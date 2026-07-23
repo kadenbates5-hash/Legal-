@@ -1,0 +1,55 @@
+import { describe, expect, it } from "vitest";
+import { evaluate } from "../src/core/escalation.js";
+
+describe("escalation engine", () => {
+  it("fires emergency for in-custody callers, bypassing queue triage", () => {
+    const result = evaluate({ inCustody: true });
+    expect(result.escalate).toBe(true);
+    expect(result.priority).toBe("emergency");
+    expect(result.directive).toBe("connect_human_immediately");
+    expect(result.triggers).toContain("in_custody");
+  });
+
+  it("fires emergency for a court appearance within 48 hours", () => {
+    const soon = evaluate({ courtAppearanceWithinHours: 24 });
+    expect(soon.priority).toBe("emergency");
+
+    const notSoon = evaluate({ courtAppearanceWithinHours: 72 });
+    expect(notSoon.priority).not.toBe("emergency");
+  });
+
+  it("treats multiple emergency triggers as still a single emergency route", () => {
+    const result = evaluate({ inCustody: true, activeProtectiveOrderIssue: true });
+    expect(result.triggers).toEqual(["in_custody", "active_protective_order"]);
+    expect(result.directive).toBe("connect_human_immediately");
+  });
+
+  it("never answers legal-advice questions — always redirects", () => {
+    const result = evaluate({ callerAskedForLegalAdvice: true });
+    expect(result.escalate).toBe(true);
+    expect(result.directive).toBe("redirect_no_answer_then_handoff");
+  });
+
+  it("interrupts a caller narrating pre-retention facts", () => {
+    const result = evaluate({ callerNarratingFacts: true });
+    expect(result.directive).toBe("redirect_no_answer_then_handoff");
+  });
+
+  it("routes opt-out requests to the fully human workflow", () => {
+    const result = evaluate({ clientRequestedOptOut: true });
+    expect(result.directive).toBe("route_to_human_workflow");
+  });
+
+  it("gives vulnerable callers a faster human handoff", () => {
+    const result = evaluate({ vulnerableCaller: true });
+    expect(result.escalate).toBe(true);
+    expect(result.directive).toBe("redirect_no_answer_then_handoff");
+  });
+
+  it("falls through to standard triage when nothing fires", () => {
+    const result = evaluate({});
+    expect(result.escalate).toBe(false);
+    expect(result.directive).toBe("continue_standard_triage");
+    expect(result.triggers).toEqual([]);
+  });
+});
