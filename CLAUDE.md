@@ -165,8 +165,11 @@ Steps 1, 2 (chat), 4, 5, and 6 (voice) of §8's build order are implemented.
 Still open:
 
 - A real STT/TTS vendor integration behind `SpeechToText`/`TextToSpeech` —
-  `voice-agent.ts` only has the interfaces and a test double so far, per
-  §5's vendor due-diligence checklist (not yet completed for any vendor)
+  `voice-agent.ts` only has the interfaces and a test double so far.
+  `src/receptionist/vendors/voicebox.ts` implements the interfaces against
+  Voicebox (a local-first, self-hosted STT/TTS service), but §5's vendor
+  due-diligence checklist has not been completed for it or any vendor, so
+  it is not wired into `VoiceReceptionistSession` for real calls
 - Real authentication for the review-gate UI (currently header-based, a
   stand-in — see `server.ts`)
 - Persistence (everything above is currently in-memory)
