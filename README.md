@@ -8,9 +8,10 @@ criminal law.
 See `docs/spec.md` for the full project specification and `CLAUDE.md` for
 the architecture of what's implemented so far.
 
-This repository currently implements the **core layer** only: routing,
+This repository currently implements: the **core layer** (routing,
 escalation, confidentiality/access-control, human-in-the-loop review gates,
-audit logging, and AI utilization tracking, plus the interfaces a
+audit logging, and AI utilization tracking); the **receptionist chat
+agent**; and the **paralegal drafting agent** — plus the interfaces a
 practice-area module and firm config plug into. See CLAUDE.md's "Not yet
 built" section for what's still ahead.
 

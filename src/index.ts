@@ -11,3 +11,4 @@ export * from "./config/firm-config.js";
 export * from "./receptionist/chat-agent.js";
 export * from "./receptionist/signal-extraction.js";
 export * from "./receptionist/scripts.js";
+export * from "./paralegal/drafting.js";

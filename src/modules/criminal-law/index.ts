@@ -34,6 +34,16 @@ export const criminalLawModule: PracticeAreaModule = {
     if (context["activeProtectiveOrderIssue"] === true) signals.activeProtectiveOrderIssue = true;
     return signals;
   },
+  deriveWorkProductFlags(templateId: string, context: Record<string, unknown>): string[] {
+    const flags: string[] = [];
+    if (templateId === "plea_agreement_memo" && context["clientIsNoncitizen"] === true) {
+      flags.push(PADILLA_ADVISORY_FLAG);
+    }
+    if (context["isProtectiveOrderMaterial"] === true) {
+      flags.push(PROTECTIVE_ORDER_NO_DISTRIBUTION_FLAG);
+    }
+    return flags;
+  },
 };
 
 /**

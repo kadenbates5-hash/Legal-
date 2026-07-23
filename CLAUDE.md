@@ -73,17 +73,41 @@ escalation/access-control logic itself, only:
 Voice would reuse this same state machine behind a speech-to-text/
 text-to-speech shim — not yet built.
 
+## Paralegal drafting agent
+
+`src/paralegal/drafting.ts` — `ParalegalDraftingSession`, the practice-
+area-agnostic drafting engine (§3, §8 build order step 4). It owns no
+legal-content knowledge itself, only the hard-coded behaviors §3 requires
+of every practice area:
+
+- every draft is access-controlled via `AccessControl` before creation
+  (`case_file` for template drafts/research, `billing_internal` for
+  billing narratives)
+- every draft is a `WorkProduct`, so nothing it produces can leave the
+  system without the review-gate's attorney checkpoint
+- `draftResearchSummary()` unconditionally adds
+  `RESEARCH_REQUIRES_VERIFICATION_FLAG` — not module-configurable
+- any draft passed a `deadlineDate` unconditionally adds
+  `DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG`, since §3 calls
+  agent-calculated deadlines "the top malpractice risk in criminal
+  defense" — this is the enforced stopgap until the full calendar-
+  redundancy system (§7 open item #1) is designed
+- practice-area-specific hard triggers (Padilla, protective-order) are
+  applied via `PracticeAreaModule.deriveWorkProductFlags()`
+
 ## Practice-area module contract
 
 A module implements `PracticeAreaModule` (`src/config/practice-area.ts`):
-intake questions, document templates, and `deriveEscalationSignals()` to
-translate module-specific context into core `EscalationSignals`. A module
-can only *add* signals — core's trigger set has no suppression path.
+intake questions, document templates, `deriveEscalationSignals()` to
+translate module-specific context into core `EscalationSignals`, and
+`deriveWorkProductFlags()` to translate drafting context into
+`WorkProduct` flags. A module can only *add* escalation signals — core's
+trigger set has no suppression path.
 
 `src/modules/criminal-law/index.ts` is the pilot module and also shows the
-Padilla-flag and protective-order-flag pattern: module code calls
-`workProduct.addFlag(...)`, and `review-gate.ts` blocks approval until an
-attorney clears it.
+Padilla-flag and protective-order-flag pattern: `deriveWorkProductFlags()`
+returns the flag names, and `review-gate.ts` blocks approval until an
+attorney clears them via `workProduct.clearFlag(...)`.
 
 ## Commands
 
@@ -105,11 +129,11 @@ npm test             # vitest run
 
 ## Not yet built
 
-Core layer (step 1) and the receptionist chat agent (step 2, chat channel
-only) are implemented. Still open, in order per §8:
+Core layer (step 1), the receptionist chat agent (step 2, chat channel
+only), and paralegal drafting functions (step 4) are implemented. Still
+open, in order per §8:
 
 - Receptionist agent, voice channel — same `router.ts` state machine behind
   a speech-to-text/text-to-speech shim
-- Paralegal agent drafting functions — calls into `review-gate.ts`
 - Attorney review-gate UI
 - Persistence (everything above is currently in-memory)

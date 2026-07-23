@@ -28,4 +28,12 @@ export interface PracticeAreaModule {
   readonly templates: DocumentTemplate[];
   /** Practice-area-specific signals derived from module logic, merged into core evaluate() input. */
   deriveEscalationSignals(context: Record<string, unknown>): Partial<EscalationSignals>;
+  /**
+   * Practice-area-specific work-product flags (e.g. the Padilla advisory)
+   * derived from drafting context, merged with the template's static
+   * `requiredFlags` by the paralegal drafting engine. Keeps hard-trigger
+   * logic like Padilla owned by the criminal-law module instead of living
+   * in the practice-area-agnostic drafting engine.
+   */
+  deriveWorkProductFlags(templateId: string, context: Record<string, unknown>): string[];
 }
