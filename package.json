@@ -5,7 +5,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:assets",
+    "build:assets": "mkdir -p dist/review-ui/public && cp -r src/review-ui/public/. dist/review-ui/public/",
+    "start:review-ui": "npm run build && node dist/review-ui/start.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

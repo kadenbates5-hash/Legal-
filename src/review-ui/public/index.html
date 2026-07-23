@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Attorney Review Queue</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  .actor-bar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .actor-bar input { padding: 0.3rem 0.5rem; }
+  ul.queue { list-style: none; padding: 0; }
+  ul.queue li { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.6rem; cursor: pointer; }
+  ul.queue li:hover { background: #f7f7f7; }
+  .status { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px; font-size: 0.75rem; background: #eee; }
+  .flags { color: #b00020; font-size: 0.85rem; margin-top: 0.25rem; }
+  #detail { border-top: 2px solid #333; margin-top: 1.5rem; padding-top: 1rem; }
+  #detail pre { white-space: pre-wrap; background: #f7f7f7; padding: 0.75rem; border-radius: 6px; }
+  button { margin-right: 0.5rem; margin-top: 0.5rem; padding: 0.4rem 0.8rem; }
+  .error { color: #b00020; }
+</style>
+</head>
+<body>
+<h1>Attorney Review Queue</h1>
+<p>Seed dashboard — actor identity here is a header stand-in for real auth (not yet built). Nothing renders or mutates without an <code>attorney</code> role.</p>
+
+<div class="actor-bar">
+  <label>Actor ID <input id="actorId" value="a1" /></label>
+  <label>Role
+    <select id="actorRole">
+      <option value="attorney" selected>attorney</option>
+      <option value="paralegal">paralegal</option>
+      <option value="receptionist">receptionist</option>
+    </select>
+  </label>
+  <button id="refresh">Refresh queue</button>
+</div>
+
+<div id="error" class="error"></div>
+<ul id="queue" class="queue"></ul>
+<div id="detail"></div>
+
+<script>
+function headers() {
+  return {
+    "Content-Type": "application/json",
+    "x-actor-id": document.getElementById("actorId").value,
+    "x-actor-role": document.getElementById("actorRole").value,
+  };
+}
+
+async function api(path, options) {
+  const res = await fetch(path, { ...options, headers: headers() });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+function showError(message) {
+  document.getElementById("error").textContent = message || "";
+}
+
+async function loadQueue() {
+  showError("");
+  try {
+    const items = await api("/api/work-products?status=pending_review");
+    const list = document.getElementById("queue");
+    list.innerHTML = "";
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.innerHTML = `<strong>${item.kind}</strong> — matter ${item.matterId}
+        <span class="status">${item.status}</span>
+        ${item.flags.length ? `<div class="flags">Unresolved flags: ${item.flags.join(", ")}</div>` : ""}`;
+      li.addEventListener("click", () => loadDetail(item.id));
+      list.appendChild(li);
+    }
+    if (items.length === 0) list.innerHTML = "<li>No work product pending review.</li>";
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadDetail(id) {
+  showError("");
+  try {
+    const wp = await api(`/api/work-products/${id}`);
+    const detail = document.getElementById("detail");
+    detail.innerHTML = `
+      <h2>${wp.kind} <span class="status">${wp.status}</span></h2>
+      <p>Matter: ${wp.matterId}</p>
+      ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${f}</code>`).join(", ")}</div>` : ""}
+      <pre>${wp.content}</pre>
+      <div id="actions"></div>
+    `;
+    const actions = document.getElementById("actions");
+
+    for (const flag of wp.flags) {
+      const btn = document.createElement("button");
+      btn.textContent = `Clear flag: ${flag}`;
+      btn.onclick = () => act(`/api/work-products/${id}/clear-flag`, { flag }, id);
+      actions.appendChild(btn);
+    }
+
+    if (wp.status === "pending_review") {
+      const approveBtn = mkButton("Approve", () => act(`/api/work-products/${id}/approve`, {}, id));
+      const rejectBtn = mkButton("Reject", () => {
+        const reason = prompt("Reason for rejection?") || "";
+        return act(`/api/work-products/${id}/reject`, { reason }, id);
+      });
+      const reviseBtn = mkButton("Request revision", () => {
+        const note = prompt("Revision note?") || "";
+        return act(`/api/work-products/${id}/request-revision`, { note }, id);
+      });
+      actions.append(approveBtn, rejectBtn, reviseBtn);
+    }
+    if (wp.status === "approved") {
+      actions.appendChild(mkButton("Release", () => act(`/api/work-products/${id}/release`, {}, id)));
+    }
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+function mkButton(label, onClick) {
+  const btn = document.createElement("button");
+  btn.textContent = label;
+  btn.onclick = onClick;
+  return btn;
+}
+
+async function act(path, body, id) {
+  showError("");
+  try {
+    await api(path, { method: "POST", body: JSON.stringify(body) });
+    await loadQueue();
+    await loadDetail(id);
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("refresh").addEventListener("click", loadQueue);
+loadQueue();
+</script>
+</body>
+</html>

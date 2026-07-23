@@ -1,6 +1,7 @@
 import { AccessControl } from "../core/access-control.js";
 import type { AuditLog } from "../core/audit.js";
 import { WorkProduct } from "../core/review-gate.js";
+import type { WorkProductStore } from "../core/work-product-store.js";
 import type { PracticeAreaModule } from "../config/practice-area.js";
 import type { Actor } from "../core/types.js";
 import type { UtilizationTracker } from "../core/utilization.js";
@@ -58,6 +59,7 @@ export class ParalegalDraftingSession {
   #auditLog: AuditLog;
   #module: PracticeAreaModule;
   #utilization: UtilizationTracker | undefined;
+  #store: WorkProductStore | undefined;
   #utilizationEntryByWorkProduct = new Map<string, string>();
 
   constructor(params: {
@@ -67,6 +69,7 @@ export class ParalegalDraftingSession {
     auditLog: AuditLog;
     module: PracticeAreaModule;
     utilization?: UtilizationTracker;
+    store?: WorkProductStore;
   }) {
     this.#actor = params.actor;
     this.#matterId = params.matterId;
@@ -74,6 +77,7 @@ export class ParalegalDraftingSession {
     this.#auditLog = params.auditLog;
     this.#module = params.module;
     this.#utilization = params.utilization;
+    this.#store = params.store;
   }
 
   /** §3: "Draft from templates: engagement letters, discovery requests, correspondence, motions." */
@@ -161,6 +165,8 @@ export class ParalegalDraftingSession {
     if (utilizationEntryId) {
       this.#utilizationEntryByWorkProduct.set(workProduct.id, utilizationEntryId);
     }
+
+    this.#store?.register(workProduct);
 
     return workProduct;
   }

@@ -95,6 +95,29 @@ of every practice area:
 - practice-area-specific hard triggers (Padilla, protective-order) are
   applied via `PracticeAreaModule.deriveWorkProductFlags()`
 
+## Attorney review-gate UI
+
+`src/review-ui/` — the attorney-facing surface over `review-gate.ts`
+(§8 build order step 5), plus `src/core/work-product-store.ts`, the
+in-memory registry that makes drafted `WorkProduct`s discoverable (a
+`ParalegalDraftingSession` given a `store` registers into it automatically).
+
+- `review-service.ts` — `ReviewGateService`. `review-gate.ts` already
+  guards the status-transition methods against non-attorney actors, but
+  reads/listing are unguarded there since drafting agents need them too.
+  This service requires an attorney actor on *every* method, including
+  plain reads — a receptionist/paralegal credential shouldn't reach this
+  surface at all, not just get blocked on the mutating calls.
+- `server.ts` — a small dependency-free JSON API (Node's built-in `http`,
+  no framework) over the service, plus static-file serving for the
+  dashboard. Actor identity comes from `x-actor-id`/`x-actor-role`
+  headers — a stand-in for real auth, which is not yet built (see §5/§6).
+  `npm run build` copies `public/` into `dist/` since `tsc` only compiles
+  `.ts` files.
+- `public/index.html` — a minimal vanilla-JS dashboard: lists work product
+  pending review, shows content/flags/history, and lets an attorney
+  approve/reject/request-revision/clear-flag/release.
+
 ## Practice-area module contract
 
 A module implements `PracticeAreaModule` (`src/config/practice-area.ts`):
@@ -113,8 +136,9 @@ attorney clears them via `workProduct.clearFlag(...)`.
 
 ```
 npm install
-npm run typecheck   # tsc --noEmit
-npm test             # vitest run
+npm run typecheck        # tsc --noEmit
+npm test                  # vitest run
+npm run start:review-ui   # attorney review-gate dashboard at http://localhost:3000
 ```
 
 ## Open items (§7 of the spec — resolve before connecting to real clients)
@@ -130,10 +154,11 @@ npm test             # vitest run
 ## Not yet built
 
 Core layer (step 1), the receptionist chat agent (step 2, chat channel
-only), and paralegal drafting functions (step 4) are implemented. Still
-open, in order per §8:
+only), paralegal drafting functions (step 4), and the attorney review-gate
+UI (step 5) are implemented. Still open, in order per §8:
 
 - Receptionist agent, voice channel — same `router.ts` state machine behind
   a speech-to-text/text-to-speech shim
-- Attorney review-gate UI
+- Real authentication for the review-gate UI (currently header-based, a
+  stand-in — see `server.ts`)
 - Persistence (everything above is currently in-memory)

@@ -12,3 +12,6 @@ export * from "./receptionist/chat-agent.js";
 export * from "./receptionist/signal-extraction.js";
 export * from "./receptionist/scripts.js";
 export * from "./paralegal/drafting.js";
+export * from "./core/work-product-store.js";
+export * from "./review-ui/review-service.js";
+export * from "./review-ui/server.js";
