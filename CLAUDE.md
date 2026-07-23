@@ -170,3 +170,56 @@ Still open:
 - Real authentication for the review-gate UI (currently header-based, a
   stand-in — see `server.ts`)
 - Persistence (everything above is currently in-memory)
+
+# General coding guidelines
+
+Behavioral guidelines to reduce common LLM coding mistakes, adapted from
+[multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills).
+These are general working habits — they don't override any project-specific
+rule above (review-gate, access-control, escalation, etc.), which always
+takes precedence.
+
+**Tradeoff:** these guidelines bias toward caution over speed. For trivial
+tasks, use judgment.
+
+## 1. Think before coding
+
+Don't assume. Don't hide confusion. Surface tradeoffs.
+
+- State assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity first
+
+Minimum code that solves the problem. Nothing speculative.
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+## 3. Surgical changes
+
+Touch only what you must. Clean up only your own mess.
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it — don't delete it.
+- Remove imports/variables/functions that your changes made unused; don't
+  remove pre-existing dead code unless asked.
+
+Every changed line should trace directly to the user's request.
+
+## 4. Goal-driven execution
+
+Define success criteria. Loop until verified.
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan with a verification check per step.
