@@ -69,9 +69,17 @@ escalation/access-control logic itself, only:
   escalation signals from free text (over-escalating is the safe failure
   mode, under-escalating is not).
 - `scripts.ts` — the actual hard-coded reply text per directive.
-
-Voice would reuse this same state machine behind a speech-to-text/
-text-to-speech shim — not yet built.
+- `voice-agent.ts` — `VoiceReceptionistSession`, the voice channel (§8
+  build order step 6). Wraps the exact same `ReceptionistChatSession`
+  behind vendor-agnostic `SpeechToText`/`TextToSpeech` interfaces — no
+  escalation/routing logic of its own, only the audio boundary and the
+  handling voice specifically needs that text doesn't: a mis-heard or
+  low-confidence transcription asks the caller to repeat themselves
+  instead of acting on a guess, without advancing any state. Vendor
+  selection deliberately stays out of this file — §5's due-diligence
+  checklist (zero-retention, no training on firm data, storage
+  jurisdiction, subpoena risk, encryption) has to clear for whichever
+  STT/TTS vendor is chosen before this touches a real call.
 
 ## Paralegal drafting agent
 
@@ -153,12 +161,12 @@ npm run start:review-ui   # attorney review-gate dashboard at http://localhost:3
 
 ## Not yet built
 
-Core layer (step 1), the receptionist chat agent (step 2, chat channel
-only), paralegal drafting functions (step 4), and the attorney review-gate
-UI (step 5) are implemented. Still open, in order per §8:
+Steps 1, 2 (chat), 4, 5, and 6 (voice) of §8's build order are implemented.
+Still open:
 
-- Receptionist agent, voice channel — same `router.ts` state machine behind
-  a speech-to-text/text-to-speech shim
+- A real STT/TTS vendor integration behind `SpeechToText`/`TextToSpeech` —
+  `voice-agent.ts` only has the interfaces and a test double so far, per
+  §5's vendor due-diligence checklist (not yet completed for any vendor)
 - Real authentication for the review-gate UI (currently header-based, a
   stand-in — see `server.ts`)
 - Persistence (everything above is currently in-memory)
