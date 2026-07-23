@@ -28,6 +28,10 @@ actual code path, not a prompt instruction:
   `approve()`/`release()` throw unless the calling actor's role is
   `"attorney"`. Unresolved flags (e.g. the Padilla immigration-consequence
   advisory) block approval until an attorney explicitly clears them.
+  `content` is private and can only change via `reviseDraft()`, which
+  itself throws once status leaves `draft`/`revision_requested` — so an
+  attorney's approval can never be silently invalidated by a post-approval
+  content edit.
 - `src/core/access-control.ts` — `AccessControl.authorize()` throws
   `AccessDeniedError` unless the request is within the actor's scope:
   receptionist gets `intake`/`scheduling` fields only; paralegal is scoped

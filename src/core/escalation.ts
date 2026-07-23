@@ -32,6 +32,7 @@ export interface EscalationResult {
 
 export type RouteDirective =
   | "connect_human_immediately"
+  | "connect_human_gently"
   | "redirect_no_answer_then_handoff"
   | "route_to_human_workflow"
   | "route_interpreter_then_continue"
@@ -106,11 +107,14 @@ export function evaluate(signals: EscalationSignals): EscalationResult {
   // see router.ts. They're procedural sequencing steps, not alert triggers.
 
   if (standardTriggers.includes("vulnerable_caller")) {
+    // §2: "gentler script, faster human handoff" — distinct from the
+    // legal-advice redirect, which has an "I can't answer that" tone that's
+    // wrong for a minor, an intoxicated caller, or someone in acute distress.
     return {
       escalate: true,
       priority: "elevated",
       triggers,
-      directive: "redirect_no_answer_then_handoff",
+      directive: "connect_human_gently",
     };
   }
 

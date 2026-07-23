@@ -9,6 +9,8 @@ import type { RouteDirective } from "../core/escalation.js";
 export const DIRECTIVE_SCRIPTS: Record<RouteDirective, string> = {
   connect_human_immediately:
     "I'm connecting you with someone right now — please stay on the line.",
+  connect_human_gently:
+    "I hear you, and I want to make sure you get the right support — let me connect you with someone right away.",
   redirect_no_answer_then_handoff:
     "I can't answer that or take down details of what happened, but I'll get you to someone who can help right away.",
   route_to_human_workflow:

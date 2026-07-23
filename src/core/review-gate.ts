@@ -35,7 +35,7 @@ export class WorkProduct {
   readonly matterId: string;
   readonly kind: string;
   status: WorkProductStatus = "draft";
-  content: string;
+  #content: string;
   readonly flags = new Set<string>();
   readonly history: WorkProductTransition[] = [];
 
@@ -45,8 +45,29 @@ export class WorkProduct {
     this.id = params.id;
     this.matterId = params.matterId;
     this.kind = params.kind;
-    this.content = params.content;
+    this.#content = params.content;
     this.#auditLog = auditLog;
+  }
+
+  get content(): string {
+    return this.#content;
+  }
+
+  /**
+   * The only way content may change. Deliberately blocked once a draft is
+   * submitted for review (`pending_review`, `approved`, `released`) —
+   * otherwise an attorney's approval could be silently invalidated by a
+   * post-approval edit, which is exactly the hole the review gate exists
+   * to close.
+   */
+  reviseDraft(actor: Actor, newContent: string): void {
+    if (this.status !== "draft" && this.status !== "revision_requested") {
+      throw new ReviewGateError(
+        `cannot revise content from status '${this.status}': content is locked once submitted for review`,
+      );
+    }
+    this.#content = newContent;
+    this.#record("revise_draft", actor, undefined);
   }
 
   /** A practice-area module hard-triggers a flag (e.g. "padilla_advisory_required"). */

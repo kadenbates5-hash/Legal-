@@ -21,11 +21,11 @@ export class AuditLog {
   #entries: AuditEntry[] = [];
 
   append(entry: Omit<AuditEntry, "sequence" | "timestamp">): AuditEntry {
-    const full: AuditEntry = {
+    const full: AuditEntry = Object.freeze({
       sequence: this.#entries.length,
       timestamp: new Date().toISOString(),
       ...entry,
-    };
+    });
     this.#entries.push(full);
     return full;
   }
@@ -42,14 +42,16 @@ export class AuditLog {
 
     if (readerRole === "attorney") return scoped;
 
-    return scoped.map((e) => ({
-      sequence: e.sequence,
-      timestamp: e.timestamp,
-      actor: e.actor,
-      matterId: e.matterId,
-      action: "[redacted]",
-      detail: undefined,
-    }));
+    return scoped.map((e) =>
+      Object.freeze({
+        sequence: e.sequence,
+        timestamp: e.timestamp,
+        actor: e.actor,
+        matterId: e.matterId,
+        action: "[redacted]",
+        detail: undefined,
+      }),
+    );
   }
 
   count(): number {

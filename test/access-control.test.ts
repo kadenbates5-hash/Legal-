@@ -52,6 +52,31 @@ describe("access control", () => {
     ).not.toThrow();
   });
 
+  it("denies staff and system actors by default (no scope modeled for them)", () => {
+    const ac = new AccessControl(new AuditLog());
+    expect(() =>
+      ac.authorize({ actor: { id: "s1", role: "staff" }, matterId: "m1", category: "intake" }),
+    ).toThrow(AccessDeniedError);
+    expect(() =>
+      ac.authorize({ actor: { id: "sys1", role: "system" }, matterId: "m1", category: "scheduling" }),
+    ).toThrow(AccessDeniedError);
+  });
+
+  it("lets an assigned paralegal draft billing/time-entry narratives for their own matter", () => {
+    const ac = new AccessControl(new AuditLog());
+    ac.assignParalegal("p1", "m1");
+    expect(() =>
+      ac.authorize({ actor: { id: "p1", role: "paralegal" }, matterId: "m1", category: "billing_internal" }),
+    ).not.toThrow();
+  });
+
+  it("denies the receptionist billing_internal access even though it handles billing calls", () => {
+    const ac = new AccessControl(new AuditLog());
+    expect(() =>
+      ac.authorize({ actor: { id: "r1", role: "receptionist" }, matterId: "m1", category: "billing_internal" }),
+    ).toThrow(AccessDeniedError);
+  });
+
   it("lets an attorney access anything", () => {
     const ac = new AccessControl(new AuditLog());
     expect(() =>

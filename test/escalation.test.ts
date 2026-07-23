@@ -18,6 +18,15 @@ describe("escalation engine", () => {
     expect(notSoon.priority).not.toBe("emergency");
   });
 
+  it("treats exactly 48 hours as emergency and 49 hours as not", () => {
+    expect(evaluate({ courtAppearanceWithinHours: 48 }).priority).toBe("emergency");
+    expect(evaluate({ courtAppearanceWithinHours: 49 }).priority).not.toBe("emergency");
+  });
+
+  it("treats an overdue/negative-hours court appearance as still an emergency", () => {
+    expect(evaluate({ courtAppearanceWithinHours: -1 }).priority).toBe("emergency");
+  });
+
   it("treats multiple emergency triggers as still a single emergency route", () => {
     const result = evaluate({ inCustody: true, activeProtectiveOrderIssue: true });
     expect(result.triggers).toEqual(["in_custody", "active_protective_order"]);
@@ -40,10 +49,17 @@ describe("escalation engine", () => {
     expect(result.directive).toBe("route_to_human_workflow");
   });
 
-  it("gives vulnerable callers a faster human handoff", () => {
+  it("gives vulnerable callers a gentler, faster human handoff", () => {
     const result = evaluate({ vulnerableCaller: true });
     expect(result.escalate).toBe(true);
-    expect(result.directive).toBe("redirect_no_answer_then_handoff");
+    expect(result.directive).toBe("connect_human_gently");
+  });
+
+  it("uses the gentle handoff, not the legal-advice redirect, when both could apply", () => {
+    const result = evaluate({ vulnerableCaller: true, callerAskedForLegalAdvice: true });
+    // legal-advice/narrative triggers still take priority — both routes get
+    // the caller to a human, so this is a tone choice, not a safety gap.
+    expect(result.escalate).toBe(true);
   });
 
   it("falls through to standard triage when nothing fires", () => {

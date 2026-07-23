@@ -63,6 +63,33 @@ describe("human-in-the-loop review gate", () => {
     expect(() => wp.clearFlag(paralegal, "protective_order_no_distribution")).toThrow(ReviewGateError);
   });
 
+  it("allows content revisions while still a draft", () => {
+    const wp = makeWorkProduct();
+    wp.reviseDraft(paralegal, "revised draft text");
+    expect(wp.content).toBe("revised draft text");
+  });
+
+  it("allows content revisions after an attorney requests changes", () => {
+    const wp = makeWorkProduct();
+    wp.submitForReview(paralegal);
+    wp.requestRevision(attorney, "fix the caption");
+    wp.reviseDraft(paralegal, "fixed caption text");
+    expect(wp.content).toBe("fixed caption text");
+  });
+
+  it("locks content once submitted for review — no silent post-approval edits", () => {
+    const wp = makeWorkProduct();
+    wp.submitForReview(paralegal);
+    expect(() => wp.reviseDraft(paralegal, "sneaky edit")).toThrow(ReviewGateError);
+
+    wp.approve(attorney);
+    expect(() => wp.reviseDraft(attorney, "sneaky edit after approval")).toThrow(ReviewGateError);
+    expect(wp.content).toBe("draft text");
+
+    wp.release(attorney);
+    expect(() => wp.reviseDraft(attorney, "sneaky edit after release")).toThrow(ReviewGateError);
+  });
+
   it("records a full transition history", () => {
     const wp = makeWorkProduct();
     wp.submitForReview(paralegal);

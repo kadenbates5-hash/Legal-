@@ -71,4 +71,11 @@ describe("router intake sequencing", () => {
     expect(router.identifyCallerType({ statesAsExistingClient: true })).toBe("existing_client");
     expect(router.identifyCallerType({})).toBe("unknown");
   });
+
+  it("classifies an ambiguous caller as family/third-party over existing-client, erring toward confidentiality", () => {
+    const { router } = makeRouter();
+    expect(router.identifyCallerType({ statesAsFamilyMember: true, statesAsExistingClient: true })).toBe(
+      "family_or_third_party",
+    );
+  });
 });

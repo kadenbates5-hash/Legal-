@@ -76,11 +76,14 @@ export class Router {
     });
 
     // Emergency and hard-alert triggers (legal advice, pre-retention
-    // narrative, opt-out) preempt every sequencing gate below.
+    // narrative, opt-out, vulnerable caller) preempt every sequencing gate
+    // below — a vulnerable caller doesn't wait through consent/conflict
+    // gates any more than an emergency does.
     if (
       escalation.priority === "emergency" ||
       escalation.directive === "redirect_no_answer_then_handoff" ||
-      escalation.directive === "route_to_human_workflow"
+      escalation.directive === "route_to_human_workflow" ||
+      escalation.directive === "connect_human_gently"
     ) {
       return {
         directive: escalation.directive,
@@ -132,8 +135,12 @@ export class Router {
   }
 
   identifyCallerType(rawSignal: { statesAsExistingClient?: boolean; statesAsFamilyMember?: boolean; statesAsBilling?: boolean; isNewCaller?: boolean }): CallerType {
-    if (rawSignal.statesAsExistingClient) return "existing_client";
+    // Family/third-party is checked first: misclassifying a third party as
+    // the client would bypass the confidentiality default in
+    // confidentiality.ts, so an ambiguous statement errs toward the safer
+    // (more restrictive) classification.
     if (rawSignal.statesAsFamilyMember) return "family_or_third_party";
+    if (rawSignal.statesAsExistingClient) return "existing_client";
     if (rawSignal.statesAsBilling) return "billing";
     if (rawSignal.isNewCaller) return "new_client";
     return "unknown";
