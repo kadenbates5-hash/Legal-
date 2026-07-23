@@ -13,7 +13,7 @@ import { loadSystemState, saveSystemState } from "../persistence/system-state.js
 const STATE_FILE = process.env["STATE_FILE"] ?? "./data/system-state.json";
 
 const state = await loadSystemState(STATE_FILE);
-const service = new ReviewGateService(state.workProductStore);
+const service = new ReviewGateService(state.workProductStore, state.deadlineTracker);
 const server = createReviewServer(service, () => {
   void saveSystemState(STATE_FILE, state);
 });

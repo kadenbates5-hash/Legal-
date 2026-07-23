@@ -6,6 +6,7 @@ import { ReviewGateService } from "../src/review-ui/review-service.js";
 import { WorkProductStore } from "../src/core/work-product-store.js";
 import { WorkProduct } from "../src/core/review-gate.js";
 import { AuditLog } from "../src/core/audit.js";
+import { DeadlineTracker } from "../src/core/deadline.js";
 
 let server: Server;
 let baseUrl: string;
@@ -143,5 +144,86 @@ describe("review-gate HTTP API persistence hook", () => {
     expect(mutationCount).toBe(1);
 
     await new Promise<void>((resolve) => hookServer.close(() => resolve()));
+  });
+});
+
+describe("deadline HTTP API", () => {
+  let deadlineServer: Server;
+  let deadlineBaseUrl: string;
+
+  beforeEach(async () => {
+    const service = new ReviewGateService(new WorkProductStore(), new DeadlineTracker());
+    deadlineServer = createReviewServer(service);
+    await new Promise<void>((resolve) => deadlineServer.listen(0, resolve));
+    const { port } = deadlineServer.address() as AddressInfo;
+    deadlineBaseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => deadlineServer.close(() => resolve()));
+  });
+
+  it("reports unconfirmed for a deadline with no calculations yet", async () => {
+    const res = await fetch(`${deadlineBaseUrl}/api/deadlines?matterId=m1&type=speedy_trial`, {
+      headers: attorneyHeaders,
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).state).toBe("unconfirmed");
+  });
+
+  it("confirms a deadline once two independent sources agree, over two API calls", async () => {
+    await fetch(`${deadlineBaseUrl}/api/deadlines/confirm`, {
+      method: "POST",
+      headers: attorneyHeaders,
+      body: JSON.stringify({ matterId: "m1", type: "speedy_trial", date: "2026-09-01", source: "calendar_system" }),
+    });
+    const res = await fetch(`${deadlineBaseUrl}/api/deadlines?matterId=m1&type=speedy_trial`, {
+      headers: attorneyHeaders,
+    });
+    // Only one (non-agent) source so far — still unconfirmed, since confirmation needs two distinct sources.
+    expect((await res.json()).state).toBe("unconfirmed");
+
+    await fetch(`${deadlineBaseUrl}/api/deadlines/confirm`, {
+      method: "POST",
+      headers: attorneyHeaders,
+      body: JSON.stringify({ matterId: "m1", type: "speedy_trial", date: "2026-09-01", source: "human" }),
+    });
+    const confirmedRes = await fetch(`${deadlineBaseUrl}/api/deadlines?matterId=m1&type=speedy_trial`, {
+      headers: attorneyHeaders,
+    });
+    expect((await confirmedRes.json()).state).toBe("confirmed");
+  });
+
+  it("rejects a confirm request with an invalid source", async () => {
+    const res = await fetch(`${deadlineBaseUrl}/api/deadlines/confirm`, {
+      method: "POST",
+      headers: attorneyHeaders,
+      body: JSON.stringify({ matterId: "m1", type: "speedy_trial", date: "2026-09-01", source: "agent" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("denies deadline endpoints to a non-attorney actor", async () => {
+    const res = await fetch(`${deadlineBaseUrl}/api/deadlines?matterId=m1&type=speedy_trial`, {
+      headers: paralegalHeaders,
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("lists conflicts across the system", async () => {
+    await fetch(`${deadlineBaseUrl}/api/deadlines/confirm`, {
+      method: "POST",
+      headers: attorneyHeaders,
+      body: JSON.stringify({ matterId: "m1", type: "speedy_trial", date: "2026-09-01", source: "human" }),
+    });
+    await fetch(`${deadlineBaseUrl}/api/deadlines/confirm`, {
+      method: "POST",
+      headers: attorneyHeaders,
+      body: JSON.stringify({ matterId: "m1", type: "speedy_trial", date: "2026-09-05", source: "calendar_system" }),
+    });
+    const res = await fetch(`${deadlineBaseUrl}/api/deadlines/conflicts`, { headers: attorneyHeaders });
+    const body = await res.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].matterId).toBe("m1");
   });
 });

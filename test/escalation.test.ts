@@ -62,6 +62,19 @@ describe("escalation engine", () => {
     expect(result.escalate).toBe(true);
   });
 
+  it("§7 red-teaming: crisis risk is emergency-tier with its own resource-bearing directive", () => {
+    const result = evaluate({ crisisRisk: true });
+    expect(result.escalate).toBe(true);
+    expect(result.priority).toBe("emergency");
+    expect(result.directive).toBe("connect_crisis_resources_immediately");
+    expect(result.triggers).toContain("crisis_risk");
+  });
+
+  it("keeps the crisis-specific directive even when another emergency trigger co-occurs", () => {
+    const result = evaluate({ crisisRisk: true, inCustody: true });
+    expect(result.directive).toBe("connect_crisis_resources_immediately");
+  });
+
   it("falls through to standard triage when nothing fires", () => {
     const result = evaluate({});
     expect(result.escalate).toBe(false);

@@ -53,6 +53,8 @@ actual code path, not a prompt instruction:
 | `core/audit.ts` | Append-only, privilege-sensitive audit trail, counsel-restricted read (§5) |
 | `core/confidentiality.ts` | Third-party disclosure default ("I can't share case details, but I can pass along a message") |
 | `core/utilization.ts` | Internal AI utilization telemetry, explicitly walled off from client billing (§4) |
+| `core/deadline.ts` | Redundant deadline confirmation — never single-sourced to the agent (§3, §7 item #1) |
+| `core/work-product-store.ts` | In-memory registry making drafted `WorkProduct`s discoverable |
 
 ## Receptionist agent (chat channel)
 
@@ -96,12 +98,31 @@ of every practice area:
 - `draftResearchSummary()` unconditionally adds
   `RESEARCH_REQUIRES_VERIFICATION_FLAG` — not module-configurable
 - any draft passed a `deadlineDate` unconditionally adds
-  `DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG`, since §3 calls
-  agent-calculated deadlines "the top malpractice risk in criminal
-  defense" — this is the enforced stopgap until the full calendar-
-  redundancy system (§7 open item #1) is designed
+  `DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG` and records the
+  calculation with `core/deadline.ts`'s `DeadlineTracker` — see below
 - practice-area-specific hard triggers (Padilla, protective-order) are
   applied via `PracticeAreaModule.deriveWorkProductFlags()`
+
+## Deadline redundancy (§7 open item #1 — resolved)
+
+`src/core/deadline.ts` — `DeadlineTracker`. §3: "Deadline calculations are
+never single-sourced... agent-calculated dates require redundant human/
+calendar-system verification." A deadline (`speedy_trial`, `arraignment`,
+`bail_hearing`, `discovery_response`, `other`) only reaches `"confirmed"`
+once *two independent sources* (`agent`, `human`, `calendar_system`) agree
+on the same date — a single source, however many times recorded, stays
+`"unconfirmed"`. If independent sources disagree, that's `"conflict"`:
+surfaced immediately via `listConflicts()`, never silently resolved by
+picking one.
+
+This isn't just advisory — `ReviewGateService.clearFlag()` refuses to
+clear `DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG` unless
+`DeadlineTracker.isConfirmed()` is actually true for the matter/type in
+question (requiring a `deadlineType` parameter on that call specifically).
+`confirmDeadline()` is how an attorney records the independent human/
+calendar-system side — it rejects `source: "agent"` outright, since that
+path exists to be the second, non-agent source. The dashboard's
+"Deadlines" panel exposes both the status check and the confirm action.
 
 ## Attorney review-gate UI
 
@@ -177,15 +198,21 @@ npm run start:review-ui   # attorney review-gate dashboard at http://localhost:3
 # STATE_FILE=./data/system-state.json PORT=3000 npm run start:review-ui  # override defaults
 ```
 
-## Open items (§7 of the spec — resolve before connecting to real clients)
+## §7 open items — status
 
-1. Deadline/calendar tracking system with genuine redundancy (not
-   single-sourced to the agent) — not yet designed.
-2. Full document templates and intake question sets specific to criminal
-   matters — `criminal-law/index.ts` has only a minimal seed set.
-3. Testing/red-teaming plan for edge cases (confessions mid-call, minors
-   calling, crisis situations) before the receptionist agent talks to a
-   real person.
+1. **Deadline/calendar redundancy** — resolved in code, see above
+   (`core/deadline.ts`). Still needs a real calendar-system integration
+   (currently any string source can call itself `"calendar_system"`) and
+   sign-off from someone who actually calculates these deadlines in
+   practice before trusting it with real dates.
+2. **Full criminal-law templates/intake questions** — resolved in code,
+   see `criminal-law/index.ts`. Still needs review by a practicing
+   criminal defense attorney before real use — this is a reasonable seed
+   set, not a jurisdiction-vetted one.
+3. **Testing/red-teaming plan** — resolved as an initial pass, see
+   `docs/red-teaming-plan.md` and `test/red-team-scenarios.test.ts`. The
+   plan explicitly calls for human adversarial testing before real-client
+   launch; the automated suite is a regression floor, not a substitute.
 
 ## Not yet built
 
@@ -200,6 +227,7 @@ but is single-process/single-file. Still open:
   stand-in — see `server.ts`)
 - A real multi-user database in place of the file-backed persistence
   adapter, before this goes near real clients
-- The three §7 open items generally: full deadline/calendar-redundancy
-  design, complete criminal-law intake questions/templates, and the
-  red-teaming/testing plan for edge cases
+- A real calendar-system integration for `DeadlineTracker` (currently any
+  caller can self-report as `"calendar_system"`)
+- Human/domain-expert sign-off on all three §7 items before real-client
+  use — see the "§7 open items — status" section above

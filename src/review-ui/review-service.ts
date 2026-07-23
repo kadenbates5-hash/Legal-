@@ -1,6 +1,13 @@
-import { AccessDeniedError, type Actor } from "../core/types.js";
+import { AccessDeniedError, ReviewGateError, type Actor } from "../core/types.js";
 import type { WorkProduct, WorkProductStatus } from "../core/review-gate.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
+import {
+  DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG,
+  type DeadlineConflict,
+  type DeadlineStatus,
+  type DeadlineTracker,
+  type DeadlineType,
+} from "../core/deadline.js";
 
 /**
  * Application layer behind the attorney review-gate UI (§8 build order
@@ -42,9 +49,11 @@ function detail(wp: WorkProduct): WorkProductDetail {
 
 export class ReviewGateService {
   #store: WorkProductStore;
+  #deadlineTracker: DeadlineTracker | undefined;
 
-  constructor(store: WorkProductStore) {
+  constructor(store: WorkProductStore, deadlineTracker?: DeadlineTracker) {
     this.#store = store;
+    this.#deadlineTracker = deadlineTracker;
   }
 
   listPendingReview(actor: Actor): WorkProductSummary[] {
@@ -91,11 +100,49 @@ export class ReviewGateService {
     return detail(wp);
   }
 
-  clearFlag(actor: Actor, id: string, flag: string): WorkProductDetail {
+  /**
+   * Clearing the deadline-redundancy flag specifically requires the
+   * deadline to actually be `"confirmed"` by the tracker (two independent
+   * sources agreeing) — an attorney can't just wave it through the way
+   * they can any other flag, because that flag exists to enforce §3's
+   * "never single-sourced" rule, not just to prompt a second look.
+   */
+  clearFlag(actor: Actor, id: string, flag: string, deadlineType?: DeadlineType): WorkProductDetail {
     requireAttorney(actor);
     const wp = this.#requireWorkProduct(id);
+
+    if (flag === DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG) {
+      if (!deadlineType) {
+        throw new ReviewGateError("clearing the deadline flag requires specifying which deadlineType it confirms");
+      }
+      if (!this.#deadlineTracker?.isConfirmed(wp.matterId, deadlineType)) {
+        throw new ReviewGateError(
+          `cannot clear '${flag}': deadline '${deadlineType}' for matter '${wp.matterId}' is not yet confirmed by two independent sources`,
+        );
+      }
+    }
+
     wp.clearFlag(actor, flag);
     return detail(wp);
+  }
+
+  /** Records an independent (human or calendar-system) deadline calculation — never "agent". */
+  confirmDeadline(actor: Actor, matterId: string, type: DeadlineType, date: string, source: "human" | "calendar_system"): DeadlineStatus {
+    requireAttorney(actor);
+    if (!this.#deadlineTracker) {
+      throw new Error("no deadline tracker configured");
+    }
+    return this.#deadlineTracker.record({ matterId, type, date, source, note: `confirmed by ${actor.id}` });
+  }
+
+  getDeadlineStatus(actor: Actor, matterId: string, type: DeadlineType): DeadlineStatus {
+    requireAttorney(actor);
+    return this.#deadlineTracker?.status(matterId, type) ?? { state: "unconfirmed", calculations: [] };
+  }
+
+  listDeadlineConflicts(actor: Actor): DeadlineConflict[] {
+    requireAttorney(actor);
+    return this.#deadlineTracker?.listConflicts() ?? [];
   }
 
   #requireWorkProduct(id: string): WorkProduct {

@@ -3,10 +3,11 @@ import type { EscalationSignals } from "../../core/escalation.js";
 import type { WorkProduct } from "../../core/review-gate.js";
 
 /**
- * Criminal law practice-area module — the pilot. §7 flags full intake
- * question sets and templates as an open item to design separately; this
- * seeds the minimal set needed to prove the module plugs into core without
- * modifying it.
+ * Criminal law practice-area module — the pilot. §7 open item #2: this is
+ * a reasonable seed set covering the core of a typical criminal defense
+ * intake and drafting workload, not a jurisdiction-vetted or exhaustive
+ * one — it still needs review by a practicing criminal defense attorney
+ * before real use, per CLAUDE.md's "§7 open items — status."
  */
 export const PADILLA_ADVISORY_FLAG = "padilla_advisory_required";
 export const PROTECTIVE_ORDER_NO_DISTRIBUTION_FLAG = "protective_order_no_distribution";
@@ -15,14 +16,54 @@ export const criminalLawModule: PracticeAreaModule = {
   id: "criminal-law",
   name: "Criminal Law",
   intakeQuestions: [
-    { id: "charge_type", prompt: "What are you being charged with, if known?", gating: false },
+    // Gating: safety/time-critical — the receptionist chat/voice agent
+    // asks these before anything else (see chat-agent.ts's
+    // orderIntakeQuestions).
     { id: "in_custody", prompt: "Are you currently in custody?", gating: true },
     { id: "court_date", prompt: "Do you have an upcoming court date?", gating: true },
+    {
+      id: "protective_order_active",
+      prompt: "Is there a protective order, restraining order, or no-contact order related to this case?",
+      gating: true,
+    },
+
+    // Non-gating: informational, gathered once the safety-critical gates clear.
+    { id: "charge_type", prompt: "What are you being charged with, if known?", gating: false },
+    { id: "arrest_date", prompt: "When were you arrested, if applicable?", gating: false },
+    { id: "bail_status", prompt: "Has bail or bond been set? If so, what amount?", gating: false },
+    { id: "arresting_agency", prompt: "Which police department or agency was involved?", gating: false },
+    {
+      id: "prior_record",
+      prompt: "Have you been arrested or charged with a crime before?",
+      gating: false,
+    },
+    {
+      id: "co_defendants",
+      prompt: "Is anyone else charged in connection with this matter?",
+      gating: false,
+    },
+    {
+      id: "immigration_status",
+      prompt: "Are you a U.S. citizen? (This affects what your attorney needs to advise you about.)",
+      gating: false,
+    },
+    {
+      id: "probation_parole_status",
+      prompt: "Are you currently on probation or parole?",
+      gating: false,
+    },
   ],
   templates: [
     { id: "engagement_letter", name: "Engagement Letter", requiredFlags: [] },
     { id: "discovery_request", name: "Discovery Request", requiredFlags: [] },
     { id: "plea_agreement_memo", name: "Plea Agreement Memo", requiredFlags: [] },
+    { id: "motion_to_suppress", name: "Motion to Suppress Evidence", requiredFlags: [] },
+    { id: "motion_to_dismiss", name: "Motion to Dismiss", requiredFlags: [] },
+    { id: "bail_reduction_motion", name: "Motion for Bail Reduction", requiredFlags: [] },
+    { id: "speedy_trial_demand", name: "Speedy Trial Demand", requiredFlags: [] },
+    { id: "witness_interview_memo", name: "Witness Interview Memo", requiredFlags: [] },
+    { id: "sentencing_memorandum", name: "Sentencing Memorandum", requiredFlags: [] },
+    { id: "client_correspondence", name: "Client Correspondence", requiredFlags: [] },
   ],
   deriveEscalationSignals(context: Record<string, unknown>): Partial<EscalationSignals> {
     const signals: Partial<EscalationSignals> = {};

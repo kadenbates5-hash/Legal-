@@ -20,7 +20,8 @@ export type EmergencyTrigger =
   | "in_custody"
   | "imminent_police_questioning"
   | "court_appearance_imminent"
-  | "active_protective_order";
+  | "active_protective_order"
+  | "crisis_risk";
 
 /** Non-emergency but still hard-coded, no-exceptions triggers. */
 export type StandardTrigger =

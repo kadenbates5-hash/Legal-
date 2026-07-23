@@ -2,6 +2,7 @@ import { AccessControl } from "../core/access-control.js";
 import type { AuditLog } from "../core/audit.js";
 import { WorkProduct } from "../core/review-gate.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
+import { DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG, type DeadlineTracker, type DeadlineType } from "../core/deadline.js";
 import type { PracticeAreaModule } from "../config/practice-area.js";
 import type { Actor } from "../core/types.js";
 import type { UtilizationTracker } from "../core/utilization.js";
@@ -26,7 +27,8 @@ import type { UtilizationTracker } from "../core/utilization.js";
  *    via `PracticeAreaModule.deriveWorkProductFlags`
  */
 export const RESEARCH_REQUIRES_VERIFICATION_FLAG = "research_requires_attorney_verification";
-export const DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG = "deadline_requires_redundant_verification";
+/** Re-exported from core/deadline.ts, where it conceptually belongs, for backward compatibility. */
+export { DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG };
 
 export interface DraftFromTemplateRequest {
   templateId: string;
@@ -35,6 +37,8 @@ export interface DraftFromTemplateRequest {
   context?: Record<string, unknown>;
   /** If this draft references a calculated deadline, it's flagged for redundant verification. */
   deadlineDate?: string;
+  /** Defaults to "other" if a deadlineDate is given without a type. */
+  deadlineType?: DeadlineType;
 }
 
 export interface ResearchSummaryRequest {
@@ -60,6 +64,7 @@ export class ParalegalDraftingSession {
   #module: PracticeAreaModule;
   #utilization: UtilizationTracker | undefined;
   #store: WorkProductStore | undefined;
+  #deadlineTracker: DeadlineTracker | undefined;
   #utilizationEntryByWorkProduct = new Map<string, string>();
 
   constructor(params: {
@@ -70,6 +75,7 @@ export class ParalegalDraftingSession {
     module: PracticeAreaModule;
     utilization?: UtilizationTracker;
     store?: WorkProductStore;
+    deadlineTracker?: DeadlineTracker;
   }) {
     this.#actor = params.actor;
     this.#matterId = params.matterId;
@@ -78,6 +84,7 @@ export class ParalegalDraftingSession {
     this.#module = params.module;
     this.#utilization = params.utilization;
     this.#store = params.store;
+    this.#deadlineTracker = params.deadlineTracker;
   }
 
   /** §3: "Draft from templates: engagement letters, discovery requests, correspondence, motions." */
@@ -97,6 +104,13 @@ export class ParalegalDraftingSession {
 
     if (request.deadlineDate !== undefined) {
       workProduct.addFlag(DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG);
+      this.#deadlineTracker?.record({
+        matterId: this.#matterId,
+        type: request.deadlineType ?? "other",
+        date: request.deadlineDate,
+        source: "agent",
+        note: `calculated while drafting ${request.templateId}`,
+      });
     }
 
     return workProduct;

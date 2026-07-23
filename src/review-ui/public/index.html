@@ -39,6 +39,37 @@
 <ul id="queue" class="queue"></ul>
 <div id="detail"></div>
 
+<div id="deadlines">
+  <h2>Deadlines — never single-sourced</h2>
+  <p>A deadline confirms only once a second, independent source (human or calendar system) agrees with the agent's calculated date. Disagreement is a conflict, surfaced here — never silently resolved.</p>
+  <div class="actor-bar">
+    <label>Matter ID <input id="deadlineMatterId" value="m1" /></label>
+    <label>Type
+      <select id="deadlineType">
+        <option value="speedy_trial">speedy_trial</option>
+        <option value="arraignment">arraignment</option>
+        <option value="bail_hearing">bail_hearing</option>
+        <option value="discovery_response">discovery_response</option>
+        <option value="other">other</option>
+      </select>
+    </label>
+    <button id="checkDeadline">Check status</button>
+  </div>
+  <div id="deadlineStatus"></div>
+  <div class="actor-bar">
+    <label>Confirm date <input id="deadlineDate" type="date" /></label>
+    <label>Source
+      <select id="deadlineSource">
+        <option value="human">human</option>
+        <option value="calendar_system">calendar_system</option>
+      </select>
+    </label>
+    <button id="confirmDeadline">Record independent confirmation</button>
+  </div>
+  <h3>Open conflicts</h3>
+  <ul id="conflictList"></ul>
+</div>
+
 <script>
 function headers() {
   return {
@@ -96,7 +127,16 @@ async function loadDetail(id) {
     for (const flag of wp.flags) {
       const btn = document.createElement("button");
       btn.textContent = `Clear flag: ${flag}`;
-      btn.onclick = () => act(`/api/work-products/${id}/clear-flag`, { flag }, id);
+      btn.onclick = () => {
+        if (flag === "deadline_requires_redundant_verification") {
+          const deadlineType = prompt(
+            "Which deadline type does this confirm? (speedy_trial, arraignment, bail_hearing, discovery_response, other)",
+          );
+          if (!deadlineType) return;
+          return act(`/api/work-products/${id}/clear-flag`, { flag, deadlineType }, id);
+        }
+        return act(`/api/work-products/${id}/clear-flag`, { flag }, id);
+      };
       actions.appendChild(btn);
     }
 
@@ -138,8 +178,59 @@ async function act(path, body, id) {
   }
 }
 
+async function checkDeadline() {
+  showError("");
+  try {
+    const matterId = document.getElementById("deadlineMatterId").value;
+    const type = document.getElementById("deadlineType").value;
+    const status = await api(`/api/deadlines?matterId=${encodeURIComponent(matterId)}&type=${encodeURIComponent(type)}`);
+    const el = document.getElementById("deadlineStatus");
+    if (status.state === "confirmed") {
+      el.innerHTML = `<p><strong>Confirmed:</strong> ${status.date}</p>`;
+    } else if (status.state === "conflict") {
+      el.innerHTML = `<p class="error"><strong>Conflict</strong> — sources disagree: ${status.calculations.map((c) => `${c.source}: ${c.date}`).join(", ")}</p>`;
+    } else {
+      el.innerHTML = `<p>Unconfirmed (${status.calculations.length} calculation(s) so far).</p>`;
+    }
+    await loadConflicts();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function confirmDeadline() {
+  showError("");
+  try {
+    await api("/api/deadlines/confirm", {
+      method: "POST",
+      body: JSON.stringify({
+        matterId: document.getElementById("deadlineMatterId").value,
+        type: document.getElementById("deadlineType").value,
+        date: document.getElementById("deadlineDate").value,
+        source: document.getElementById("deadlineSource").value,
+      }),
+    });
+    await checkDeadline();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadConflicts() {
+  const conflicts = await api("/api/deadlines/conflicts");
+  const list = document.getElementById("conflictList");
+  list.innerHTML = conflicts.length
+    ? conflicts
+        .map((c) => `<li>${c.matterId} / ${c.type}: ${c.calculations.map((x) => `${x.source}=${x.date}`).join(", ")}</li>`)
+        .join("")
+    : "<li>None.</li>";
+}
+
+document.getElementById("checkDeadline").addEventListener("click", checkDeadline);
+document.getElementById("confirmDeadline").addEventListener("click", confirmDeadline);
 document.getElementById("refresh").addEventListener("click", loadQueue);
 loadQueue();
+loadConflicts();
 </script>
 </body>
 </html>

@@ -9,6 +9,8 @@ import type { RouteDirective } from "../core/escalation.js";
 export const DIRECTIVE_SCRIPTS: Record<RouteDirective, string> = {
   connect_human_immediately:
     "I'm connecting you with someone right now — please stay on the line.",
+  connect_crisis_resources_immediately:
+    "I'm connecting you with someone right now. If you're in immediate danger, please call 911, or reach the 988 Suicide & Crisis Lifeline by calling or texting 988 — you don't have to go through this alone.",
   connect_human_gently:
     "I hear you, and I want to make sure you get the right support — let me connect you with someone right away.",
   redirect_no_answer_then_handoff:
@@ -31,3 +33,7 @@ export const THIRD_PARTY_DISCLOSURE_SCRIPT =
 export const OUTRO_CLEARED_FOR_INTAKE = "A few quick questions to get you started:";
 
 export const WRAP_UP = "That's everything I need for now — someone from our team will follow up with you shortly.";
+
+/** §7 red-teaming: what to say when a caller explicitly declines recording consent. */
+export const RECORDING_CONSENT_REFUSED_SCRIPT =
+  "Understood — I'll connect you directly with someone so this conversation isn't recorded.";

@@ -11,6 +11,8 @@ export interface EscalationSignals {
   imminentPoliceQuestioning?: boolean;
   courtAppearanceWithinHours?: number;
   activeProtectiveOrderIssue?: boolean;
+  /** Self-harm/suicide risk, or immediate physical danger from another person right now. */
+  crisisRisk?: boolean;
   callerAskedForLegalAdvice?: boolean;
   callerNarratingFacts?: boolean;
   conflictCheckResolved?: boolean;
@@ -32,6 +34,7 @@ export interface EscalationResult {
 
 export type RouteDirective =
   | "connect_human_immediately"
+  | "connect_crisis_resources_immediately"
   | "connect_human_gently"
   | "redirect_no_answer_then_handoff"
   | "route_to_human_workflow"
@@ -62,6 +65,7 @@ export function evaluate(signals: EscalationSignals): EscalationResult {
     emergencyTriggers.push("court_appearance_imminent");
   }
   if (signals.activeProtectiveOrderIssue) emergencyTriggers.push("active_protective_order");
+  if (signals.crisisRisk) emergencyTriggers.push("crisis_risk");
 
   if (signals.callerAskedForLegalAdvice) standardTriggers.push("legal_advice_requested");
   if (signals.callerNarratingFacts) standardTriggers.push("pre_retention_factual_narrative");
@@ -75,11 +79,16 @@ export function evaluate(signals: EscalationSignals): EscalationResult {
   const triggers: EscalationTrigger[] = [...emergencyTriggers, ...standardTriggers];
 
   if (emergencyTriggers.length > 0) {
+    // Crisis risk gets its own directive (with resource information like
+    // 988) even if it co-occurs with another emergency trigger — a caller
+    // in crisis needs that regardless of what else is happening.
     return {
       escalate: true,
       priority: "emergency",
       triggers,
-      directive: "connect_human_immediately",
+      directive: emergencyTriggers.includes("crisis_risk")
+        ? "connect_crisis_resources_immediately"
+        : "connect_human_immediately",
     };
   }
 

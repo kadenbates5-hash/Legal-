@@ -28,4 +28,43 @@ describe("criminal law module", () => {
     applyPadillaFlagIfApplicable(wp, false, true);
     expect(wp.flags.size).toBe(0);
   });
+
+  it("§7 item 2: covers the full criminal-defense intake question set, gating questions marked", () => {
+    const ids = criminalLawModule.intakeQuestions.map((q) => q.id);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "in_custody",
+        "court_date",
+        "protective_order_active",
+        "charge_type",
+        "arrest_date",
+        "bail_status",
+        "arresting_agency",
+        "prior_record",
+        "co_defendants",
+        "immigration_status",
+        "probation_parole_status",
+      ]),
+    );
+    const gating = criminalLawModule.intakeQuestions.filter((q) => q.gating).map((q) => q.id);
+    expect(gating).toEqual(["in_custody", "court_date", "protective_order_active"]);
+  });
+
+  it("§7 item 2: covers a realistic criminal-defense document template set", () => {
+    const ids = criminalLawModule.templates.map((t) => t.id);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "engagement_letter",
+        "discovery_request",
+        "plea_agreement_memo",
+        "motion_to_suppress",
+        "motion_to_dismiss",
+        "bail_reduction_motion",
+        "speedy_trial_demand",
+        "witness_interview_memo",
+        "sentencing_memorandum",
+        "client_correspondence",
+      ]),
+    );
+  });
 });

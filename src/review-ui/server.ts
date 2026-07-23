@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { AccessDeniedError, ReviewGateError, type Actor } from "../core/types.js";
+import type { DeadlineType } from "../core/deadline.js";
 import { ReviewGateService } from "./review-service.js";
 
 /**
@@ -104,6 +105,12 @@ async function handleRequest(
 
   try {
     const actor = actorFromHeaders(req);
+
+    if (url.pathname.startsWith("/api/deadlines")) {
+      await handleDeadlineRequest(service, req, res, actor, url, onMutated);
+      return;
+    }
+
     const segments = url.pathname.replace(/^\/api\/work-products\/?/, "").split("/").filter(Boolean);
 
     if (segments.length === 0 && req.method === "GET") {
@@ -142,7 +149,12 @@ async function handleRequest(
           result = service.release(actor, id);
           break;
         case "clear-flag":
-          result = service.clearFlag(actor, id, String(body["flag"] ?? ""));
+          result = service.clearFlag(
+            actor,
+            id,
+            String(body["flag"] ?? ""),
+            body["deadlineType"] as DeadlineType | undefined,
+          );
           break;
         default:
           sendJson(res, 404, { error: "not found" });
@@ -157,4 +169,50 @@ async function handleRequest(
   } catch (err) {
     sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
   }
+}
+
+async function handleDeadlineRequest(
+  service: ReviewGateService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  if (url.pathname === "/api/deadlines/conflicts" && req.method === "GET") {
+    sendJson(res, 200, service.listDeadlineConflicts(actor));
+    return;
+  }
+
+  if (url.pathname === "/api/deadlines" && req.method === "GET") {
+    const matterId = url.searchParams.get("matterId");
+    const type = url.searchParams.get("type") as DeadlineType | null;
+    if (!matterId || !type) {
+      sendJson(res, 400, { error: "matterId and type query params are required" });
+      return;
+    }
+    sendJson(res, 200, service.getDeadlineStatus(actor, matterId, type));
+    return;
+  }
+
+  if (url.pathname === "/api/deadlines/confirm" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const source = body["source"];
+    if (source !== "human" && source !== "calendar_system") {
+      sendJson(res, 400, { error: "source must be 'human' or 'calendar_system'" });
+      return;
+    }
+    const result = service.confirmDeadline(
+      actor,
+      String(body["matterId"] ?? ""),
+      body["type"] as DeadlineType,
+      String(body["date"] ?? ""),
+      source,
+    );
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
 }

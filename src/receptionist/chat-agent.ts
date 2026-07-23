@@ -2,7 +2,8 @@ import { Router, newIntakeState, type IntakeState } from "../core/router.js";
 import type { EscalationSignals, RouteDirective } from "../core/escalation.js";
 import { disclosurePolicyFor } from "../core/confidentiality.js";
 import { extractSignalsFromText, parseHoursUntil } from "./signal-extraction.js";
-import { DIRECTIVE_SCRIPTS, GREETING, OUTRO_CLEARED_FOR_INTAKE, WRAP_UP } from "./scripts.js";
+import { DIRECTIVE_SCRIPTS, GREETING, OUTRO_CLEARED_FOR_INTAKE, RECORDING_CONSENT_REFUSED_SCRIPT, WRAP_UP } from "./scripts.js";
+import { RECORDING_CONSENT_REFUSAL_RE } from "./signal-extraction.js";
 import type { IntakeQuestion, PracticeAreaModule } from "../config/practice-area.js";
 import type { Actor } from "../core/types.js";
 import type { UtilizationTracker } from "../core/utilization.js";
@@ -102,6 +103,9 @@ export class ReceptionistChatSession {
     } else if (this.#pendingGate === "route_interpreter_then_continue") {
       this.#state.interpreterRouted = true;
     } else if (this.#pendingGate === "disclose_recording_consent_then_continue") {
+      if (RECORDING_CONSENT_REFUSAL_RE.test(text)) {
+        return this.#finish(RECORDING_CONSENT_REFUSED_SCRIPT);
+      }
       this.#state.recordingConsentDisclosed = true;
     } else if (this.#pendingGate === "hold_for_conflict_check") {
       this.#state.conflictCheckRun = true;
@@ -127,6 +131,7 @@ export class ReceptionistChatSession {
 
     if (
       decision.directive === "connect_human_immediately" ||
+      decision.directive === "connect_crisis_resources_immediately" ||
       decision.directive === "connect_human_gently" ||
       decision.directive === "redirect_no_answer_then_handoff" ||
       decision.directive === "route_to_human_workflow"
@@ -180,6 +185,9 @@ export class ReceptionistChatSession {
     if (questionId === "court_date") {
       const hours = parseHoursUntil(answerText);
       return hours !== undefined ? { courtAppearanceWithinHours: hours } : {};
+    }
+    if (questionId === "protective_order_active") {
+      return AFFIRMATIVE_RE.test(answerText) ? { activeProtectiveOrderIssue: true } : {};
     }
     return {};
   }

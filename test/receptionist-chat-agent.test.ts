@@ -47,8 +47,8 @@ describe("receptionist chat agent", () => {
     expect(r2.reply).toMatch(/conflict of interest/i);
     expect(r2.done).toBe(false);
 
-    // criminal-law module's questions are [charge_type (non-gating), in_custody
-    // (gating), court_date (gating)] — the agent must ask the gating ones first.
+    // criminal-law module's gating questions (in_custody, court_date,
+    // protective_order_active) must all be asked before any non-gating one.
     const r3 = session.handleMessage("no one else involved");
     expect(r3.reply).toMatch(/custody/i);
     expect(r3.done).toBe(false);
@@ -58,8 +58,12 @@ describe("receptionist chat agent", () => {
     expect(r4.done).toBe(false);
 
     const r5 = session.handleMessage("no upcoming date");
-    expect(r5.reply).toMatch(/charged with/i);
+    expect(r5.reply).toMatch(/protective order/i);
     expect(r5.done).toBe(false);
+
+    const r6 = session.handleMessage("no");
+    expect(r6.reply).toMatch(/charged with/i);
+    expect(r6.done).toBe(false);
   });
 
   it("connects immediately when the caller says they're in custody, at any point", () => {
@@ -93,6 +97,18 @@ describe("receptionist chat agent", () => {
     const result = session.handleMessage("yes");
     expect(result.reply).toMatch(/connecting you/i);
     expect(result.done).toBe(true);
+  });
+
+  it("escalates mid-intake as soon as the gating protective-order question is answered yes", () => {
+    const { session } = makeSession();
+    clearGates(session); // now at in_custody
+    session.handleMessage("no"); // answers in_custody -> now at court_date
+    const result = session.handleMessage("no"); // answers court_date -> now at protective_order_active
+    expect(result.reply).toMatch(/protective order/i);
+
+    const escalated = session.handleMessage("yes, there's a restraining order");
+    expect(escalated.reply).toMatch(/connecting you/i);
+    expect(escalated.done).toBe(true);
   });
 
   it("escalates mid-intake when the court-date answer implies an imminent appearance", () => {
