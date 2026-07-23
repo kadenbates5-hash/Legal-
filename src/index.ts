@@ -8,3 +8,6 @@ export * from "./core/confidentiality.js";
 export * from "./core/utilization.js";
 export * from "./config/practice-area.js";
 export * from "./config/firm-config.js";
+export * from "./receptionist/chat-agent.js";
+export * from "./receptionist/signal-extraction.js";
+export * from "./receptionist/scripts.js";

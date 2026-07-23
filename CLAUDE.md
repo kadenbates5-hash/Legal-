@@ -50,6 +50,25 @@ actual code path, not a prompt instruction:
 | `core/confidentiality.ts` | Third-party disclosure default ("I can't share case details, but I can pass along a message") |
 | `core/utilization.ts` | Internal AI utilization telemetry, explicitly walled off from client billing (§4) |
 
+## Receptionist agent (chat channel)
+
+`src/receptionist/` — the conversational layer over core. It owns no
+escalation/access-control logic itself, only:
+
+- `chat-agent.ts` — `ReceptionistChatSession`, a per-conversation state
+  machine that calls `Router.route()` every turn and renders the returned
+  directive as a scripted reply. Sequences caller-type ID → consent
+  disclosure → conflict check → practice-area intake questions, with
+  emergency/legal-advice/opt-out triggers able to end the conversation at
+  any point (including mid-intake, if an answer reveals e.g. custody).
+- `signal-extraction.ts` — conservative regex-based extraction of
+  escalation signals from free text (over-escalating is the safe failure
+  mode, under-escalating is not).
+- `scripts.ts` — the actual hard-coded reply text per directive.
+
+Voice would reuse this same state machine behind a speech-to-text/
+text-to-speech shim — not yet built.
+
 ## Practice-area module contract
 
 A module implements `PracticeAreaModule` (`src/config/practice-area.ts`):
@@ -82,11 +101,11 @@ npm test             # vitest run
 
 ## Not yet built
 
-This session implemented the **core layer only** (step 1 of the spec's
-suggested build order, §8). Still open, in order:
+Core layer (step 1) and the receptionist chat agent (step 2, chat channel
+only) are implemented. Still open, in order per §8:
 
-- Receptionist agent (chat channel first, voice second) — conversational
-  layer that calls into `router.ts`/`escalation.ts`
+- Receptionist agent, voice channel — same `router.ts` state machine behind
+  a speech-to-text/text-to-speech shim
 - Paralegal agent drafting functions — calls into `review-gate.ts`
 - Attorney review-gate UI
 - Persistence (everything above is currently in-memory)
