@@ -75,13 +75,25 @@ async function serveStatic(res: ServerResponse, requestPath: string): Promise<vo
   }
 }
 
-export function createReviewServer(service: ReviewGateService): Server {
+/**
+ * `onMutated` fires after any successful state-changing request (approve,
+ * reject, request-revision, release, clear-flag) — a persistence layer can
+ * hook this to save after every mutation without this file knowing
+ * anything about how or where state is persisted. See
+ * `review-ui/start.ts` for the file-backed wiring.
+ */
+export function createReviewServer(service: ReviewGateService, onMutated?: () => void): Server {
   return createServer((req, res) => {
-    void handleRequest(service, req, res);
+    void handleRequest(service, req, res, onMutated);
   });
 }
 
-async function handleRequest(service: ReviewGateService, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleRequest(
+  service: ReviewGateService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  onMutated?: () => void,
+): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
 
   if (!url.pathname.startsWith("/api/")) {
@@ -115,26 +127,30 @@ async function handleRequest(service: ReviewGateService, req: IncomingMessage, r
     if (segments.length === 2 && req.method === "POST") {
       const action = segments[1];
       const body = await readJsonBody(req);
+      let result;
       switch (action) {
         case "approve":
-          sendJson(res, 200, service.approve(actor, id));
-          return;
+          result = service.approve(actor, id);
+          break;
         case "reject":
-          sendJson(res, 200, service.reject(actor, id, String(body["reason"] ?? "")));
-          return;
+          result = service.reject(actor, id, String(body["reason"] ?? ""));
+          break;
         case "request-revision":
-          sendJson(res, 200, service.requestRevision(actor, id, String(body["note"] ?? "")));
-          return;
+          result = service.requestRevision(actor, id, String(body["note"] ?? ""));
+          break;
         case "release":
-          sendJson(res, 200, service.release(actor, id));
-          return;
+          result = service.release(actor, id);
+          break;
         case "clear-flag":
-          sendJson(res, 200, service.clearFlag(actor, id, String(body["flag"] ?? "")));
-          return;
+          result = service.clearFlag(actor, id, String(body["flag"] ?? ""));
+          break;
         default:
           sendJson(res, 404, { error: "not found" });
           return;
       }
+      sendJson(res, 200, result);
+      onMutated?.();
+      return;
     }
 
     sendJson(res, 404, { error: "not found" });

@@ -57,4 +57,21 @@ export class AuditLog {
   count(): number {
     return this.#entries.length;
   }
+
+  /**
+   * Plain-data snapshot for persistence. Unlike `read()`, this returns
+   * unredacted entries regardless of caller — it's meant for a trusted
+   * persistence layer restoring the log itself, not for a UI/reporting
+   * consumer, so it deliberately has no reader-role parameter.
+   */
+  toSnapshot(): AuditEntry[] {
+    return this.#entries.map((e) => ({ ...e }));
+  }
+
+  /** Rehydrates a log from a persisted snapshot, preserving exact sequence/timestamp. */
+  static fromSnapshot(entries: readonly AuditEntry[]): AuditLog {
+    const log = new AuditLog();
+    log.#entries = entries.map((e) => Object.freeze({ ...e }));
+    return log;
+  }
 }

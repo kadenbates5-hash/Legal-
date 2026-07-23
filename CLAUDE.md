@@ -126,6 +126,33 @@ in-memory registry that makes drafted `WorkProduct`s discoverable (a
   pending review, shows content/flags/history, and lets an attorney
   approve/reject/request-revision/clear-flag/release.
 
+## Persistence
+
+`src/persistence/` — file-backed persistence, the concrete stopgap for
+§8's "not yet built — persistence." Still single-process/single-file, not
+a substitute for a real multi-user database before this goes near real
+clients, but it's real durability, not an in-memory-only demo:
+
+- `json-file-store.ts` — dependency-free, atomic JSON-file read/write
+  (temp file + rename, so a crash mid-write can't leave a corrupt state
+  file).
+- `system-state.ts` — bundles the audit log, utilization tracker, and
+  work-product store into one JSON document via `loadSystemState`/
+  `saveSystemState`.
+- Every stateful core object (`AuditLog`, `UtilizationTracker`,
+  `WorkProduct`, `WorkProductStore`) has `toSnapshot()`/`fromSnapshot()`
+  round-tripping its exact state to plain data — including `WorkProduct`
+  states like `approved`/`released` that the normal constructor and
+  transition methods can't reach directly. A rehydrated `WorkProduct` is a
+  fully functional, rule-enforcing object afterward (content still locks,
+  unresolved flags still block approval), not just replayed JSON.
+- `review-ui/start.ts` wires this in: loads state on boot, and
+  `server.ts`'s `onMutated` hook saves after every state-changing request.
+
+Swapping the file-backed adapter for a real database later only means
+replacing `json-file-store.ts` — the snapshot shapes and every caller stay
+the same.
+
 ## Practice-area module contract
 
 A module implements `PracticeAreaModule` (`src/config/practice-area.ts`):
@@ -147,6 +174,7 @@ npm install
 npm run typecheck        # tsc --noEmit
 npm test                  # vitest run
 npm run start:review-ui   # attorney review-gate dashboard at http://localhost:3000
+# STATE_FILE=./data/system-state.json PORT=3000 npm run start:review-ui  # override defaults
 ```
 
 ## Open items (§7 of the spec — resolve before connecting to real clients)
@@ -161,12 +189,17 @@ npm run start:review-ui   # attorney review-gate dashboard at http://localhost:3
 
 ## Not yet built
 
-Steps 1, 2 (chat), 4, 5, and 6 (voice) of §8's build order are implemented.
-Still open:
+All six numbered steps of §8's build order are implemented (chat, then
+voice, for the receptionist). File-backed persistence exists (see above)
+but is single-process/single-file. Still open:
 
 - A real STT/TTS vendor integration behind `SpeechToText`/`TextToSpeech` —
   `voice-agent.ts` only has the interfaces and a test double so far, per
   §5's vendor due-diligence checklist (not yet completed for any vendor)
 - Real authentication for the review-gate UI (currently header-based, a
   stand-in — see `server.ts`)
-- Persistence (everything above is currently in-memory)
+- A real multi-user database in place of the file-backed persistence
+  adapter, before this goes near real clients
+- The three §7 open items generally: full deadline/calendar-redundancy
+  design, complete criminal-law intake questions/templates, and the
+  red-teaming/testing plan for edge cases

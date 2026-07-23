@@ -30,6 +30,17 @@ export interface WorkProductTransition {
   note: string | undefined;
 }
 
+/** Plain-data shape for persistence (§8's "not yet built" — persistence). */
+export interface WorkProductSnapshot {
+  id: string;
+  matterId: string;
+  kind: string;
+  status: WorkProductStatus;
+  content: string;
+  flags: string[];
+  history: WorkProductTransition[];
+}
+
 export class WorkProduct {
   readonly id: string;
   readonly matterId: string;
@@ -130,6 +141,39 @@ export class WorkProduct {
       );
     }
     this.#transition(actor, "released");
+  }
+
+  /** Plain-data snapshot for persistence. Round-trips exactly via `fromSnapshot`. */
+  toSnapshot(): WorkProductSnapshot {
+    return {
+      id: this.id,
+      matterId: this.matterId,
+      kind: this.kind,
+      status: this.status,
+      content: this.#content,
+      flags: [...this.flags],
+      history: this.history.map((t) => ({ ...t })),
+    };
+  }
+
+  /**
+   * Rehydrates a `WorkProduct` from a persisted snapshot, restoring exact
+   * status/flags/history — including states like `approved`/`released`
+   * that the normal constructor + transition methods can't reach directly.
+   * This is the one legitimate way to bypass the constructor's
+   * draft-first flow; it exists only for loading persisted state, not as
+   * a general escape hatch. Business rules still hold afterward — e.g. a
+   * rehydrated `approved` work product still refuses `reviseDraft`.
+   */
+  static fromSnapshot(snapshot: WorkProductSnapshot, auditLog: AuditLog): WorkProduct {
+    const workProduct = new WorkProduct(
+      { id: snapshot.id, matterId: snapshot.matterId, kind: snapshot.kind, content: snapshot.content },
+      auditLog,
+    );
+    workProduct.status = snapshot.status;
+    for (const flag of snapshot.flags) workProduct.flags.add(flag);
+    workProduct.history.push(...snapshot.history.map((t) => ({ ...t })));
+    return workProduct;
   }
 
   #requireAttorney(actor: Actor, action: string): void {

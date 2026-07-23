@@ -16,3 +16,5 @@ export * from "./paralegal/drafting.js";
 export * from "./core/work-product-store.js";
 export * from "./review-ui/review-service.js";
 export * from "./review-ui/server.js";
+export * from "./persistence/json-file-store.js";
+export * from "./persistence/system-state.js";

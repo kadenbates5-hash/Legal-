@@ -28,6 +28,12 @@ export interface UtilizationEntry {
   status: UtilizationStatus;
 }
 
+/** Plain-data shape for persistence. */
+export interface UtilizationSnapshot {
+  entries: UtilizationEntry[];
+  nextId: number;
+}
+
 export class UtilizationTracker {
   #entries: UtilizationEntry[] = [];
   #nextId = 1;
@@ -80,6 +86,18 @@ export class UtilizationTracker {
 
   all(): readonly UtilizationEntry[] {
     return this.#entries;
+  }
+
+  /** Plain-data snapshot for persistence, including the id counter so reload can't collide with old ids. */
+  toSnapshot(): UtilizationSnapshot {
+    return { entries: this.#entries.map((e) => ({ ...e })), nextId: this.#nextId };
+  }
+
+  static fromSnapshot(snapshot: UtilizationSnapshot): UtilizationTracker {
+    const tracker = new UtilizationTracker();
+    tracker.#entries = snapshot.entries.map((e) => ({ ...e }));
+    tracker.#nextId = snapshot.nextId;
+    return tracker;
   }
 
   #sumDurationsMs(entries: UtilizationEntry[]): number {

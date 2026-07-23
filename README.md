@@ -8,12 +8,15 @@ criminal law.
 See `docs/spec.md` for the full project specification and `CLAUDE.md` for
 the architecture of what's implemented so far.
 
-This repository currently implements: the **core layer** (routing,
-escalation, confidentiality/access-control, human-in-the-loop review gates,
-audit logging, and AI utilization tracking); the **receptionist chat
-agent**; and the **paralegal drafting agent** — plus the interfaces a
+This repository implements all six steps of the spec's suggested build
+order (§8): the **core layer** (routing, escalation, confidentiality/
+access-control, human-in-the-loop review gates, audit logging, and AI
+utilization tracking); the **receptionist agent** (chat and voice
+channels); the **paralegal drafting agent**; the **attorney review-gate
+UI**; and file-backed **persistence** — plus the interfaces a
 practice-area module and firm config plug into. See CLAUDE.md's "Not yet
-built" section for what's still ahead.
+built" section for what's still ahead (real STT/TTS vendor, real auth, a
+production database).
 
 ## Setup
 
@@ -21,4 +24,5 @@ built" section for what's still ahead.
 npm install
 npm run typecheck
 npm test
+npm run start:review-ui   # attorney review-gate dashboard at http://localhost:3000
 ```

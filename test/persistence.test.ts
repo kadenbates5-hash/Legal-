@@ -1,0 +1,165 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { AuditLog } from "../src/core/audit.js";
+import { UtilizationTracker } from "../src/core/utilization.js";
+import { WorkProduct } from "../src/core/review-gate.js";
+import { WorkProductStore } from "../src/core/work-product-store.js";
+import { loadSystemState, saveSystemState } from "../src/persistence/system-state.js";
+import { readJsonFile, writeJsonFile } from "../src/persistence/json-file-store.js";
+import { ReviewGateError, type Actor } from "../src/core/types.js";
+
+const paralegal: Actor = { id: "p1", role: "paralegal" };
+const attorney: Actor = { id: "a1", role: "attorney" };
+
+describe("domain object snapshot round-trips", () => {
+  it("AuditLog preserves entries, order, and sequence numbers exactly", () => {
+    const log = new AuditLog();
+    log.append({ actor: paralegal, matterId: "m1", action: "a", detail: "first" });
+    log.append({ actor: attorney, matterId: "m1", action: "b", detail: undefined });
+
+    const restored = AuditLog.fromSnapshot(log.toSnapshot());
+    expect(restored.count()).toBe(2);
+    expect(restored.read("attorney")).toEqual(log.read("attorney"));
+  });
+
+  it("UtilizationTracker preserves entries and the id counter (no id collisions after reload)", () => {
+    const tracker = new UtilizationTracker();
+    const e1 = tracker.start({ matterId: "m1", agentRole: "paralegal", taskType: "drafting", description: "x" });
+    tracker.finish(e1.id, "completed");
+
+    const restored = UtilizationTracker.fromSnapshot(tracker.toSnapshot());
+    expect(restored.all()).toEqual(tracker.all());
+
+    const e2 = restored.start({ matterId: "m1", agentRole: "paralegal", taskType: "drafting", description: "y" });
+    expect(e2.id).not.toBe(e1.id);
+  });
+
+  it("WorkProduct round-trips exact status, content, flags, and history through a snapshot", () => {
+    const auditLog = new AuditLog();
+    const wp = new WorkProduct({ id: "wp1", matterId: "m1", kind: "engagement_letter", content: "v1" }, auditLog);
+    wp.reviseDraft(paralegal, "v2");
+    wp.submitForReview(paralegal);
+    wp.requestRevision(attorney, "fix caption");
+    wp.reviseDraft(paralegal, "v3");
+    wp.submitForReview(paralegal);
+    wp.approve(attorney);
+
+    const snapshot = wp.toSnapshot();
+    const restored = WorkProduct.fromSnapshot(snapshot, auditLog);
+
+    expect(restored.status).toBe("approved");
+    expect(restored.content).toBe("v3");
+    expect(restored.history).toEqual(wp.history);
+    expect([...restored.flags]).toEqual([...wp.flags]);
+  });
+
+  it("a rehydrated approved work product still enforces the content lock — business rules survive, not just data", () => {
+    const auditLog = new AuditLog();
+    const wp = new WorkProduct({ id: "wp1", matterId: "m1", kind: "engagement_letter", content: "final" }, auditLog);
+    wp.submitForReview(paralegal);
+    wp.approve(attorney);
+
+    const restored = WorkProduct.fromSnapshot(wp.toSnapshot(), auditLog);
+    expect(() => restored.reviseDraft(attorney, "sneaky edit after reload")).toThrow(ReviewGateError);
+    restored.release(attorney);
+    expect(restored.status).toBe("released");
+  });
+
+  it("a rehydrated work product with unresolved flags still blocks approval", () => {
+    const auditLog = new AuditLog();
+    const wp = new WorkProduct({ id: "wp1", matterId: "m1", kind: "plea_agreement_memo", content: "x" }, auditLog);
+    wp.addFlag("padilla_advisory_required");
+    wp.submitForReview(paralegal);
+
+    const restored = WorkProduct.fromSnapshot(wp.toSnapshot(), auditLog);
+    expect(() => restored.approve(attorney)).toThrow(ReviewGateError);
+  });
+
+  it("WorkProductStore round-trips every registered work product", () => {
+    const auditLog = new AuditLog();
+    const store = new WorkProductStore();
+    store.register(new WorkProduct({ id: "wp1", matterId: "m1", kind: "engagement_letter", content: "a" }, auditLog));
+    store.register(new WorkProduct({ id: "wp2", matterId: "m2", kind: "discovery_request", content: "b" }, auditLog));
+
+    const restored = WorkProductStore.fromSnapshot(store.toSnapshot(), auditLog);
+    expect(restored.listAll()).toHaveLength(2);
+    expect(restored.get("wp2")?.content).toBe("b");
+  });
+});
+
+describe("json-file-store", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "legal-ai-persist-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("returns the default value when the file doesn't exist yet", async () => {
+    const value = await readJsonFile(path.join(dir, "nope.json"), { fallback: true });
+    expect(value).toEqual({ fallback: true });
+  });
+
+  it("round-trips arbitrary JSON data through a real file, creating parent directories", async () => {
+    const filePath = path.join(dir, "nested", "state.json");
+    await writeJsonFile(filePath, { a: 1, b: ["x", "y"] });
+    const loaded = await readJsonFile(filePath, {});
+    expect(loaded).toEqual({ a: 1, b: ["x", "y"] });
+  });
+
+  it("overwrites cleanly on a second write (no stale leftover data)", async () => {
+    const filePath = path.join(dir, "state.json");
+    await writeJsonFile(filePath, { version: 1 });
+    await writeJsonFile(filePath, { version: 2 });
+    expect(await readJsonFile(filePath, {})).toEqual({ version: 2 });
+  });
+});
+
+describe("system-state persistence integration", () => {
+  let dir: string;
+  let filePath: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "legal-ai-system-state-"));
+    filePath = path.join(dir, "system-state.json");
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("loads an empty state from a fresh file path", async () => {
+    const state = await loadSystemState(filePath);
+    expect(state.workProductStore.listAll()).toHaveLength(0);
+    expect(state.auditLog.count()).toBe(0);
+    expect(state.utilization.all()).toHaveLength(0);
+  });
+
+  it("persists and reloads a full working state across separate load calls, simulating a process restart", async () => {
+    const state = await loadSystemState(filePath);
+    const wp = new WorkProduct(
+      { id: "wp1", matterId: "m1", kind: "engagement_letter", content: "draft" },
+      state.auditLog,
+    );
+    state.workProductStore.register(wp);
+    wp.submitForReview(paralegal);
+    state.utilization.start({ matterId: "m1", agentRole: "paralegal", taskType: "drafting", description: "x" });
+
+    await saveSystemState(filePath, state);
+
+    // Simulate a fresh process: nothing here shares references with `state` above.
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.workProductStore.get("wp1")?.status).toBe("pending_review");
+    expect(reloaded.utilization.all()).toHaveLength(1);
+    expect(reloaded.auditLog.count()).toBeGreaterThan(0);
+
+    // And the reloaded work product is still a fully functional, rule-enforcing object.
+    reloaded.workProductStore.get("wp1")!.approve(attorney);
+    expect(reloaded.workProductStore.get("wp1")!.status).toBe("approved");
+  });
+});

@@ -115,3 +115,33 @@ describe("review-gate HTTP API", () => {
     expect(body.flags).not.toContain("padilla_advisory_required");
   });
 });
+
+describe("review-gate HTTP API persistence hook", () => {
+  it("fires onMutated after a successful mutation but not on a plain read", async () => {
+    const auditLog = new AuditLog();
+    const hookStore = new WorkProductStore();
+    const wp = new WorkProduct({ id: "wp1", matterId: "m1", kind: "engagement_letter", content: "x" }, auditLog);
+    wp.submitForReview({ id: "p1", role: "paralegal" });
+    hookStore.register(wp);
+
+    let mutationCount = 0;
+    const hookServer = createReviewServer(new ReviewGateService(hookStore), () => {
+      mutationCount += 1;
+    });
+    await new Promise<void>((resolve) => hookServer.listen(0, resolve));
+    const { port } = hookServer.address() as AddressInfo;
+    const hookBaseUrl = `http://127.0.0.1:${port}`;
+
+    await fetch(`${hookBaseUrl}/api/work-products/wp1`, { headers: attorneyHeaders });
+    expect(mutationCount).toBe(0);
+
+    await fetch(`${hookBaseUrl}/api/work-products/wp1/approve`, {
+      method: "POST",
+      headers: attorneyHeaders,
+      body: "{}",
+    });
+    expect(mutationCount).toBe(1);
+
+    await new Promise<void>((resolve) => hookServer.close(() => resolve()));
+  });
+});
