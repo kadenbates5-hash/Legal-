@@ -65,6 +65,20 @@ export function recordingConsentScriptFor(firmConfig?: FirmConfig): string {
 export const THIRD_PARTY_DISCLOSURE_SCRIPT =
   "I can't share case details, but I can pass along a message.";
 
+/**
+ * §2 lists "billing question" as its own caller-type category, distinct
+ * from a family member/third party. A billing caller shouldn't be walked
+ * through the practice-area module's legal intake questions (custody,
+ * court date, etc. — nonsensical for someone calling about an invoice),
+ * nor told the third-party "I can't share case details" line, which reads
+ * as a brush-off for what may be their own account. Since caller identity
+ * isn't verified here (§5/§6 — no real auth yet), the safe, correct
+ * behavior is a dedicated human handoff for billing specifically, not
+ * assuming they're either the verified client or a stranger.
+ */
+export const BILLING_HANDOFF_SCRIPT =
+  "I'll connect you with our billing team for that — they can pull up your account details.";
+
 export const OUTRO_CLEARED_FOR_INTAKE = "A few quick questions to get you started:";
 
 export const WRAP_UP = "That's everything I need for now — someone from our team will follow up with you shortly.";

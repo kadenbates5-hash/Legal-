@@ -100,6 +100,14 @@ describe("receptionist chat agent", () => {
     expect(result.done).toBe(true);
   });
 
+  it("escalates on a self-correction like 'no wait, actually yes' to the custody question", () => {
+    const { session } = makeSession();
+    clearGates(session); // now at in_custody question
+    const result = session.handleMessage("No wait, actually yes");
+    expect(result.reply).toMatch(/connecting you/i);
+    expect(result.done).toBe(true);
+  });
+
   it("escalates mid-intake as soon as the gating protective-order question is answered yes", () => {
     const { session } = makeSession();
     clearGates(session); // now at in_custody
@@ -136,6 +144,16 @@ describe("receptionist chat agent", () => {
     session.handleMessage("okay");
     const result = session.handleMessage("no conflicts");
     expect(result.reply).toMatch(/can't share case details/i);
+    expect(result.done).toBe(true);
+  });
+
+  it("routes billing callers to a dedicated billing handoff, never intake questions or the third-party brush-off", () => {
+    const { session } = makeSession();
+    session.handleMessage("I have a question about my invoice");
+    session.handleMessage("okay");
+    const result = session.handleMessage("no conflicts");
+    expect(result.reply).toMatch(/billing team/i);
+    expect(result.reply).not.toMatch(/can't share case details/i);
     expect(result.done).toBe(true);
   });
 

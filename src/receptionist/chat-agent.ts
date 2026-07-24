@@ -2,7 +2,7 @@ import { Router, newIntakeState, type IntakeState } from "../core/router.js";
 import type { EscalationSignals, RouteDirective } from "../core/escalation.js";
 import { disclosurePolicyFor } from "../core/confidentiality.js";
 import { extractSignalsFromText, parseHoursUntil } from "./signal-extraction.js";
-import { DIRECTIVE_SCRIPTS, OUTRO_CLEARED_FOR_INTAKE, RECORDING_CONSENT_REFUSED_SCRIPT, WRAP_UP, greetingFor, recordingConsentScriptFor } from "./scripts.js";
+import { BILLING_HANDOFF_SCRIPT, DIRECTIVE_SCRIPTS, OUTRO_CLEARED_FOR_INTAKE, RECORDING_CONSENT_REFUSED_SCRIPT, WRAP_UP, greetingFor, recordingConsentScriptFor } from "./scripts.js";
 import { RECORDING_CONSENT_REFUSAL_RE } from "./signal-extraction.js";
 import type { IntakeQuestion, PracticeAreaModule } from "../config/practice-area.js";
 import type { Actor } from "../core/types.js";
@@ -24,7 +24,14 @@ export interface ChatTurnResult {
 
 type PendingGate = "caller_type" | RouteDirective | "intake_question" | null;
 
-const AFFIRMATIVE_RE = /^\s*(y|yes|yeah|yep|correct|that's right)\b/i;
+/**
+ * Deliberately NOT anchored to the start of the answer. A gating question
+ * (in_custody, protective_order_active) is safety-critical, and the same
+ * "over-escalating is the safe failure mode" rule from signal-extraction.ts
+ * applies here: a self-correction like "No wait, actually yes" must still
+ * register as affirmative, not be missed because "yes" isn't the first word.
+ */
+const AFFIRMATIVE_RE = /(^\s*y\b)|\b(yes|yeah|yep|yup|correct|that's right|affirmative)\b/i;
 
 const CALLER_TYPE_PATTERNS = {
   statesAsFamilyMember: /\bfamily|on behalf of|calling for|my (son|daughter|husband|wife|brother|sister|father|mother)\b/i,
@@ -156,6 +163,10 @@ export class ReceptionistChatSession {
           ? recordingConsentScriptFor(this.#firmConfig)
           : DIRECTIVE_SCRIPTS[decision.directive];
       return { reply, done: false };
+    }
+
+    if (this.#state.callerType === "billing") {
+      return this.#finish(BILLING_HANDOFF_SCRIPT);
     }
 
     const disclosure = disclosurePolicyFor(this.#state.callerType);
