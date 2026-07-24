@@ -15,6 +15,7 @@ export * from "./receptionist/voice-agent.js";
 export * from "./paralegal/drafting.js";
 export * from "./core/work-product-store.js";
 export * from "./core/deadline.js";
+export * from "./core/scheduling.js";
 export * from "./review-ui/review-service.js";
 export * from "./review-ui/server.js";
 export * from "./persistence/json-file-store.js";

@@ -70,6 +70,25 @@
   <ul id="conflictList"></ul>
 </div>
 
+<div id="scheduling">
+  <h2>Scheduling</h2>
+  <p>Book, reschedule, or cancel consultations. Bookings outside business hours are rejected unless explicitly overridden — see <code>core/scheduling.ts</code>.</p>
+  <div class="actor-bar">
+    <label>Matter ID <input id="apptMatterId" value="m1" /></label>
+    <label>Start (local) <input id="apptStartTime" type="datetime-local" /></label>
+    <label>Practice area <input id="apptPracticeArea" value="criminal-law" /></label>
+    <label><input id="apptOverrideHours" type="checkbox" /> allow outside business hours</label>
+    <button id="bookAppt">Book consultation</button>
+  </div>
+  <div class="actor-bar">
+    <label>List appointments for matter <input id="scheduleListMatterId" value="m1" /></label>
+    <button id="refreshAppointments">Refresh</button>
+  </div>
+  <ul id="appointmentList" class="queue"></ul>
+  <h3>Reminders due now</h3>
+  <ul id="dueReminderList"></ul>
+</div>
+
 <script>
 function headers() {
   return {
@@ -231,6 +250,79 @@ document.getElementById("confirmDeadline").addEventListener("click", confirmDead
 document.getElementById("refresh").addEventListener("click", loadQueue);
 loadQueue();
 loadConflicts();
+
+async function bookAppointment() {
+  showError("");
+  try {
+    const startTimeLocal = document.getElementById("apptStartTime").value;
+    if (!startTimeLocal) throw new Error("pick a start time");
+    await api("/api/appointments", {
+      method: "POST",
+      body: JSON.stringify({
+        matterId: document.getElementById("apptMatterId").value,
+        startTime: new Date(startTimeLocal).toISOString(),
+        practiceAreaId: document.getElementById("apptPracticeArea").value,
+        allowOutsideBusinessHours: document.getElementById("apptOverrideHours").checked,
+      }),
+    });
+    document.getElementById("scheduleListMatterId").value = document.getElementById("apptMatterId").value;
+    await loadAppointments();
+    await loadDueReminders();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadAppointments() {
+  showError("");
+  try {
+    const matterId = document.getElementById("scheduleListMatterId").value;
+    const items = await api(`/api/appointments?matterId=${encodeURIComponent(matterId)}`);
+    const list = document.getElementById("appointmentList");
+    list.innerHTML = "";
+    for (const appt of items) {
+      const li = document.createElement("li");
+      const when = new Date(appt.startTime).toLocaleString();
+      li.innerHTML = `<strong>${appt.type}</strong> with ${appt.attorneyId} at ${when}
+        <span class="status">${appt.status}</span>`;
+      if (appt.status === "scheduled" || appt.status === "rescheduled") {
+        const cancelBtn = mkButton("Cancel", async () => {
+          const reason = prompt("Cancellation reason (optional)?") || undefined;
+          await api(`/api/appointments/${appt.id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
+          await loadAppointments();
+        });
+        const completeBtn = mkButton("Complete", async () => {
+          await api(`/api/appointments/${appt.id}/complete`, { method: "POST", body: "{}" });
+          await loadAppointments();
+        });
+        li.appendChild(document.createElement("br"));
+        li.append(cancelBtn, completeBtn);
+      }
+      list.appendChild(li);
+    }
+    if (items.length === 0) list.innerHTML = "<li>No appointments for this matter.</li>";
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadDueReminders() {
+  const due = await api("/api/appointments/reminders/due");
+  const list = document.getElementById("dueReminderList");
+  list.innerHTML = due.length
+    ? due
+        .map(
+          (d) =>
+            `<li>Matter ${d.appointment.matterId} — ${d.reminder.offsetMinutesBefore} min before ${new Date(d.appointment.startTime).toLocaleString()}</li>`,
+        )
+        .join("")
+    : "<li>None due right now.</li>";
+}
+
+document.getElementById("bookAppt").addEventListener("click", bookAppointment);
+document.getElementById("refreshAppointments").addEventListener("click", loadAppointments);
+loadAppointments();
+loadDueReminders();
 </script>
 </body>
 </html>

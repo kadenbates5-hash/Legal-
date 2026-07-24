@@ -162,4 +162,30 @@ describe("system-state persistence integration", () => {
     reloaded.workProductStore.get("wp1")!.approve(attorney);
     expect(reloaded.workProductStore.get("wp1")!.status).toBe("approved");
   });
+
+  it("persists and reloads scheduled appointments across a process restart", async () => {
+    const receptionist: Actor = { id: "r1", role: "receptionist" };
+    const state = await loadSystemState(filePath);
+    const appt = state.scheduling.scheduleConsultation(receptionist, {
+      matterId: "m1",
+      startTime: new Date("2026-08-01T15:00:00Z"),
+      attorneyId: "a1",
+    });
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    const reloadedAppt = reloaded.scheduling.get(appt.id);
+    expect(reloadedAppt?.status).toBe("scheduled");
+    expect(reloadedAppt?.attorneyId).toBe("a1");
+
+    // Reloaded service is still a fully functional object: overlap checking still works.
+    expect(() =>
+      reloaded.scheduling.scheduleConsultation(receptionist, {
+        matterId: "m2",
+        startTime: new Date("2026-08-01T15:00:00Z"),
+        attorneyId: "a1",
+      }),
+    ).toThrow(/overlapping/);
+  });
 });

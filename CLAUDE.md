@@ -60,6 +60,7 @@ actual code path, not a prompt instruction:
 | `core/utilization.ts` | Internal AI utilization telemetry, explicitly walled off from client billing (§4) |
 | `core/deadline.ts` | Redundant deadline confirmation — never single-sourced to the agent (§3, §7 item #1) |
 | `core/work-product-store.ts` | In-memory registry making drafted `WorkProduct`s discoverable |
+| `core/scheduling.ts` | Consultation booking/rescheduling/reminders (§2) |
 
 ## Receptionist agent (chat channel)
 
@@ -111,6 +112,36 @@ of every practice area:
 - practice-area-specific hard triggers (Padilla, protective-order) are
   applied via `PracticeAreaModule.deriveWorkProductFlags()`
 
+## Scheduling
+
+`src/core/scheduling.ts` — `SchedulingService`, §2's "Schedule/reschedule
+consultations, send reminders." Practice-area-agnostic, same pattern as
+the rest of core:
+
+- Books a `consultation`/`follow_up` `Appointment`, auto-assigning an
+  attorney from `FirmConfig.attorneys` by matching `practiceAreaIds` (or
+  accepts an explicit `attorneyId`) — falls back to the firm's first
+  attorney if no practice-area match exists, throws if the firm has none.
+- Rejects a booking or reschedule outside `isWithinBusinessHours()` unless
+  `allowOutsideBusinessHours` is explicitly passed (e.g. an emergency
+  follow-up) — reuses `firm-config.ts`'s business-hours check rather than
+  duplicating the logic.
+- Prevents double-booking: refuses to schedule/reschedule an attorney into
+  a time slot that overlaps one of their existing (non-cancelled)
+  appointments.
+- Computes reminder due-times (default: 24h and 1h before) as plain data —
+  `getDueReminders()` returns what's due right now for a host process to
+  poll and actually send (email/SMS is a vendor integration, deliberately
+  out of scope, same reasoning as `voice-agent.ts` staying vendor-agnostic
+  for STT/TTS).
+- Optionally enforces `AccessControl`'s existing `"scheduling"` category
+  when constructed with one — receptionist role is already scoped to
+  `intake`/`scheduling` fields (§5), so this reuses that gate rather than
+  inventing a new one.
+- `toSnapshot()`/`fromSnapshot()` follow the same persistence pattern as
+  every other stateful core object — wired into `system-state.ts` and the
+  dashboard's "Scheduling" panel.
+
 ## Deadline redundancy (§7 open item #1 — resolved)
 
 `src/core/deadline.ts` — `DeadlineTracker`. §3: "Deadline calculations are
@@ -152,8 +183,15 @@ in-memory registry that makes drafted `WorkProduct`s discoverable (a
   `npm run build` copies `public/` into `dist/` since `tsc` only compiles
   `.ts` files.
 - `public/index.html` — a minimal vanilla-JS dashboard: lists work product
-  pending review, shows content/flags/history, and lets an attorney
-  approve/reject/request-revision/clear-flag/release.
+  pending review, shows content/flags/history, lets an attorney
+  approve/reject/request-revision/clear-flag/release, and includes
+  "Deadlines" and "Scheduling" panels over their respective APIs.
+
+`/api/appointments*` (see `scheduling.ts` above) is wired into the same
+server, gated by `SchedulingService`'s own optional `AccessControl`
+integration rather than `ReviewGateService` — scheduling is a
+receptionist-role concern, not attorney-only, so it deliberately isn't
+behind the attorney-only service.
 
 ## Persistence
 
@@ -165,18 +203,22 @@ clients, but it's real durability, not an in-memory-only demo:
 - `json-file-store.ts` — dependency-free, atomic JSON-file read/write
   (temp file + rename, so a crash mid-write can't leave a corrupt state
   file).
-- `system-state.ts` — bundles the audit log, utilization tracker, and
-  work-product store into one JSON document via `loadSystemState`/
-  `saveSystemState`.
+- `system-state.ts` — bundles the audit log, utilization tracker,
+  work-product store, deadline tracker, and scheduling service into one
+  JSON document via `loadSystemState`/`saveSystemState`.
 - Every stateful core object (`AuditLog`, `UtilizationTracker`,
-  `WorkProduct`, `WorkProductStore`) has `toSnapshot()`/`fromSnapshot()`
-  round-tripping its exact state to plain data — including `WorkProduct`
-  states like `approved`/`released` that the normal constructor and
-  transition methods can't reach directly. A rehydrated `WorkProduct` is a
-  fully functional, rule-enforcing object afterward (content still locks,
-  unresolved flags still block approval), not just replayed JSON.
-- `review-ui/start.ts` wires this in: loads state on boot, and
-  `server.ts`'s `onMutated` hook saves after every state-changing request.
+  `WorkProduct`, `WorkProductStore`, `DeadlineTracker`,
+  `SchedulingService`) has `toSnapshot()`/`fromSnapshot()` round-tripping
+  its exact state to plain data — including `WorkProduct` states like
+  `approved`/`released` that the normal constructor and transition
+  methods can't reach directly. A rehydrated `WorkProduct` is a fully
+  functional, rule-enforcing object afterward (content still locks,
+  unresolved flags still block approval), not just replayed JSON; a
+  rehydrated `SchedulingService` still enforces double-booking checks.
+- `review-ui/start.ts` wires this in: loads state on boot (plus an
+  optional `FIRM_CONFIG_FILE` for business hours/attorney auto-assignment/
+  branding), and `server.ts`'s `onMutated` hook saves after every
+  state-changing request.
 
 Swapping the file-backed adapter for a real database later only means
 replacing `json-file-store.ts` — the snapshot shapes and every caller stay
@@ -204,6 +246,7 @@ npm run typecheck        # tsc --noEmit
 npm test                  # vitest run
 npm run start:review-ui   # attorney review-gate dashboard at http://localhost:3000
 # STATE_FILE=./data/system-state.json PORT=3000 npm run start:review-ui  # override defaults
+# FIRM_CONFIG_FILE=./data/firm-config.json npm run start:review-ui        # enable scheduling business-hours/attorney-assignment/branding
 ```
 
 ## §7 open items — status

@@ -10,13 +10,13 @@ the architecture of what's implemented so far.
 
 This repository implements all six steps of the spec's suggested build
 order (§8): the **core layer** (routing, escalation, confidentiality/
-access-control, human-in-the-loop review gates, audit logging, and AI
-utilization tracking); the **receptionist agent** (chat and voice
-channels); the **paralegal drafting agent**; the **attorney review-gate
-UI**; and file-backed **persistence** — plus the interfaces a
-practice-area module and firm config plug into. See CLAUDE.md's "Not yet
-built" section for what's still ahead (real STT/TTS vendor, real auth, a
-production database).
+access-control, human-in-the-loop review gates, audit logging, redundant
+deadline tracking, consultation scheduling/reminders, and AI utilization
+tracking); the **receptionist agent** (chat and voice channels); the
+**paralegal drafting agent**; the **attorney review-gate UI**; and
+file-backed **persistence** — plus the interfaces a practice-area module
+and firm config plug into. See CLAUDE.md's "Not yet built" section for
+what's still ahead (real STT/TTS vendor, real auth, a production database).
 
 ## Setup
 

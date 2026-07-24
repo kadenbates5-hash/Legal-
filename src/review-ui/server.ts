@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { AccessDeniedError, ReviewGateError, type Actor } from "../core/types.js";
 import type { DeadlineType } from "../core/deadline.js";
+import { SchedulingError, type AppointmentType, type SchedulingService } from "../core/scheduling.js";
 import { ReviewGateService } from "./review-service.js";
 
 /**
@@ -50,6 +51,9 @@ function errorStatus(err: unknown): number {
   if (err instanceof AccessDeniedError) return 403;
   if (err instanceof ReviewGateError) return 409;
   if (err instanceof Error && err.message.startsWith("no work product")) return 404;
+  if (err instanceof SchedulingError) {
+    return err.message.startsWith("no appointment") ? 404 : 409;
+  }
   return 400;
 }
 
@@ -78,14 +82,15 @@ async function serveStatic(res: ServerResponse, requestPath: string): Promise<vo
 
 /**
  * `onMutated` fires after any successful state-changing request (approve,
- * reject, request-revision, release, clear-flag) — a persistence layer can
- * hook this to save after every mutation without this file knowing
- * anything about how or where state is persisted. See
- * `review-ui/start.ts` for the file-backed wiring.
+ * reject, request-revision, release, clear-flag, appointment booking/
+ * changes) — a persistence layer can hook this to save after every
+ * mutation without this file knowing anything about how or where state is
+ * persisted. See `review-ui/start.ts` for the file-backed wiring.
+ * `scheduling` is optional — omit it and `/api/appointments*` 404s.
  */
-export function createReviewServer(service: ReviewGateService, onMutated?: () => void): Server {
+export function createReviewServer(service: ReviewGateService, onMutated?: () => void, scheduling?: SchedulingService): Server {
   return createServer((req, res) => {
-    void handleRequest(service, req, res, onMutated);
+    void handleRequest(service, req, res, onMutated, scheduling);
   });
 }
 
@@ -94,6 +99,7 @@ async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
   onMutated?: () => void,
+  scheduling?: SchedulingService,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
 
@@ -108,6 +114,15 @@ async function handleRequest(
 
     if (url.pathname.startsWith("/api/deadlines")) {
       await handleDeadlineRequest(service, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/appointments")) {
+      if (!scheduling) {
+        sendJson(res, 404, { error: "scheduling is not configured on this server" });
+        return;
+      }
+      await handleAppointmentsRequest(scheduling, req, res, actor, url, onMutated);
       return;
     }
 
@@ -210,6 +225,97 @@ async function handleDeadlineRequest(
       source,
     );
     sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleAppointmentsRequest(
+  scheduling: SchedulingService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  if (url.pathname === "/api/appointments/reminders/due" && req.method === "GET") {
+    sendJson(res, 200, scheduling.getDueReminders());
+    return;
+  }
+
+  const segments = url.pathname.replace(/^\/api\/appointments\/?/, "").split("/").filter(Boolean);
+
+  if (segments.length === 0 && req.method === "GET") {
+    const matterId = url.searchParams.get("matterId");
+    const attorneyId = url.searchParams.get("attorneyId");
+    const result = matterId ? scheduling.listByMatter(matterId) : attorneyId ? scheduling.listByAttorney(attorneyId) : scheduling.listAll();
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (segments.length === 0 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const appointment = scheduling.scheduleConsultation(actor, {
+      matterId: String(body["matterId"] ?? ""),
+      startTime: new Date(String(body["startTime"] ?? "")),
+      ...(typeof body["durationMinutes"] === "number" ? { durationMinutes: body["durationMinutes"] } : {}),
+      ...(typeof body["type"] === "string" ? { type: body["type"] as AppointmentType } : {}),
+      ...(typeof body["attorneyId"] === "string" ? { attorneyId: body["attorneyId"] } : {}),
+      ...(typeof body["practiceAreaId"] === "string" ? { practiceAreaId: body["practiceAreaId"] } : {}),
+      allowOutsideBusinessHours: body["allowOutsideBusinessHours"] === true,
+    });
+    sendJson(res, 200, appointment);
+    onMutated?.();
+    return;
+  }
+
+  const id = segments[0];
+  if (!id) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+
+  if (segments.length === 1 && req.method === "GET") {
+    const appointment = scheduling.get(id);
+    if (!appointment) {
+      sendJson(res, 404, { error: `no appointment '${id}'` });
+      return;
+    }
+    sendJson(res, 200, appointment);
+    return;
+  }
+
+  if (segments.length === 2 && req.method === "POST") {
+    const action = segments[1];
+    const body = await readJsonBody(req);
+    let result;
+    switch (action) {
+      case "reschedule":
+        result = scheduling.reschedule(actor, id, {
+          newStartTime: new Date(String(body["newStartTime"] ?? "")),
+          allowOutsideBusinessHours: body["allowOutsideBusinessHours"] === true,
+        });
+        break;
+      case "cancel":
+        result = scheduling.cancel(actor, id, typeof body["reason"] === "string" ? body["reason"] : undefined);
+        break;
+      case "complete":
+        result = scheduling.complete(actor, id);
+        break;
+      default:
+        sendJson(res, 404, { error: "not found" });
+        return;
+    }
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 3 && segments[1] === "reminders" && req.method === "POST") {
+    scheduling.markReminderSent(id, segments[2]!);
+    sendJson(res, 200, scheduling.get(id));
     onMutated?.();
     return;
   }
