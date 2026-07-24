@@ -6,6 +6,7 @@ import { AuditLog } from "../src/core/audit.js";
 import { criminalLawModule } from "../src/modules/criminal-law/index.js";
 import { UtilizationTracker } from "../src/core/utilization.js";
 import type { Actor } from "../src/core/types.js";
+import type { FirmConfig } from "../src/config/firm-config.js";
 
 const actor: Actor = { id: "r1", role: "receptionist" };
 
@@ -175,5 +176,70 @@ describe("receptionist chat agent", () => {
     session.handleMessage("I don't want AI involved, human only");
     const after = session.handleMessage("hello?");
     expect(after.done).toBe(true);
+  });
+});
+
+describe("receptionist chat agent — firm config wiring", () => {
+  function makeFirmConfig(overrides?: Partial<FirmConfig>): FirmConfig {
+    return {
+      firmName: "Acme Defense",
+      attorneys: [],
+      businessHours: { timezone: "America/New_York", open: "09:00", close: "17:00", days: [1, 2, 3, 4, 5] },
+      branding: { tone: "warm", greeting: "Welcome to Acme Defense." },
+      jurisdictionRecordingConsent: "two-party-consent",
+      ...overrides,
+    };
+  }
+
+  function makeSessionWithConfig(firmConfig?: FirmConfig, now?: () => Date) {
+    const auditLog = new AuditLog();
+    const accessControl = new AccessControl(auditLog);
+    const router = new Router(accessControl, auditLog);
+    return new ReceptionistChatSession({ matterId: "m1", module: criminalLawModule, router, actor, firmConfig, now });
+  }
+
+  it("uses the default generic greeting when no firm config is supplied", () => {
+    const session = makeSessionWithConfig();
+    expect(session.greet()).toMatch(/^Thanks for reaching out\./);
+  });
+
+  it("uses the firm's branded greeting when a firm config is supplied", () => {
+    // Fixed to a moment within business hours so this test doesn't depend on wall-clock time.
+    const session = makeSessionWithConfig(makeFirmConfig(), () => new Date("2026-07-22T15:00:00Z"));
+    expect(session.greet()).toMatch(/^Welcome to Acme Defense\./);
+  });
+
+  it("prepends an after-hours notice outside business hours, without disabling anything", () => {
+    // 2026-07-22 (Wed) 10:00 UTC = 06:00 America/New_York — before the 09:00 open.
+    const session = makeSessionWithConfig(makeFirmConfig(), () => new Date("2026-07-22T10:00:00Z"));
+    expect(session.greet()).toMatch(/office is currently closed/i);
+
+    // Emergency escalation still works exactly the same after-hours.
+    const result = session.handleMessage("I'm currently in jail and need help");
+    expect(result.reply).toMatch(/connecting you/i);
+    expect(result.done).toBe(true);
+  });
+
+  it("does not show the after-hours notice during business hours", () => {
+    const session = makeSessionWithConfig(makeFirmConfig(), () => new Date("2026-07-22T15:00:00Z"));
+    expect(session.greet()).not.toMatch(/office is currently closed/i);
+  });
+
+  it("shows two-party-consent wording immediately after caller-type is identified", () => {
+    const session = makeSessionWithConfig(makeFirmConfig({ jurisdictionRecordingConsent: "two-party-consent" }));
+    const result = session.handleMessage("I'm a new client");
+    expect(result.reply).toMatch(/requires all parties to consent/i);
+  });
+
+  it("shows one-party-consent wording when the firm's jurisdiction only requires notice", () => {
+    const session = makeSessionWithConfig(makeFirmConfig({ jurisdictionRecordingConsent: "one-party-consent" }));
+    const result = session.handleMessage("I'm a new client");
+    expect(result.reply).toMatch(/one-party consent rule/i);
+  });
+
+  it("falls back to the generic consent script when no firm config is supplied", () => {
+    const session = makeSessionWithConfig();
+    const result = session.handleMessage("I'm a new client");
+    expect(result.reply).toMatch(/permitted under our state's consent rules/i);
   });
 });

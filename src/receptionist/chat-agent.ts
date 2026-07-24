@@ -2,11 +2,12 @@ import { Router, newIntakeState, type IntakeState } from "../core/router.js";
 import type { EscalationSignals, RouteDirective } from "../core/escalation.js";
 import { disclosurePolicyFor } from "../core/confidentiality.js";
 import { extractSignalsFromText, parseHoursUntil } from "./signal-extraction.js";
-import { DIRECTIVE_SCRIPTS, GREETING, OUTRO_CLEARED_FOR_INTAKE, RECORDING_CONSENT_REFUSED_SCRIPT, WRAP_UP } from "./scripts.js";
+import { DIRECTIVE_SCRIPTS, OUTRO_CLEARED_FOR_INTAKE, RECORDING_CONSENT_REFUSED_SCRIPT, WRAP_UP, greetingFor, recordingConsentScriptFor } from "./scripts.js";
 import { RECORDING_CONSENT_REFUSAL_RE } from "./signal-extraction.js";
 import type { IntakeQuestion, PracticeAreaModule } from "../config/practice-area.js";
 import type { Actor } from "../core/types.js";
 import type { UtilizationTracker } from "../core/utilization.js";
+import { isWithinBusinessHours, type FirmConfig } from "../config/firm-config.js";
 
 /**
  * Chat-channel receptionist agent (§8 build order: "receptionist agent,
@@ -60,6 +61,8 @@ export class ReceptionistChatSession {
   #intakeQuestionIndex = 0;
   #answers = new Map<string, string>();
   #terminated = false;
+  #firmConfig: FirmConfig | undefined;
+  #now: () => Date;
 
   constructor(params: {
     matterId: string;
@@ -68,6 +71,10 @@ export class ReceptionistChatSession {
     actor: Actor;
     conflictedNames?: string[];
     utilization?: UtilizationTracker;
+    /** §1 layer 3: drives greeting branding, after-hours notice, and consent-disclosure wording. Never affects escalation. */
+    firmConfig?: FirmConfig;
+    /** Injectable clock for testing the after-hours notice deterministically. */
+    now?: () => Date;
   }) {
     this.#router = params.router;
     this.#module = params.module;
@@ -76,6 +83,8 @@ export class ReceptionistChatSession {
     this.#conflictedNames = (params.conflictedNames ?? []).map((n) => n.toLowerCase());
     this.#orderedQuestions = orderIntakeQuestions(params.module.intakeQuestions);
     this.#state = newIntakeState({ matterId: params.matterId, callerType: "unknown" });
+    this.#firmConfig = params.firmConfig;
+    this.#now = params.now ?? (() => new Date());
 
     if (this.#utilization) {
       this.#utilizationEntryId = this.#utilization.start({
@@ -88,7 +97,8 @@ export class ReceptionistChatSession {
   }
 
   greet(): string {
-    return GREETING;
+    const isAfterHours = this.#firmConfig !== undefined && !isWithinBusinessHours(this.#firmConfig, this.#now());
+    return greetingFor(this.#firmConfig, isAfterHours);
   }
 
   handleMessage(text: string): ChatTurnResult {
@@ -141,7 +151,11 @@ export class ReceptionistChatSession {
 
     if (!decision.clearedForSubstantiveIntake) {
       this.#pendingGate = decision.directive;
-      return { reply: DIRECTIVE_SCRIPTS[decision.directive], done: false };
+      const reply =
+        decision.directive === "disclose_recording_consent_then_continue"
+          ? recordingConsentScriptFor(this.#firmConfig)
+          : DIRECTIVE_SCRIPTS[decision.directive];
+      return { reply, done: false };
     }
 
     const disclosure = disclosurePolicyFor(this.#state.callerType);

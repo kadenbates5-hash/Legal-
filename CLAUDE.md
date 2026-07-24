@@ -14,7 +14,12 @@ Three layers, per the spec:
    `src/config/practice-area.ts`) — swappable. `src/modules/criminal-law/`
    is the pilot module.
 3. **Firm-level config** (`src/config/firm-config.ts`) — attorney
-   assignments, hours, tone/branding, sign-off rules.
+   assignments, hours, tone/branding, sign-off rules. Consumed by
+   `ReceptionistChatSession` (see below): `isWithinBusinessHours()` drives
+   an after-hours greeting notice, `branding.greeting` drives the opener,
+   and `jurisdictionRecordingConsent` drives the consent-disclosure
+   wording — all cosmetic, never gating. A missing `firmConfig` falls back
+   to generic wording, so this layer stays optional everywhere it's used.
 
 ## Non-negotiable design rule
 
@@ -70,7 +75,10 @@ escalation/access-control logic itself, only:
 - `signal-extraction.ts` — conservative regex-based extraction of
   escalation signals from free text (over-escalating is the safe failure
   mode, under-escalating is not).
-- `scripts.ts` — the actual hard-coded reply text per directive.
+- `scripts.ts` — the actual hard-coded reply text per directive, plus
+  `greetingFor()`/`recordingConsentScriptFor()` which layer optional
+  `FirmConfig` branding/jurisdiction wording on top of the generic
+  fallback text — cosmetic only, never a gate.
 - `voice-agent.ts` — `VoiceReceptionistSession`, the voice channel (§8
   build order step 6). Wraps the exact same `ReceptionistChatSession`
   behind vendor-agnostic `SpeechToText`/`TextToSpeech` interfaces — no

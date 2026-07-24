@@ -1,4 +1,5 @@
 import type { RouteDirective } from "../core/escalation.js";
+import type { FirmConfig } from "../config/firm-config.js";
 
 /**
  * Canned response text per directive. Kept as plain strings rather than a
@@ -25,7 +26,41 @@ export const DIRECTIVE_SCRIPTS: Record<RouteDirective, string> = {
   continue_standard_triage: "Thanks — let's continue.",
 };
 
-export const GREETING = "Thanks for reaching out. Are you a new client, an existing client, or calling on behalf of someone else?";
+const CALLER_TYPE_QUESTION = "Are you a new client, an existing client, or calling on behalf of someone else?";
+const DEFAULT_GREETING_OPENER = "Thanks for reaching out.";
+
+export const GREETING = `${DEFAULT_GREETING_OPENER} ${CALLER_TYPE_QUESTION}`;
+
+export const AFTER_HOURS_NOTICE = "Our office is currently closed, but I can still help right now — ";
+
+/**
+ * §1 layer 3: firm-level config drives tone/branding here, never core
+ * enforcement. Falls back to the generic greeting when no firm config is
+ * supplied (e.g. in tests), and prepends an after-hours notice — computed
+ * by the caller via `isWithinBusinessHours`, not decided here — without
+ * changing anything about escalation availability.
+ */
+export function greetingFor(firmConfig?: FirmConfig, isAfterHours = false): string {
+  const opener = firmConfig?.branding.greeting || DEFAULT_GREETING_OPENER;
+  const afterHours = isAfterHours ? AFTER_HOURS_NOTICE : "";
+  return `${afterHours}${opener} ${CALLER_TYPE_QUESTION}`;
+}
+
+/**
+ * Recording-consent disclosure wording varies by jurisdiction — a
+ * two-party-consent state needs the caller's affirmative agreement called
+ * out explicitly; a one-party-consent state only needs notice. Falls back
+ * to generic wording when no firm config is supplied.
+ */
+export function recordingConsentScriptFor(firmConfig?: FirmConfig): string {
+  if (firmConfig?.jurisdictionRecordingConsent === "two-party-consent") {
+    return "This call may be recorded for quality and record-keeping purposes. Because our state requires all parties to consent to being recorded, I need your agreement before we continue — is that okay with you?";
+  }
+  if (firmConfig?.jurisdictionRecordingConsent === "one-party-consent") {
+    return "Just so you're aware, this call may be recorded for quality and record-keeping purposes, as permitted under our state's one-party consent rule. Let me know if that's not okay with you.";
+  }
+  return DIRECTIVE_SCRIPTS.disclose_recording_consent_then_continue;
+}
 
 export const THIRD_PARTY_DISCLOSURE_SCRIPT =
   "I can't share case details, but I can pass along a message.";
