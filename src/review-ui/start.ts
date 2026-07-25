@@ -15,6 +15,10 @@ import { AccessControl } from "../core/access-control.js";
 import { criminalLawModule } from "../modules/criminal-law/index.js";
 import type { UserRole } from "../core/auth.js";
 import type { FirmConfig } from "../config/firm-config.js";
+import { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
+import { AudioClipStore } from "../receptionist/audio-clip-store.js";
+import { VoiceboxSpeechToText, VoiceboxTextToSpeech } from "../integrations/voicebox.js";
+import type { ReviewServerOptions } from "./server.js";
 
 /**
  * Standalone entry point for the attorney review-gate UI (`npm run
@@ -146,13 +150,45 @@ const audit = new AuditService(state.auditLog);
  */
 const trustProxy = process.env["TRUST_PROXY"] === "true";
 
-const server = createReviewServer(
-  service,
-  state.auth,
-  () => {
+/**
+ * The real-call telephony surface (see `server.ts`'s `handleVoiceRequest`
+ * and CLAUDE.md's "Voicebox voice integration"/"Twilio telephony
+ * integration"): a Twilio phone number's webhooks drive
+ * `VoiceCallSessions`, which uses Voicebox for both STT and TTS. Only
+ * wired up when all three Twilio env vars are present — `/api/voice/*`
+ * 404s otherwise, same "absent config means the surface doesn't exist"
+ * pattern as every other optional panel here.
+ */
+const TWILIO_ACCOUNT_SID = process.env["TWILIO_ACCOUNT_SID"];
+const TWILIO_AUTH_TOKEN = process.env["TWILIO_AUTH_TOKEN"];
+const PUBLIC_BASE_URL = process.env["PUBLIC_BASE_URL"];
+const VOICEBOX_BASE_URL = process.env["VOICEBOX_BASE_URL"];
+const VOICEBOX_PROFILE_ID = process.env["VOICEBOX_PROFILE_ID"];
+const voiceOptions: Pick<ReviewServerOptions, "voiceCalls" | "audioClips" | "twilio"> =
+  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && PUBLIC_BASE_URL
+    ? {
+        voiceCalls: new VoiceCallSessions({
+          accessControl: new AccessControl(state.auditLog),
+          auditLog: state.auditLog,
+          module: criminalLawModule,
+          stt: new VoiceboxSpeechToText(VOICEBOX_BASE_URL ? { baseUrl: VOICEBOX_BASE_URL } : {}),
+          tts: new VoiceboxTextToSpeech({
+            ...(VOICEBOX_BASE_URL ? { baseUrl: VOICEBOX_BASE_URL } : {}),
+            ...(VOICEBOX_PROFILE_ID ? { profileId: VOICEBOX_PROFILE_ID } : {}),
+          }),
+          utilization: state.utilization,
+          ...(firmConfig ? { firmConfig } : {}),
+        }),
+        audioClips: new AudioClipStore(),
+        twilio: { accountSid: TWILIO_ACCOUNT_SID, authToken: TWILIO_AUTH_TOKEN, publicBaseUrl: PUBLIC_BASE_URL.replace(/\/+$/, "") },
+      }
+    : {};
+
+const server = createReviewServer(service, state.auth, {
+  onMutated: () => {
     void saveSystemState(store, state);
   },
-  state.scheduling,
+  scheduling: state.scheduling,
   intake,
   accounts,
   drafting,
@@ -160,7 +196,8 @@ const server = createReviewServer(
   cases,
   audit,
   trustProxy,
-);
+  ...voiceOptions,
+});
 
 const port = Number(process.env["PORT"] ?? 3000);
 server.listen(port, () => {
@@ -168,4 +205,7 @@ server.listen(port, () => {
   console.log(DATABASE_URL ? "State persisted to Postgres (DATABASE_URL)" : `State persisted to ${STATE_FILE}`);
   if (firmConfig) console.log(`Firm config loaded from ${FIRM_CONFIG_FILE}`);
   if (trustProxy) console.log("TRUST_PROXY is on — trusting X-Forwarded-Proto from the upstream proxy.");
+  if (voiceOptions.twilio) {
+    console.log(`Telephony integration active — point a Twilio phone number's voice webhook at ${PUBLIC_BASE_URL}/api/voice/twilio/incoming`);
+  }
 });

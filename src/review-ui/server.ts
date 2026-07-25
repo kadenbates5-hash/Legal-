@@ -13,6 +13,9 @@ import type { DraftingService } from "./drafting-service.js";
 import type { DocumentsService } from "./documents-service.js";
 import type { CasesService } from "./cases-service.js";
 import type { AuditService } from "./audit-service.js";
+import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
+import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
+import { verifyTwilioSignature, twimlPlayThenRecord, twimlPlayThenHangup, downloadTwilioRecording } from "../integrations/twilio-voice.js";
 import type { UserRole } from "../core/auth.js";
 
 /**
@@ -119,6 +122,19 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   }
 }
 
+/** Twilio posts webhook bodies as `application/x-www-form-urlencoded`, not JSON. */
+async function readFormBody(req: IncomingMessage): Promise<Record<string, string>> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  const params = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+  return Object.fromEntries(params.entries());
+}
+
+function sendXml(res: ServerResponse, status: number, xml: string): void {
+  res.writeHead(status, { "Content-Type": "text/xml; charset=utf-8" });
+  res.end(xml);
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown, extraHeaders?: Record<string, string>): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", ...extraHeaders });
@@ -180,22 +196,43 @@ async function serveStatic(res: ServerResponse, requestPath: string): Promise<vo
  * wiring. `scheduling` is optional — omit it and `/api/appointments*`
  * 404s.
  */
-export function createReviewServer(
-  service: ReviewGateService,
-  auth: AuthService,
-  onMutated?: () => void,
-  scheduling?: SchedulingService,
-  intake?: IntakeDemoSessions,
-  accounts?: AccountsService,
-  drafting?: DraftingService,
-  documents?: DocumentsService,
-  cases?: CasesService,
-  audit?: AuditService,
+export interface TwilioVoiceConfig {
+  accountSid: string;
+  authToken: string;
+  /** The externally reachable base URL Twilio calls back to and fetches `<Play>` audio from (e.g. https://docket.example.com) — no trailing slash. */
+  publicBaseUrl: string;
+}
+
+/**
+ * `onMutated`/`scheduling`/etc. as an options object rather than a long
+ * positional parameter list — this grew past a dozen optional pieces
+ * (each gating a `/api/*` surface to 404 when absent) and a positional
+ * list that long had already caused real bugs: inserting a new parameter
+ * shifted every later positional argument in existing call sites without
+ * a type error, since they're all optional. A single object makes an
+ * omitted or misplaced piece a missing/misspelled key, not a silent
+ * off-by-one.
+ */
+export interface ReviewServerOptions {
+  onMutated?: () => void;
+  scheduling?: SchedulingService;
+  intake?: IntakeDemoSessions;
+  accounts?: AccountsService;
+  drafting?: DraftingService;
+  documents?: DocumentsService;
+  cases?: CasesService;
+  audit?: AuditService;
+  /** Real-call telephony voice channel (see `receptionist/voice-call-sessions.ts`) — `voiceCalls`/`audioClips`/`twilio` must all be set together for `/api/voice/*` to be configured. */
+  voiceCalls?: VoiceCallSessions;
+  audioClips?: AudioClipStore;
+  twilio?: TwilioVoiceConfig;
   /** See the module doc comment above — off by default, only enable behind a real TLS-terminating proxy. */
-  trustProxy = false,
-): Server {
+  trustProxy?: boolean;
+}
+
+export function createReviewServer(service: ReviewGateService, auth: AuthService, options?: ReviewServerOptions): Server {
   return createServer((req, res) => {
-    void handleRequest(service, auth, req, res, onMutated, scheduling, intake, accounts, drafting, documents, cases, audit, trustProxy);
+    void handleRequest(service, auth, req, res, options ?? {});
   });
 }
 
@@ -204,17 +241,16 @@ async function handleRequest(
   auth: AuthService,
   req: IncomingMessage,
   res: ServerResponse,
-  onMutated?: () => void,
-  scheduling?: SchedulingService,
-  intake?: IntakeDemoSessions,
-  accounts?: AccountsService,
-  drafting?: DraftingService,
-  documents?: DocumentsService,
-  cases?: CasesService,
-  audit?: AuditService,
-  trustProxy = false,
+  options: ReviewServerOptions,
 ): Promise<void> {
+  const { onMutated, scheduling, intake, accounts, drafting, documents, cases, audit, voiceCalls, audioClips, twilio, trustProxy = false } =
+    options;
   const url = new URL(req.url ?? "/", "http://localhost");
+
+  if (url.pathname.startsWith("/api/voice/")) {
+    await handleVoiceRequest({ voiceCalls, audioClips, twilio }, req, res, url);
+    return;
+  }
 
   if (url.pathname === "/api/login" && req.method === "POST") {
     await handleLogin(auth, req, res, onMutated, trustProxy);
@@ -704,6 +740,121 @@ async function handleCasesRequest(
 
   if (segments.length === 1 && req.method === "GET") {
     sendJson(res, 200, cases.getCase(actor, segments[0]!));
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+/**
+ * `/api/voice/*` — the real-call telephony surface, deliberately handled
+ * outside the normal `resolveActor()`/cookie-session flow: Twilio's
+ * webhooks aren't a Docket user, so there's no cookie or
+ * `x-system-api-key` to check. `verifyTwilioSignature` is the entire auth
+ * story for `/api/voice/twilio/*`; `/api/voice/audio/:clipId` is
+ * intentionally public (Twilio's own media fetcher doesn't sign its
+ * requests either) but only ever serves a short-lived, unguessable clip
+ * id — see `receptionist/audio-clip-store.ts`.
+ */
+async function handleVoiceRequest(
+  config: { voiceCalls: VoiceCallSessions | undefined; audioClips: AudioClipStore | undefined; twilio: TwilioVoiceConfig | undefined },
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+): Promise<void> {
+  if (url.pathname.startsWith("/api/voice/audio/")) {
+    if (!config.audioClips) {
+      sendJson(res, 404, { error: "voice audio is not configured on this server" });
+      return;
+    }
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "method not allowed" });
+      return;
+    }
+    const clipId = url.pathname.slice("/api/voice/audio/".length);
+    const clip = config.audioClips.get(clipId);
+    if (!clip) {
+      sendJson(res, 404, { error: "not found" });
+      return;
+    }
+    res.writeHead(200, { "Content-Type": clip.contentType });
+    res.end(clip.data);
+    return;
+  }
+
+  if (!url.pathname.startsWith("/api/voice/twilio/")) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+
+  if (!config.voiceCalls || !config.audioClips || !config.twilio) {
+    sendJson(res, 404, { error: "the telephony integration is not configured on this server" });
+    return;
+  }
+  const { voiceCalls, audioClips, twilio } = config;
+
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "method not allowed" });
+    return;
+  }
+
+  const formParams = await readFormBody(req);
+  const signature = firstHeader(req.headers["x-twilio-signature"]);
+  const fullUrl = `${twilio.publicBaseUrl}${url.pathname}`;
+  if (!verifyTwilioSignature({ authToken: twilio.authToken, url: fullUrl, formParams, signature })) {
+    sendJson(res, 403, { error: "invalid Twilio signature" });
+    return;
+  }
+
+  const recordingActionUrl = (callSid: string) => `${twilio.publicBaseUrl}/api/voice/twilio/${encodeURIComponent(callSid)}/recording`;
+  const audioUrl = (clipId: string) => `${twilio.publicBaseUrl}/api/voice/audio/${clipId}`;
+
+  // A downstream failure anywhere below (Voicebox unreachable, a recording
+  // download failing, an unexpected exception) still needs a valid TwiML
+  // response, or Twilio just plays its own generic error tone with no
+  // trace of what happened. Twilio's own `<Say>` is the one acceptable use
+  // of the carrier's built-in TTS in this file, reserved for this exact
+  // fallback path so a real error doesn't strand the caller silently.
+  const errorFallbackXml = `<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, something went wrong. Please try calling again.</Say><Hangup /></Response>`;
+
+  if (url.pathname === "/api/voice/twilio/incoming") {
+    const callSid = formParams["CallSid"];
+    if (!callSid) {
+      sendJson(res, 400, { error: "CallSid is required" });
+      return;
+    }
+    try {
+      const greetingAudio = (await voiceCalls.start(callSid)) as Buffer;
+      const clipId = audioClips.store(greetingAudio, "audio/wav");
+      sendXml(res, 200, twimlPlayThenRecord({ audioUrl: audioUrl(clipId), recordingActionUrl: recordingActionUrl(callSid) }));
+    } catch {
+      voiceCalls.end(callSid);
+      sendXml(res, 200, errorFallbackXml);
+    }
+    return;
+  }
+
+  const segments = url.pathname.replace(/^\/api\/voice\/twilio\/?/, "").split("/").filter(Boolean);
+  if (segments.length === 2 && segments[1] === "recording") {
+    const callSid = decodeURIComponent(segments[0]!);
+    const recordingUrl = formParams["RecordingUrl"];
+    if (!recordingUrl) {
+      sendJson(res, 400, { error: "RecordingUrl is required" });
+      return;
+    }
+    try {
+      const audioBuffer = await downloadTwilioRecording({ recordingUrl, accountSid: twilio.accountSid, authToken: twilio.authToken });
+      const turn = await voiceCalls.handleTurn(callSid, { data: audioBuffer, mimeType: "audio/wav" });
+      const clipId = audioClips.store(turn.audioReply as Buffer, "audio/wav");
+      if (turn.done) {
+        sendXml(res, 200, twimlPlayThenHangup({ audioUrl: audioUrl(clipId) }));
+      } else {
+        sendXml(res, 200, twimlPlayThenRecord({ audioUrl: audioUrl(clipId), recordingActionUrl: recordingActionUrl(callSid) }));
+      }
+    } catch {
+      voiceCalls.end(callSid);
+      sendXml(res, 200, errorFallbackXml);
+    }
     return;
   }
 

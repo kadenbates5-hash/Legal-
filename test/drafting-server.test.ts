@@ -42,7 +42,7 @@ beforeEach(async () => {
 
   const store = new WorkProductStore();
   const drafting = new DraftingService({ accessControl, auditLog, module: criminalLawModule, store });
-  server = createReviewServer(new ReviewGateService(store), auth, undefined, undefined, undefined, undefined, drafting);
+  server = createReviewServer(new ReviewGateService(store), auth, { drafting });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const { port } = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${port}`;

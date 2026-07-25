@@ -31,13 +31,17 @@ panel over the append-only, privilege-sensitive audit trail; **persistence**
 that's either file-backed or a real Postgres database; and a **Google
 Calendar integration** (`npm run sync:calendar`) that confirms deadlines
 against a shared calendar as the independent `calendar_system` source;
-and a **Voicebox** STT/TTS integration behind the receptionist voice
+a **Voicebox** STT/TTS integration behind the receptionist voice
 channel's vendor-agnostic interfaces (local, open-source — see
-CLAUDE.md's "Voicebox voice integration" for what that tradeoff means) —
-plus the interfaces a practice-area module and firm config plug into.
-See CLAUDE.md's "Not yet built" section for what's still ahead (a real
-telephony/carrier integration to route an actual phone call, password
-reset/MFA, Google Calendar key rotation/vendor due-diligence).
+CLAUDE.md's "Voicebox voice integration" for what that tradeoff means);
+and a **Twilio telephony integration** so a real phone call reaches the
+receptionist agent end to end (Twilio webhook → Voicebox transcribes →
+the same router/escalation state machine as chat → Voicebox speaks the
+reply back) — plus the interfaces a practice-area module and firm config
+plug into. See CLAUDE.md's "Not yet built" section for what's still
+ahead (the one-time Twilio console step of pointing a real phone number
+at this, password reset/MFA, Google Calendar key rotation/vendor
+due-diligence).
 
 ## Setup
 

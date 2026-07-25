@@ -313,10 +313,71 @@ service reached with a per-request API key.
   tradeoff is inherent to the vendor choice, not something this adapter
   can paper over.
 
-There's still no telephony/carrier integration (no Twilio-equivalent
-webhook exists anywhere in this codebase) — `VoiceReceptionistSession` is
-exercised by tests only, same as before this integration. Wiring a real
-phone number to it is a separate, distinct piece of work.
+## Telephony integration — Twilio (§8 build order step 6, fully resolved)
+
+A real phone call now reaches `VoiceReceptionistSession` end to end,
+closing the last piece of the voice channel. Twilio was chosen as the
+carrier (the industry-standard telephony API); nothing about the design
+is Twilio-specific beyond `src/integrations/twilio-voice.ts` itself.
+
+- `src/receptionist/audio-clip-store.ts` — `AudioClipStore`, a short-TTL
+  (default 10 min) in-memory map from a random clip id to synthesized
+  audio bytes. Exists because Twilio's `<Play>` verb takes a fetchable
+  URL, not inline audio in the webhook response — this is what that URL
+  resolves to. Deliberately not persisted, same "throwaway call state"
+  reasoning as `intake-demo.ts`.
+- `src/receptionist/voice-call-sessions.ts` — `VoiceCallSessions`, the
+  real-call analogue of `review-ui/intake-demo.ts`'s `IntakeDemoSessions`:
+  one `VoiceReceptionistSession` per live call, keyed by the carrier's
+  call id (Twilio's `CallSid`). Vendor-agnostic — it knows nothing about
+  Twilio, only that some caller identifies a call by a string.
+- `src/integrations/twilio-voice.ts` — the only Twilio-specific code:
+  `verifyTwilioSignature()` (HMAC-SHA1 over the exact webhook URL plus
+  sorted POST params, per Twilio's own algorithm, timing-safe comparison,
+  fails closed on a missing/wrong signature), `twimlPlayThenRecord()`/
+  `twimlPlayThenHangup()` (the TwiML XML Twilio expects back), and
+  `downloadTwilioRecording()` (Basic-auth GET of a completed recording as
+  WAV bytes).
+- `server.ts`'s `handleVoiceRequest()` wires it together as
+  `/api/voice/twilio/incoming` (answers a new call: greet via Voicebox
+  TTS, `<Play>` it, `<Record>` the caller's reply) and
+  `/api/voice/twilio/:callSid/recording` (download the recording,
+  transcribe via Voicebox STT, drive one `VoiceReceptionistSession` turn,
+  `<Play>` the reply, loop or `<Hangup>` if the conversation is done), plus
+  `/api/voice/audio/:clipId` (GET, serves a stored clip). These routes are
+  handled **before** the normal cookie/`x-system-api-key` actor
+  resolution — a Twilio webhook isn't a Docket user session, so
+  `verifyTwilioSignature()` is the entire auth story for the two
+  `/api/voice/twilio/*` routes. `/api/voice/audio/:clipId` is
+  intentionally public (Twilio's own media-fetching requests aren't
+  signed either) but only ever serves a short-lived, 128-bit random clip
+  id. Any failure partway through either webhook (Voicebox unreachable, a
+  bad recording download, an unexpected exception) falls back to Twilio's
+  *own* built-in `<Say>`+`<Hangup>` — the one deliberate exception to
+  "never use the carrier's TTS," reserved for not stranding a caller
+  silently when the real pipeline breaks.
+- `review-ui/start.ts` wires `VoiceCallSessions`/`AudioClipStore`/the
+  Twilio config into the server only when `TWILIO_ACCOUNT_SID`/
+  `TWILIO_AUTH_TOKEN`/`PUBLIC_BASE_URL` are all set — `/api/voice/*` 404s
+  otherwise, same "absent config means the surface doesn't exist" pattern
+  as every other optional panel. `VOICEBOX_BASE_URL`/`VOICEBOX_PROFILE_ID`
+  are optional and fall through to `voicebox.ts`'s own defaults.
+
+To actually go live: point a Twilio phone number's "A call comes in"
+voice webhook (in the Twilio console) at
+`<PUBLIC_BASE_URL>/api/voice/twilio/incoming` — that's a Twilio-side
+console configuration step, not something this codebase can do for you.
+
+`createReviewServer`'s signature changed as part of this: it now takes a
+single `ReviewServerOptions` object (`{ scheduling?, intake?, accounts?,
+drafting?, documents?, cases?, audit?, voiceCalls?, audioClips?, twilio?,
+onMutated?, trustProxy? }`) instead of a long positional-parameter list.
+That list had grown past a dozen optional pieces and a purely positional
+signature that long had already caused real bugs more than once —
+inserting a new parameter silently shifted every later positional
+argument in existing call sites, with no type error since they're all
+optional. A missing or misspelled option key is a much safer failure mode
+than a silent off-by-one.
 
 ## Real authentication (§5/§6 — resolved)
 
@@ -561,6 +622,8 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 # FIRM_CONFIG_FILE=./data/firm-config.json npm run start:review-ui        # enable scheduling business-hours/attorney-assignment/branding
 # CALENDAR_SYSTEM_API_KEY=... npm run start:review-ui                     # pin the calendar-integration key instead of auto-generating one
 GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
+# TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
+# VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 ```
 
 ## §7 open items — status
@@ -600,12 +663,13 @@ voice, for the receptionist). Persistence, TLS-aware cookies, and account
 management are resolved (see "Persistence" and "Real authentication"
 above). Still open:
 
-- A telephony/carrier integration (no Twilio-equivalent webhook exists)
-  to actually route a real phone call into `VoiceReceptionistSession` —
-  see "Voicebox voice integration" above for what *is* now built (the
-  STT/TTS vendor adapter itself) and its specific caveats (best-effort
-  `/transcribe` contract, no concurrency/uptime guarantees, must run
-  co-located with whatever answers the call)
+- The Twilio phone-number console configuration itself (pointing a real
+  number's voice webhook at `/api/voice/twilio/incoming`) — see
+  "Telephony integration — Twilio" above for what's code vs. what's a
+  one-time console step; the code side is done
+- Voicebox's specific caveats remain (see "Voicebox voice integration"
+  above): best-effort `/transcribe` contract, no concurrency/uptime
+  guarantees, must run co-located with whatever answers the call
 - Automatic system-API-key *rotation* for the Google Calendar integration
   (see "Google Calendar integration" above — today a key is rotated by
   hand, regenerating the service-account key and re-running

@@ -45,7 +45,7 @@ beforeEach(async () => {
   auth = new AuthService();
   auth.createUser({ username: "reception1", password: "correct-horse", role: "receptionist", actorId: "r1" });
   const service = new ReviewGateService(new WorkProductStore());
-  server = createReviewServer(service, auth, undefined, scheduling);
+  server = createReviewServer(service, auth, { scheduling });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const { port } = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${port}`;
@@ -247,10 +247,12 @@ describe("appointments HTTP API", () => {
     const hookServer = createReviewServer(
       new ReviewGateService(new WorkProductStore()),
       hookAuth,
-      () => {
-        mutationCount += 1;
+      {
+        onMutated: () => {
+          mutationCount += 1;
+        },
+        scheduling,
       },
-      scheduling,
     );
     await new Promise<void>((resolve) => hookServer.listen(0, resolve));
     const { port } = hookServer.address() as AddressInfo;

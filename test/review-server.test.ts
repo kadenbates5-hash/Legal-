@@ -123,15 +123,7 @@ describe("session cookie Secure flag (trust-proxy model)", () => {
     const proxiedServer = createReviewServer(
       new ReviewGateService(new WorkProductStore()),
       proxiedAuth,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true, // trustProxy
+      { trustProxy: true },
     );
     await new Promise<void>((resolve) => proxiedServer.listen(0, resolve));
     const { port } = proxiedServer.address() as AddressInfo;
@@ -154,15 +146,7 @@ describe("session cookie Secure flag (trust-proxy model)", () => {
     const proxiedServer = createReviewServer(
       new ReviewGateService(new WorkProductStore()),
       proxiedAuth,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true, // trustProxy
+      { trustProxy: true },
     );
     await new Promise<void>((resolve) => proxiedServer.listen(0, resolve));
     const { port } = proxiedServer.address() as AddressInfo;
@@ -263,8 +247,10 @@ describe("review-gate HTTP API persistence hook", () => {
     hookAuth.createUser({ username: "attorney1", password: "correct-horse", role: "attorney", actorId: "a1" });
 
     let mutationCount = 0;
-    const hookServer = createReviewServer(new ReviewGateService(hookStore), hookAuth, () => {
-      mutationCount += 1;
+    const hookServer = createReviewServer(new ReviewGateService(hookStore), hookAuth, {
+      onMutated: () => {
+        mutationCount += 1;
+      },
     });
     await new Promise<void>((resolve) => hookServer.listen(0, resolve));
     const { port } = hookServer.address() as AddressInfo;

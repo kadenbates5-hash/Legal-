@@ -34,7 +34,7 @@ beforeEach(async () => {
   auth.createUser({ username: "attorney1", password: "correct-horse", role: "attorney", actorId: "a1" });
   auth.createUser({ username: "paralegal1", password: "correct-horse", role: "paralegal", actorId: "p1" });
   const accounts = new AccountsService(auth, new AccessControl(new AuditLog()));
-  server = createReviewServer(new ReviewGateService(new WorkProductStore()), auth, undefined, undefined, undefined, accounts);
+  server = createReviewServer(new ReviewGateService(new WorkProductStore()), auth, { accounts });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const { port } = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${port}`;

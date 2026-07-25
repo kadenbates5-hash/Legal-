@@ -52,13 +52,7 @@ beforeEach(async () => {
   server = createReviewServer(
     new ReviewGateService(workProductStore),
     auth,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    drafting,
-    documents,
-    cases,
+    { drafting, documents, cases },
   );
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const { port } = server.address() as AddressInfo;
