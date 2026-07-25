@@ -15,6 +15,11 @@ import type { CasesService } from "./cases-service.js";
 import type { AuditService } from "./audit-service.js";
 import type { ResearchService } from "./research-service.js";
 import type { AssistantService } from "./assistant-service.js";
+import type { StaffService } from "./staff-service.js";
+import type { MessagingService } from "./messaging-service.js";
+import type { StaffScheduleService } from "./staff-schedule-service.js";
+import type { StaffScheduleStatus } from "../core/staff-schedule.js";
+import type { BillingHoursService } from "./billing-hours-service.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { verifyTwilioSignature, twimlPlayThenRecord, twimlPlayThenHangup, downloadTwilioRecording } from "../integrations/twilio-voice.js";
@@ -233,6 +238,10 @@ export interface ReviewServerOptions {
   audit?: AuditService;
   research?: ResearchService;
   assistant?: AssistantService;
+  staff?: StaffService;
+  messaging?: MessagingService;
+  staffSchedule?: StaffScheduleService;
+  billingHours?: BillingHoursService;
   /** Real-call telephony voice channel (see `receptionist/voice-call-sessions.ts`) — `voiceCalls`/`audioClips`/`twilio` must all be set together for `/api/voice/*` to be configured. */
   voiceCalls?: VoiceCallSessions;
   audioClips?: AudioClipStore;
@@ -265,6 +274,10 @@ async function handleRequest(
     audit,
     research,
     assistant,
+    staff,
+    messaging,
+    staffSchedule,
+    billingHours,
     voiceCalls,
     audioClips,
     twilio,
@@ -426,6 +439,42 @@ async function handleRequest(
         return;
       }
       await handleAssistantRequest(assistant, req, res, actor, url);
+      return;
+    }
+
+    if (url.pathname === "/api/staff" && req.method === "GET") {
+      if (!staff) {
+        sendJson(res, 404, { error: "the staff directory is not configured on this server" });
+        return;
+      }
+      sendJson(res, 200, staff.list(actor));
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/messages")) {
+      if (!messaging) {
+        sendJson(res, 404, { error: "messaging is not configured on this server" });
+        return;
+      }
+      await handleMessagingRequest(messaging, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/staff-schedule")) {
+      if (!staffSchedule) {
+        sendJson(res, 404, { error: "the staff schedule is not configured on this server" });
+        return;
+      }
+      await handleStaffScheduleRequest(staffSchedule, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/billing-hours")) {
+      if (!billingHours) {
+        sendJson(res, 404, { error: "billing hours are not configured on this server" });
+        return;
+      }
+      await handleBillingHoursRequest(billingHours, req, res, actor, url, onMutated);
       return;
     }
 
@@ -606,6 +655,7 @@ async function handleAccountsRequest(
       password: String(body["password"] ?? ""),
       role: body["role"] as UserRole,
       ...(typeof body["actorId"] === "string" && body["actorId"] ? { actorId: body["actorId"] } : {}),
+      ...(typeof body["displayName"] === "string" && body["displayName"] ? { displayName: body["displayName"] } : {}),
     });
     sendJson(res, 200, result);
     onMutated?.();
@@ -808,6 +858,178 @@ async function handleCasesRequest(
 
   if (segments.length === 1 && req.method === "GET") {
     sendJson(res, 200, cases.getCase(actor, segments[0]!));
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleMessagingRequest(
+  messaging: MessagingService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  const segments = url.pathname.replace(/^\/api\/messages\/?/, "").split("/").filter(Boolean);
+
+  if (segments.length === 1 && segments[0] === "announcements" && req.method === "GET") {
+    sendJson(res, 200, messaging.listAnnouncements(actor));
+    return;
+  }
+
+  if (segments.length === 1 && segments[0] === "announcements" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = messaging.postAnnouncement(actor, String(body["body"] ?? ""));
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 1 && segments[0] === "conversations" && req.method === "GET") {
+    sendJson(res, 200, messaging.listConversations(actor));
+    return;
+  }
+
+  if (segments.length === 2 && segments[0] === "conversations" && segments[1] === "direct" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = messaging.startDirectConversation(actor, String(body["otherActorId"] ?? ""));
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 2 && segments[0] === "conversations" && segments[1] === "group" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const memberActorIds = Array.isArray(body["memberActorIds"]) ? body["memberActorIds"].map(String) : [];
+    const result = messaging.createGroup(actor, String(body["name"] ?? ""), memberActorIds);
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (segments[0] === "conversations" && segments[1] && segments[2] === "messages") {
+    const conversationId = segments[1]!;
+    if (req.method === "GET") {
+      sendJson(res, 200, messaging.listMessages(actor, conversationId));
+      return;
+    }
+    if (req.method === "POST") {
+      const body = await readJsonBody(req);
+      const result = messaging.postMessage(actor, conversationId, String(body["body"] ?? ""));
+      sendJson(res, 200, result);
+      onMutated?.();
+      return;
+    }
+  }
+
+  if (segments[0] === "conversations" && segments[1] && segments[2] === "members") {
+    const conversationId = segments[1]!;
+    if (req.method === "POST") {
+      const body = await readJsonBody(req);
+      const result = messaging.addMember(actor, conversationId, String(body["actorId"] ?? ""));
+      sendJson(res, 200, result);
+      onMutated?.();
+      return;
+    }
+    if (req.method === "DELETE" && segments[3]) {
+      const result = messaging.removeMember(actor, conversationId, segments[3]!);
+      sendJson(res, 200, result);
+      onMutated?.();
+      return;
+    }
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleStaffScheduleRequest(
+  staffSchedule: StaffScheduleService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  const segments = url.pathname.replace(/^\/api\/staff-schedule\/?/, "").split("/").filter(Boolean);
+
+  if (segments[0] === "date" && segments[1] && req.method === "GET") {
+    sendJson(res, 200, staffSchedule.listForDate(actor, segments[1]!));
+    return;
+  }
+
+  if (segments[0] === "actor" && segments[1] && segments.length === 2 && req.method === "GET") {
+    sendJson(res, 200, staffSchedule.listForActor(actor, segments[1]!));
+    return;
+  }
+
+  if (segments[0] === "actor" && segments[1] && segments.length === 2 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = staffSchedule.setEntry(
+      actor,
+      segments[1]!,
+      String(body["date"] ?? ""),
+      body["status"] as StaffScheduleStatus,
+      typeof body["note"] === "string" && body["note"] ? body["note"] : undefined,
+    );
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (segments[0] === "actor" && segments[1] && segments.length === 3 && req.method === "DELETE") {
+    staffSchedule.removeEntry(actor, segments[1]!, segments[2]!);
+    sendJson(res, 200, { ok: true });
+    onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleBillingHoursRequest(
+  billingHours: BillingHoursService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  const segments = url.pathname.replace(/^\/api\/billing-hours\/?/, "").split("/").filter(Boolean);
+
+  if (segments.length === 1 && segments[0] === "mine" && req.method === "GET") {
+    sendJson(res, 200, billingHours.listMyHours(actor));
+    return;
+  }
+
+  if (segments[0] !== "matters" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const matterId = segments[1]!;
+
+  if (segments.length === 2 && req.method === "GET") {
+    sendJson(res, 200, billingHours.listMatterHours(actor, matterId));
+    return;
+  }
+
+  if (segments.length === 2 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = billingHours.logHours(actor, matterId, {
+      date: String(body["date"] ?? ""),
+      hours: Number(body["hours"]),
+      description: String(body["description"] ?? ""),
+    });
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 3 && req.method === "DELETE") {
+    billingHours.deleteEntry(actor, matterId, segments[2]!);
+    sendJson(res, 200, { ok: true });
+    onMutated?.();
     return;
   }
 

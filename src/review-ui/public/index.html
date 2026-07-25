@@ -261,6 +261,10 @@
     <button data-panel="cases" id="navCases" hidden><span class="dot"></span>Cases</button>
     <button data-panel="research" id="navResearch" hidden><span class="dot"></span>Research</button>
     <button data-panel="assistant" id="navAssistant" hidden><span class="dot"></span>Assistant</button>
+    <button data-panel="staff" id="navStaff"><span class="dot"></span>Staff</button>
+    <button data-panel="messages" id="navMessages"><span class="dot"></span>Messages</button>
+    <button data-panel="staff-schedule" id="navStaffSchedule"><span class="dot"></span>Schedule</button>
+    <button data-panel="billing" id="navBilling" hidden><span class="dot"></span>Billing</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
     <button data-panel="audit" id="navAudit" hidden><span class="dot"></span>Audit Log</button>
   </nav>
@@ -493,6 +497,123 @@
       </div>
     </section>
 
+    <!-- ===== Staff (every logged-in human) ===== -->
+    <section class="panel" id="panel-staff">
+      <p class="subtitle">Everyone on the team — initials shown here are also used as avatars in Messages.</p>
+      <div class="card">
+        <div class="field-row">
+          <h3 style="margin:0;flex:1 0 100%;">Directory</h3>
+          <button class="btn" id="refreshStaff">Refresh</button>
+        </div>
+        <ul id="staffList" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- ===== Messages (every logged-in human) ===== -->
+    <section class="panel" id="panel-messages">
+      <p class="subtitle">Direct messages, group chats, and firm-wide announcements. Nothing here is client-facing work product.</p>
+      <div class="card">
+        <h3>Announcements</h3>
+        <div class="chat-window">
+          <div class="chat-log" id="announcementsLog"></div>
+          <div class="chat-input">
+            <input id="announcementText" type="text" placeholder="Post an announcement to everyone…" />
+            <button class="btn primary" id="announcementSend">Post</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>New conversation</h3>
+        <div class="field-row">
+          <label class="field">Start direct message with <input id="dmActorId" placeholder="actor id, e.g. p1" /></label>
+          <button class="btn" id="startDm">Start DM</button>
+        </div>
+        <div class="field-row">
+          <label class="field">New group name <input id="groupName" /></label>
+          <label class="field grow">Members (comma-separated actor ids) <input id="groupMembers" placeholder="p1, r1" /></label>
+          <button class="btn" id="startGroup">Create group</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="field-row">
+          <h3 style="margin:0;flex:1 0 100%;">Your conversations</h3>
+          <button class="btn" id="refreshConversations">Refresh</button>
+        </div>
+        <ul id="conversationList" class="list"></ul>
+        <div class="chat-window" id="conversationWindow" style="display:none;">
+          <div class="chat-log" id="conversationLog"></div>
+          <div class="chat-input">
+            <input id="conversationText" type="text" placeholder="Message…" />
+            <button class="btn primary" id="conversationSend">Send</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Staff Schedule (every logged-in human) ===== -->
+    <section class="panel" id="panel-staff-schedule">
+      <p class="subtitle">Who's in the office, remote, or out, by date. Anyone can set their own day; an attorney can set anyone's.</p>
+      <div class="card">
+        <h3>Set an entry</h3>
+        <div class="field-row">
+          <label class="field">Actor ID <input id="scheduleActorId" placeholder="your actor id, or anyone's if you're an attorney" /></label>
+          <label class="field">Date <input id="scheduleDate" type="date" /></label>
+          <label class="field">Status
+            <select id="scheduleStatus">
+              <option value="in_office">in office</option>
+              <option value="remote">remote</option>
+              <option value="out">out</option>
+            </select>
+          </label>
+          <label class="field grow">Note (optional) <input id="scheduleNote" /></label>
+          <button class="btn primary" id="setScheduleEntry">Save</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="field-row">
+          <label class="field">View who's in on <input id="scheduleViewDate" type="date" /></label>
+          <button class="btn" id="loadScheduleForDate">Load</button>
+        </div>
+        <ul id="scheduleForDateList" class="list"></ul>
+      </div>
+      <div class="card">
+        <div class="field-row">
+          <label class="field">View an actor's upcoming entries <input id="scheduleViewActorId" placeholder="actor id" /></label>
+          <button class="btn" id="loadScheduleForActor">Load</button>
+        </div>
+        <ul id="scheduleForActorList" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- ===== Billing (paralegal/attorney) ===== -->
+    <section class="panel" id="panel-billing">
+      <p class="subtitle">Billable hours logged against a matter — internal timekeeping, distinct from AI-utilization telemetry.</p>
+      <div class="card">
+        <h3>Log hours</h3>
+        <div class="field-row">
+          <label class="field">Matter ID <input id="billingMatterId" value="m1" /></label>
+          <label class="field">Date <input id="billingDate" type="date" /></label>
+          <label class="field">Hours <input id="billingHoursValue" type="number" step="0.1" min="0.1" /></label>
+          <label class="field grow">Description <input id="billingDescription" /></label>
+          <button class="btn primary" id="logBillingHours">Log</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="field-row">
+          <h3 style="margin:0;flex:1 0 100%;">Hours on this matter</h3>
+          <button class="btn" id="loadBillingMatter">Load matter</button>
+        </div>
+        <ul id="billingMatterList" class="list"></ul>
+      </div>
+      <div class="card">
+        <div class="field-row">
+          <h3 style="margin:0;flex:1 0 100%;">My hours (all matters)</h3>
+          <button class="btn" id="loadMyBillingHours">Refresh</button>
+        </div>
+        <ul id="billingMineList" class="list"></ul>
+      </div>
+    </section>
+
     <!-- ===== Accounts (attorney-only) ===== -->
     <section class="panel" id="panel-accounts">
       <p class="subtitle">Attorney-only. Add a login for a colleague, or disable one — access is revoked immediately, including "remember me" sessions. At least one enabled attorney account must always remain.</p>
@@ -500,6 +621,7 @@
         <h3>Add an account</h3>
         <div class="field-row">
           <label class="field">Username <input id="newAccountUsername" /></label>
+          <label class="field">Full name <input id="newAccountDisplayName" placeholder="for Staff/Messages/Schedule" /></label>
           <label class="field">Temporary password <input id="newAccountPassword" type="text" placeholder="8+ characters" /></label>
           <label class="field">Role
             <select id="newAccountRole">
@@ -596,6 +718,7 @@ async function loadWhoami() {
       document.getElementById("navCases").hidden = false;
       document.getElementById("navResearch").hidden = false;
       document.getElementById("navAssistant").hidden = false;
+      document.getElementById("navBilling").hidden = false;
     }
     // Review Queue and Deadlines are attorney-only server-side (ReviewGateService gates
     // every method, including reads) — only fetch them once we know the role, and only
@@ -1310,6 +1433,305 @@ document.getElementById("researchQuery").addEventListener("keydown", (e) => {
 document.getElementById("loadResearchMatter").addEventListener("click", loadResearchMatter);
 document.getElementById("navResearch").addEventListener("click", loadResearchMatter);
 
+/* ===== Staff ===== */
+async function loadStaff() {
+  showError("");
+  try {
+    const members = await api("/api/staff");
+    const list = document.getElementById("staffList");
+    list.innerHTML = "";
+    for (const member of members) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<span class="badge">${escapeHtml(member.initials)}</span>
+        <strong>${escapeHtml(member.displayName)}</strong>
+        <span class="badge">${escapeHtml(member.role)}</span>
+        ${member.disabled ? `<span class="badge rejected">disabled</span>` : ""}
+        ${member.matterAssignment ? `<span class="badge confirmed">matter: ${escapeHtml(member.matterAssignment.matterId)}</span>` : ""}
+        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.2rem;">actor id: ${escapeHtml(member.actorId)} (username: ${escapeHtml(member.username)})</div>`;
+      list.appendChild(li);
+    }
+    if (members.length === 0) list.innerHTML = '<li class="static empty">No staff yet.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("refreshStaff").addEventListener("click", loadStaff);
+document.getElementById("navStaff").addEventListener("click", loadStaff);
+
+/* ===== Messages ===== */
+let currentConversationId = null;
+
+function appendMessageBubble(logId, message) {
+  const log = document.getElementById(logId);
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  const time = new Date(message.sentAt).toLocaleString();
+  bubble.innerHTML = `<strong>${escapeHtml(message.senderName)}</strong> <span style="color:var(--text-muted);font-size:0.75rem;">${time}</span><div>${escapeHtml(message.body)}</div>`;
+  log.appendChild(bubble);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function loadAnnouncements() {
+  showError("");
+  try {
+    const messages = await api("/api/messages/announcements");
+    const log = document.getElementById("announcementsLog");
+    log.innerHTML = "";
+    for (const message of messages) appendMessageBubble("announcementsLog", message);
+    if (messages.length === 0) log.innerHTML = '<div class="bubble" style="opacity:0.6;">No announcements yet.</div>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function postAnnouncement() {
+  showError("");
+  try {
+    const input = document.getElementById("announcementText");
+    const body = input.value.trim();
+    if (!body) return;
+    await api("/api/messages/announcements", { method: "POST", body: JSON.stringify({ body }) });
+    input.value = "";
+    await loadAnnouncements();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadConversations() {
+  showError("");
+  try {
+    const conversations = await api("/api/messages/conversations");
+    const list = document.getElementById("conversationList");
+    list.innerHTML = "";
+    for (const conversation of conversations) {
+      if (conversation.kind === "announcement") continue;
+      const li = document.createElement("li");
+      li.classList.add("static");
+      const label =
+        conversation.kind === "group"
+          ? conversation.name
+          : conversation.participants.map((p) => p.displayName).join(", ");
+      li.innerHTML = `<strong>${escapeHtml(label || "(conversation)")}</strong> <span class="badge">${escapeHtml(conversation.kind)}</span>`;
+      const openBtn = mkButton("Open", () => openConversation(conversation.id));
+      li.appendChild(document.createElement("br"));
+      li.appendChild(openBtn);
+      list.appendChild(li);
+    }
+    if (list.innerHTML === "") list.innerHTML = '<li class="static empty">No conversations yet — start a DM or group above.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function openConversation(conversationId) {
+  showError("");
+  try {
+    currentConversationId = conversationId;
+    document.getElementById("conversationWindow").style.display = "";
+    const messages = await api(`/api/messages/conversations/${conversationId}/messages`);
+    const log = document.getElementById("conversationLog");
+    log.innerHTML = "";
+    for (const message of messages) appendMessageBubble("conversationLog", message);
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function sendConversationMessage() {
+  showError("");
+  try {
+    if (!currentConversationId) return;
+    const input = document.getElementById("conversationText");
+    const body = input.value.trim();
+    if (!body) return;
+    await api(`/api/messages/conversations/${currentConversationId}/messages`, { method: "POST", body: JSON.stringify({ body }) });
+    input.value = "";
+    await openConversation(currentConversationId);
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("announcementSend").addEventListener("click", postAnnouncement);
+document.getElementById("announcementText").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") postAnnouncement();
+});
+document.getElementById("conversationSend").addEventListener("click", sendConversationMessage);
+document.getElementById("conversationText").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendConversationMessage();
+});
+document.getElementById("startDm").addEventListener("click", async () => {
+  showError("");
+  try {
+    const otherActorId = document.getElementById("dmActorId").value.trim();
+    if (!otherActorId) return;
+    const conversation = await api("/api/messages/conversations/direct", { method: "POST", body: JSON.stringify({ otherActorId }) });
+    document.getElementById("dmActorId").value = "";
+    await loadConversations();
+    await openConversation(conversation.id);
+  } catch (err) {
+    showError(err.message);
+  }
+});
+document.getElementById("startGroup").addEventListener("click", async () => {
+  showError("");
+  try {
+    const name = document.getElementById("groupName").value.trim();
+    const memberActorIds = document
+      .getElementById("groupMembers")
+      .value.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!name) return;
+    const conversation = await api("/api/messages/conversations/group", { method: "POST", body: JSON.stringify({ name, memberActorIds }) });
+    document.getElementById("groupName").value = "";
+    document.getElementById("groupMembers").value = "";
+    await loadConversations();
+    await openConversation(conversation.id);
+  } catch (err) {
+    showError(err.message);
+  }
+});
+document.getElementById("refreshConversations").addEventListener("click", loadConversations);
+document.getElementById("navMessages").addEventListener("click", () => {
+  loadAnnouncements();
+  loadConversations();
+});
+
+/* ===== Staff Schedule ===== */
+function renderScheduleEntries(listId, entries, { showActorId }) {
+  const list = document.getElementById(listId);
+  list.innerHTML = "";
+  for (const entry of entries) {
+    const li = document.createElement("li");
+    li.classList.add("static");
+    li.innerHTML = `${showActorId ? `<strong>${escapeHtml(entry.actorId)}</strong> ` : ""}<span class="badge">${escapeHtml(entry.date)}</span>
+      <span class="badge ${entry.status === "in_office" ? "approved" : entry.status === "remote" ? "pending_review" : "rejected"}">${escapeHtml(entry.status.replace("_", " "))}</span>
+      ${entry.note ? `<div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.2rem;">${escapeHtml(entry.note)}</div>` : ""}`;
+    list.appendChild(li);
+  }
+  if (entries.length === 0) list.innerHTML = '<li class="static empty">No entries.</li>';
+}
+
+document.getElementById("setScheduleEntry").addEventListener("click", async () => {
+  showError("");
+  try {
+    const actorId = document.getElementById("scheduleActorId").value.trim();
+    const date = document.getElementById("scheduleDate").value;
+    const status = document.getElementById("scheduleStatus").value;
+    const note = document.getElementById("scheduleNote").value.trim();
+    if (!actorId || !date) return;
+    await api(`/api/staff-schedule/actor/${encodeURIComponent(actorId)}`, {
+      method: "POST",
+      body: JSON.stringify({ date, status, ...(note ? { note } : {}) }),
+    });
+    document.getElementById("scheduleNote").value = "";
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+document.getElementById("loadScheduleForDate").addEventListener("click", async () => {
+  showError("");
+  try {
+    const date = document.getElementById("scheduleViewDate").value;
+    if (!date) return;
+    const entries = await api(`/api/staff-schedule/date/${encodeURIComponent(date)}`);
+    renderScheduleEntries("scheduleForDateList", entries, { showActorId: true });
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+document.getElementById("loadScheduleForActor").addEventListener("click", async () => {
+  showError("");
+  try {
+    const actorId = document.getElementById("scheduleViewActorId").value.trim();
+    if (!actorId) return;
+    const entries = await api(`/api/staff-schedule/actor/${encodeURIComponent(actorId)}`);
+    renderScheduleEntries("scheduleForActorList", entries, { showActorId: false });
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+/* ===== Billing ===== */
+function renderBillingEntries(listId, entries, { showActorId }) {
+  const list = document.getElementById(listId);
+  list.innerHTML = "";
+  let total = 0;
+  for (const entry of entries) {
+    total += entry.hours;
+    const li = document.createElement("li");
+    li.classList.add("static");
+    li.innerHTML = `${showActorId ? `<strong>${escapeHtml(entry.actorId)}</strong> ` : ""}<span class="badge">${escapeHtml(entry.date)}</span>
+      <span class="badge confirmed">${entry.hours}h</span>
+      <div style="margin-top:0.2rem;">${escapeHtml(entry.description)}</div>`;
+    list.appendChild(li);
+  }
+  if (entries.length === 0) {
+    list.innerHTML = '<li class="static empty">No hours logged yet.</li>';
+  } else {
+    const totalLi = document.createElement("li");
+    totalLi.classList.add("static");
+    totalLi.innerHTML = `<strong>Total: ${total.toFixed(1)}h</strong>`;
+    list.appendChild(totalLi);
+  }
+}
+
+document.getElementById("logBillingHours").addEventListener("click", async () => {
+  showError("");
+  try {
+    const matterId = document.getElementById("billingMatterId").value.trim();
+    const date = document.getElementById("billingDate").value;
+    const hours = Number(document.getElementById("billingHoursValue").value);
+    const description = document.getElementById("billingDescription").value.trim();
+    if (!matterId || !date || !hours || !description) return;
+    await api(`/api/billing-hours/matters/${encodeURIComponent(matterId)}`, {
+      method: "POST",
+      body: JSON.stringify({ date, hours, description }),
+    });
+    document.getElementById("billingHoursValue").value = "";
+    document.getElementById("billingDescription").value = "";
+    await loadBillingMatter();
+    await loadMyBillingHours();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+async function loadBillingMatter() {
+  showError("");
+  try {
+    const matterId = document.getElementById("billingMatterId").value.trim();
+    if (!matterId) return;
+    const entries = await api(`/api/billing-hours/matters/${encodeURIComponent(matterId)}`);
+    renderBillingEntries("billingMatterList", entries, { showActorId: true });
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadMyBillingHours() {
+  showError("");
+  try {
+    const entries = await api("/api/billing-hours/mine");
+    renderBillingEntries("billingMineList", entries, { showActorId: false });
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("loadBillingMatter").addEventListener("click", loadBillingMatter);
+document.getElementById("loadMyBillingHours").addEventListener("click", loadMyBillingHours);
+document.getElementById("navBilling").addEventListener("click", () => {
+  loadBillingMatter();
+  loadMyBillingHours();
+});
+
 /* ===== Assistant ===== */
 let assistantSessionId = null;
 
@@ -1377,6 +1799,7 @@ async function loadAccounts() {
       const li = document.createElement("li");
       li.classList.add("static");
       li.innerHTML = `<span class="status-dot ${acct.disabled ? "disabled" : ""}"></span><strong>${acct.username}</strong>
+        <span class="muted">${escapeHtml(acct.displayName)}</span>
         <span class="badge">${acct.role}</span>
         <span class="badge ${acct.disabled ? "rejected" : "approved"}">${acct.disabled ? "disabled" : "enabled"}</span>
         ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${acct.matterAssignment.matterId}</span>` : ""}
@@ -1450,10 +1873,12 @@ async function createAccount() {
   showError("");
   try {
     const username = document.getElementById("newAccountUsername").value;
+    const displayName = document.getElementById("newAccountDisplayName").value;
     const password = document.getElementById("newAccountPassword").value;
     const role = document.getElementById("newAccountRole").value;
-    await api("/api/accounts", { method: "POST", body: JSON.stringify({ username, password, role }) });
+    await api("/api/accounts", { method: "POST", body: JSON.stringify({ username, displayName, password, role }) });
     document.getElementById("newAccountUsername").value = "";
+    document.getElementById("newAccountDisplayName").value = "";
     document.getElementById("newAccountPassword").value = "";
     await loadAccounts();
   } catch (err) {

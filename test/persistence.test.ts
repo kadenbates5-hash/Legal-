@@ -235,4 +235,38 @@ describe("system-state persistence integration", () => {
     expect(reloaded.researchLibrary.get(saved.id)).toEqual(saved);
     expect(reloaded.researchLibrary.listByMatter("m1")).toHaveLength(1);
   });
+
+  it("persists and reloads messaging conversations/messages across a process restart", async () => {
+    const state = await loadSystemState(filePath);
+    const conversation = state.messaging.getOrCreateDirectConversation("a1", "p1");
+    state.messaging.postMessage(conversation.id, "a1", "hello");
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.messaging.getOrCreateDirectConversation("p1", "a1").id).toBe(conversation.id);
+    expect(reloaded.messaging.listMessages(conversation.id).map((m) => m.body)).toEqual(["hello"]);
+  });
+
+  it("persists and reloads staff schedule entries across a process restart", async () => {
+    const state = await loadSystemState(filePath);
+    state.staffSchedule.setEntry("a1", "2026-07-28", "in_office");
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.staffSchedule.listForActor("a1")).toHaveLength(1);
+    expect(reloaded.staffSchedule.listForActor("a1")[0]!.status).toBe("in_office");
+  });
+
+  it("persists and reloads billing hours entries across a process restart", async () => {
+    const state = await loadSystemState(filePath);
+    const entry = state.billingHours.log({ matterId: "m1", actorId: "p1", date: "2026-07-28", hours: 2, description: "Discovery review" });
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.billingHours.get(entry.id)).toEqual(entry);
+    expect(reloaded.billingHours.listByMatter("m1")).toHaveLength(1);
+  });
 });

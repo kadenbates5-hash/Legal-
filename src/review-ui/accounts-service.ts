@@ -28,6 +28,7 @@ export interface AccountSummary {
   username: string;
   role: UserRole;
   actorId: string;
+  displayName: string;
   disabled: boolean;
   /** Set after an attorney resets this account's password; cleared once the holder changes it themselves. */
   mustChangePassword: boolean;
@@ -58,6 +59,7 @@ export class AccountsService {
       username: user.username,
       role: user.role,
       actorId: user.actorId,
+      displayName: user.displayName,
       disabled: user.disabled,
       mustChangePassword: user.mustChangePassword,
       ...(matterAssignment ? { matterAssignment } : {}),
@@ -69,7 +71,7 @@ export class AccountsService {
     return this.#auth.listUsers().map((u) => this.#summarize(u));
   }
 
-  create(actor: Actor, params: { username: string; password: string; role: UserRole; actorId?: string }): AccountSummary {
+  create(actor: Actor, params: { username: string; password: string; role: UserRole; actorId?: string; displayName?: string }): AccountSummary {
     requireAttorney(actor);
     return this.#summarize(this.#auth.createUser(params));
   }

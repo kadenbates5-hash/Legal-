@@ -25,6 +25,8 @@ export interface User {
   readonly role: UserRole;
   /** The Actor.id this user maps to for authorization checks (access-control, scheduling assignment, etc.). */
   readonly actorId: string;
+  /** A person's full name, for the Staff directory/messaging/schedule panels — falls back to `username` if never set. */
+  readonly displayName: string;
   /** Disabled accounts can never log in again and have every live session revoked immediately — see `setDisabled`. */
   readonly disabled: boolean;
   /** Set by `resetPassword()` (an attorney set a temporary password on this user's behalf); cleared by `changePassword()`. Surfaced via `/api/me` and the Accounts panel — there's no forced-change flow yet, just a flag the UI can nudge on. */
@@ -91,7 +93,7 @@ export class AuthService {
   }
 
   /** Creates a login-capable account. Never overwrites an existing username. */
-  createUser(params: { username: string; password: string; role: UserRole; actorId?: string }): User {
+  createUser(params: { username: string; password: string; role: UserRole; actorId?: string; displayName?: string }): User {
     const key = params.username.trim().toLowerCase();
     if (!key) throw new AuthError("username must not be empty");
     if (params.password.length < 8) throw new AuthError("password must be at least 8 characters");
@@ -106,6 +108,7 @@ export class AuthService {
       salt,
       role: params.role,
       actorId: params.actorId ?? params.username,
+      displayName: params.displayName?.trim() || params.username,
       disabled: false,
       mustChangePassword: false,
     };
@@ -299,7 +302,12 @@ export class AuthService {
     const service = new AuthService();
     for (const user of snapshot.users) {
       // `disabled`/`mustChangePassword` default to false for state files saved before these fields existed.
-      const restored: User = { ...user, disabled: user.disabled ?? false, mustChangePassword: user.mustChangePassword ?? false };
+      const restored: User = {
+        ...user,
+        disabled: user.disabled ?? false,
+        mustChangePassword: user.mustChangePassword ?? false,
+        displayName: user.displayName || user.username,
+      };
       service.#usersById.set(user.id, restored);
       service.#usersByUsername.set(user.username.trim().toLowerCase(), restored);
     }

@@ -500,6 +500,87 @@ circumstance. It also doesn't persist conversation history across a
 server restart — that's a deliberate scope line (ephemeral scratch
 workspace), not an oversight, matching `intake-demo.ts`'s reasoning.
 
+## Staff directory, messaging, staff schedule, and billing hours (resolved)
+
+Four small, related additions, all internal-only (never client-facing, so
+none of them touch the review-gate): who's on the team, how they talk to
+each other, when they're in the office, and how they log billable time.
+
+- `core/auth.ts` — `User` gained a `displayName` field (a person's full
+  name, defaulting to `username` if never set) via `createUser({..,
+  displayName })`. Initials (for avatars in Staff/Messages) are always
+  derived from it at read time, never stored — see `initialsFor()` below.
+- `review-ui/staff-service.ts` — `StaffService`, backing the "Staff"
+  panel: a read-only directory of every account (username, display name,
+  initials, role, disabled status, and a paralegal's current matter
+  assignment) via `AuthService.listUsers()`/`AccessControl
+  .getParalegalAssignment()`. Open to every logged-in human (messaging
+  and scheduling both need "who else exists in the system" to address);
+  denies only the `"system"` machine credential, which is never created
+  via `createUser` and so can never appear here anyway.
+  `initialsFor(displayName)` is exported standalone since it's a pure
+  presentation-layer function: a single-word name takes its first two
+  characters, a multi-word name takes the first letter of the first and
+  last words, both uppercased.
+- `core/messaging.ts` / `review-ui/messaging-service.ts` — internal
+  staff chat, backing the "Messages" panel. `MessagingStore` (core) knows
+  three `Conversation` kinds: `"direct"` (exactly two participants,
+  created lazily the first time one actor messages another and reused
+  after that), `"group"` (named, explicit member list, creator can
+  add/remove others, any member can leave), and `"announcement"` — a
+  single well-known conversation (`ANNOUNCEMENTS_CONVERSATION_ID`) that
+  always exists with no membership list at all: every authenticated
+  human can both read *and post* to it. That's a deliberate design
+  choice, not an oversight — the feature request named no restriction on
+  who can announce, so this system has no separate "who can announce"
+  role, unlike the review-gate's attorney-only checkpoint. `Messaging
+  Service` is the actual access gate (direct/group conversations require
+  participancy; announcements don't) plus display-name enrichment via
+  `AuthService`, since a raw `actorId` means nothing in the UI.
+- `core/staff-schedule.ts` / `review-ui/staff-schedule-service.ts` —
+  who's in the office/remote/out, one entry per (actor, date), backing
+  the "Schedule" panel. Deliberately separate from `core/scheduling.ts`'s
+  `SchedulingService`, which books client consultations — this tracks
+  the staff's own whereabouts, not client-facing appointments. Read
+  access is open to every logged-in human (the point is everyone can see
+  who's in when); write access is narrower — anyone can set their own
+  day, but only an attorney can set someone else's, the same
+  self-service-vs-attorney-gated split as password change vs. password
+  reset.
+- `core/billing-hours.ts` / `review-ui/billing-hours-service.ts` —
+  billable-hours entries a lawyer or paralegal logs against a matter,
+  backing the "Billing" panel. Deliberately distinct from
+  `core/utilization.ts`'s `UtilizationTracker`, which is internal
+  AI-utilization telemetry explicitly walled off from client billing —
+  this is the actual human timekeeping record that would feed a client
+  invoice (generating the invoice itself is out of scope, same reasoning
+  as scheduling reminders/calendar sync staying "for a host process to
+  poll and actually send/run"). Same shape as `DocumentsService`: every
+  method authorizes the matter via `AccessControl`'s existing
+  `"billing_internal"` category before touching the store, since an
+  entry is exposed over HTTP by matter id/entry id that any
+  authenticated caller could otherwise name arbitrarily.
+- `server.ts` wires these as `GET /api/staff`; `GET|POST /api/messages/
+  conversations`, `POST /api/messages/conversations/direct`,
+  `POST /api/messages/conversations/group`, `GET|POST /api/messages/
+  conversations/:id/messages`, `POST|DELETE /api/messages/conversations/
+  :id/members[/:actorId]`, and `GET|POST /api/messages/announcements`;
+  `GET|POST /api/staff-schedule/actor/:actorId`, `DELETE /api/
+  staff-schedule/actor/:actorId/:date`, and `GET /api/staff-schedule/
+  date/:date`; and `GET /api/billing-hours/mine` plus `GET|POST /api/
+  billing-hours/matters/:matterId` / `DELETE /api/billing-hours/matters/
+  :matterId/:id` — each 404s if the corresponding service wasn't passed
+  to `createReviewServer`, same "absent config means the surface doesn't
+  exist" pattern as every other optional panel.
+- All four stores persist through the same `toSnapshot()`/
+  `fromSnapshot()` pattern as everything else — see "Persistence" below.
+
+What this doesn't do: give an announcement poster any special role check
+(intentional, per above), push staff-schedule entries anywhere external
+(e.g. no calendar sync, unlike deadline confirmation), or generate an
+actual client invoice from logged billing hours — it's the timekeeping
+record, not the billing pipeline.
+
 ## Real authentication (§5/§6 — resolved)
 
 `src/core/auth.ts` — `AuthService`. Replaces the earlier
@@ -591,10 +672,12 @@ distinct trust levels:
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over ten panels — Review Queue, Deadlines, Scheduling,
-Live Intake Demo, Drafting, Cases, Research, Assistant, Accounts, and
-Audit Log (the last six hidden from the nav for roles that can't use
-them). Review Queue and
+between sections) over fourteen panels — Review Queue, Deadlines,
+Scheduling, Live Intake Demo, Drafting, Cases, Research, Assistant,
+Staff, Messages, Schedule, Billing, Accounts, and Audit Log (Drafting/
+Cases/Research/Assistant/Billing and Accounts/Audit Log hidden from the
+nav for roles that can't use them; Staff/Messages/Schedule are open to
+every logged-in human so they're never hidden). Review Queue and
 Deadlines are themselves attorney-only server-side (`ReviewGateService`
 gates every method, including reads), so the dashboard only fires their
 initial load once `GET /api/me` confirms the role — a non-attorney
@@ -629,6 +712,10 @@ session sees an inline "attorney-only" message instead of a background
   — see "Legal research — CourtListener" above for what it does.
 - `assistant-service.ts` — `AssistantService`, backing the "Assistant"
   panel — see "AI Assistant — Claude" above for what it does.
+- `staff-service.ts` / `messaging-service.ts` / `staff-schedule-service.ts`
+  / `billing-hours-service.ts` — backing the "Staff", "Messages",
+  "Schedule", and "Billing" panels respectively — see "Staff directory,
+  messaging, staff schedule, and billing hours" above for what each does.
 - `audit-service.ts` — `AuditService`, backing the "Audit Log" panel.
   `AuditLog.read()` already takes an explicit counsel-aware reader role
   (`"attorney"` vs. `"system_admin_no_content"`), but that's a parameter
@@ -643,12 +730,15 @@ session sees an inline "attorney-only" message instead of a background
   for the calendar integration's machine credential. `GET /` redirects to
   `/login.html` when there's no valid session; `POST /api/logout` clears
   it. `/api/intake/*`, `/api/accounts*`, `/api/drafting/*`,
-  `/api/documents/*`, `/api/cases*`, `/api/audit*`, `/api/research/*`, and
-  `/api/assistant/*` are 404 if no `IntakeDemoSessions`/`AccountsService`/
-  `DraftingService`/`DocumentsService`/`CasesService`/`AuditService`/
-  `ResearchService`/`AssistantService` was passed to `createReviewServer`,
-  respectively. `npm run build` copies `public/` into `dist/` since `tsc`
-  only compiles `.ts` files.
+  `/api/documents/*`, `/api/cases*`, `/api/audit*`, `/api/research/*`,
+  `/api/assistant/*`, `/api/staff`, `/api/messages/*`,
+  `/api/staff-schedule/*`, and `/api/billing-hours/*` are 404 if no
+  `IntakeDemoSessions`/`AccountsService`/`DraftingService`/
+  `DocumentsService`/`CasesService`/`AuditService`/`ResearchService`/
+  `AssistantService`/`StaffService`/`MessagingService`/
+  `StaffScheduleService`/`BillingHoursService` was passed to
+  `createReviewServer`, respectively. `npm run build` copies `public/`
+  into `dist/` since `tsc` only compiles `.ts` files.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
 - `public/index.html` — the Docket app shell: a dark sidebar (brand +
@@ -667,16 +757,28 @@ session sees an inline "attorney-only" message instead of a background
   matter" on any result, and a per-matter quick-access list with a
   Remove action — same role gate as Drafting), Assistant (a chat window
   driving `assistant-service.ts` — "Start new conversation" then ask it
-  to search/draft/schedule; same role gate as Drafting), Accounts (add a
-  login, disable/re-enable one, and for paralegal accounts specifically,
-  assign/unassign a matter — nav item hidden unless role is `attorney`),
-  and Audit Log (every access grant/denial and work-product transition,
-  append-only, optionally filtered by matter id — nav item hidden unless
-  role is `attorney`). All six hides are client-side convenience only;
-  the real gate is server-side in
+  to search/draft/schedule; same role gate as Drafting), Staff (a
+  read-only directory of every account — username, display name,
+  initials, role, and a paralegal's matter assignment — open to every
+  logged-in human, never hidden), Messages (an Announcements chat window
+  every human can post to, a "start DM"/"create group" form, and a
+  conversation list with an "Open" button into a chat window — also
+  never hidden), Schedule (set your own or, as an attorney, anyone's
+  in-office/remote/out entry for a date; view everyone's status for a
+  date or one actor's upcoming entries — also never hidden), Billing (log
+  hours against a matter with a date/hours/description, view a matter's
+  logged hours with a running total, and view your own hours across every
+  matter — same role gate as Drafting), Accounts (add a login with a
+  username/full name/temporary password/role, disable/re-enable one, and
+  for paralegal accounts specifically, assign/unassign a matter — nav
+  item hidden unless role is `attorney`), and Audit Log (every access
+  grant/denial and work-product transition, append-only, optionally
+  filtered by matter id — nav item hidden unless role is `attorney`). The
+  Drafting/Cases/Research/Assistant/Billing and Accounts/Audit Log hides
+  are client-side convenience only; the real gate is server-side in
   `AccountsService`/`DraftingService`/`DocumentsService`/`CasesService`/
-  `ResearchService`/`AssistantService`/`AuditService`. Any `401` from the API redirects the
-  browser back to `/login.html`.
+  `ResearchService`/`AssistantService`/`BillingHoursService`/`AuditService`.
+  Any `401` from the API redirects the browser back to `/login.html`.
 - `start.ts`'s boot-time bootstrap: if no accounts exist yet in the
   persisted state, it creates them from `ATTORNEY_USERNAME`/
   `ATTORNEY_PASSWORD` (and optionally `PARALEGAL_USERNAME`/
@@ -727,12 +829,14 @@ two ways now: file-backed by default, or a real Postgres database when
   every connect, so there's no separate migration step to run first.
 - `system-state.ts` — bundles the audit log, utilization tracker,
   work-product store, document store, research library, deadline tracker,
-  scheduling service, auth, and access control into one document via
+  scheduling service, auth, access control, messaging store, staff
+  schedule store, and billing hours store into one document via
   `loadSystemState`/`saveSystemState`, which accept either a `StateStore`
   or (for convenience/backward compatibility) a plain file-path string.
 - Every stateful core object (`AuditLog`, `UtilizationTracker`,
   `WorkProduct`, `WorkProductStore`, `DocumentStore`, `ResearchLibrary`,
-  `DeadlineTracker`, `SchedulingService`, `AuthService`, `AccessControl`) has
+  `DeadlineTracker`, `SchedulingService`, `AuthService`, `AccessControl`,
+  `MessagingStore`, `StaffScheduleStore`, `BillingHoursStore`) has
   `toSnapshot()`/`fromSnapshot()` round-tripping its exact state to plain
   data — including `WorkProduct` states like `approved`/`released` that
   the normal constructor and transition methods can't reach directly. A

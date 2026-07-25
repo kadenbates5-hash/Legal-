@@ -22,6 +22,10 @@ import { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { VoiceboxSpeechToText, VoiceboxTextToSpeech } from "../integrations/voicebox.js";
 import { AssistantService } from "./assistant-service.js";
 import { AnthropicClient } from "../integrations/anthropic.js";
+import { StaffService } from "./staff-service.js";
+import { MessagingService } from "./messaging-service.js";
+import { StaffScheduleService } from "./staff-schedule-service.js";
+import { BillingHoursService } from "./billing-hours-service.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -189,6 +193,18 @@ const assistant = ANTHROPIC_API_KEY
     })
   : undefined;
 
+/** Backs the "Staff" panel: every logged-in human can see who else is on the team. */
+const staff = new StaffService(state.auth, state.accessControl);
+
+/** Backs the "Messages" panel: direct/group chat plus firm-wide announcements. */
+const messaging = new MessagingService(state.messaging, state.auth);
+
+/** Backs the "Schedule" panel: who's in the office/remote/out, per day. */
+const staffSchedule = new StaffScheduleService(state.staffSchedule);
+
+/** Backs the "Billing" panel: billable hours logged by lawyers/paralegals against a matter. */
+const billingHours = new BillingHoursService({ accessControl: state.accessControl, store: state.billingHours });
+
 /**
  * TLS is terminated upstream by a reverse proxy/load balancer, not by this
  * Node process — set TRUST_PROXY=true only when actually deployed behind
@@ -245,6 +261,10 @@ const server = createReviewServer(service, state.auth, {
   cases,
   audit,
   research,
+  staff,
+  messaging,
+  staffSchedule,
+  billingHours,
   trustProxy,
   ...(assistant ? { assistant } : {}),
   ...voiceOptions,

@@ -8,6 +8,9 @@ import { DeadlineTracker, type DeadlineCalculation } from "../core/deadline.js";
 import { SchedulingService, type Appointment } from "../core/scheduling.js";
 import { AuthService, type AuthSnapshot } from "../core/auth.js";
 import { AccessControl, type ParalegalAssignment } from "../core/access-control.js";
+import { MessagingStore, type MessagingSnapshot } from "../core/messaging.js";
+import { StaffScheduleStore, type StaffScheduleEntry } from "../core/staff-schedule.js";
+import { BillingHoursStore, type BillingHoursEntry } from "../core/billing-hours.js";
 import type { FirmConfig } from "../config/firm-config.js";
 import { fileStateStore, type StateStore } from "./state-store.js";
 
@@ -37,6 +40,12 @@ export interface SystemStateSnapshot {
   documents?: CaseDocument[];
   /** Saved statute/case-law references (see core/research-library.ts), backing the Research panel's "quick access" list. */
   savedReferences?: SavedReference[];
+  /** Direct/group/announcement conversations and their messages (see core/messaging.ts), backing the Messages panel. */
+  messaging?: MessagingSnapshot;
+  /** Per-staff-member, per-date in-office/remote/out entries (see core/staff-schedule.ts), backing the Schedule panel's staff-availability view. */
+  staffSchedule?: StaffScheduleEntry[];
+  /** Billable-hours entries logged against a matter (see core/billing-hours.ts), backing the Billing panel. */
+  billingHours?: BillingHoursEntry[];
 }
 
 export interface SystemState {
@@ -50,6 +59,9 @@ export interface SystemState {
   accessControl: AccessControl;
   documentStore: DocumentStore;
   researchLibrary: ResearchLibrary;
+  messaging: MessagingStore;
+  staffSchedule: StaffScheduleStore;
+  billingHours: BillingHoursStore;
 }
 
 export interface LoadSystemStateOptions {
@@ -69,6 +81,9 @@ function emptySnapshot(): SystemStateSnapshot {
     paralegalAssignments: [],
     documents: [],
     savedReferences: [],
+    messaging: { conversations: [], messages: [] },
+    staffSchedule: [],
+    billingHours: [],
   };
 }
 
@@ -87,7 +102,23 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const accessControl = AccessControl.fromSnapshot(auditLog, snapshot.paralegalAssignments ?? []);
   const documentStore = DocumentStore.fromSnapshot(snapshot.documents ?? []);
   const researchLibrary = ResearchLibrary.fromSnapshot(snapshot.savedReferences ?? []);
-  return { auditLog, utilization, workProductStore, deadlineTracker, scheduling, auth, accessControl, documentStore, researchLibrary };
+  const messaging = MessagingStore.fromSnapshot(snapshot.messaging ?? { conversations: [], messages: [] });
+  const staffSchedule = StaffScheduleStore.fromSnapshot(snapshot.staffSchedule ?? []);
+  const billingHours = BillingHoursStore.fromSnapshot(snapshot.billingHours ?? []);
+  return {
+    auditLog,
+    utilization,
+    workProductStore,
+    deadlineTracker,
+    scheduling,
+    auth,
+    accessControl,
+    documentStore,
+    researchLibrary,
+    messaging,
+    staffSchedule,
+    billingHours,
+  };
 }
 
 export async function saveSystemState(source: string | StateStore, state: SystemState): Promise<void> {
@@ -102,6 +133,9 @@ export async function saveSystemState(source: string | StateStore, state: System
     paralegalAssignments: state.accessControl.toSnapshot(),
     documents: state.documentStore.toSnapshot(),
     savedReferences: state.researchLibrary.toSnapshot(),
+    messaging: state.messaging.toSnapshot(),
+    staffSchedule: state.staffSchedule.toSnapshot(),
+    billingHours: state.billingHours.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }

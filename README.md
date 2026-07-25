@@ -45,11 +45,18 @@ integration for attorneys/paralegals that can search case law, draft and
 revise work product, manage research, and handle scheduling, scoped to
 exactly what the logged-in user's own account can already do, and
 permanently barred from the review-gate/deadline-confirmation/account-
-management surfaces no matter who's using it — plus the interfaces a
-practice-area module and firm config plug into. See CLAUDE.md's "Not yet
-built" section for what's still ahead (the one-time Twilio console step
-of pointing a real phone number at this, MFA, Google Calendar key
-rotation/vendor due-diligence).
+management surfaces no matter who's using it; a **Staff** directory panel
+(username, display name, initials, role, and a paralegal's matter
+assignment, visible to every logged-in human); a **Messages** panel with
+direct messages, named group chats, and a firm-wide Announcements channel
+anyone can post to; a **Schedule** panel tracking who's in the office,
+remote, or out on a given day (self-service, or attorney-set for anyone
+else); and a **Billing** panel where lawyers and paralegals log billable
+hours against a matter, kept distinct from the AI-utilization
+telemetry — plus the interfaces a practice-area module and firm config
+plug into. See CLAUDE.md's "Not yet built" section for what's still ahead
+(the one-time Twilio console step of pointing a real phone number at
+this, MFA, Google Calendar key rotation/vendor due-diligence).
 
 ## Setup
 
