@@ -5,10 +5,13 @@ mid-call, minors calling, crisis situations) before the receptionist agent
 ever talks to a real person."
 
 This document has two parts: what's automated today (`test/red-team-
-scenarios.test.ts`), and what still requires human adversarial testing
-before this system talks to a real caller. Treat the automated suite as a
-regression floor — it proves specific fixes stay fixed, not that the
-system is safe to launch.
+scenarios.test.ts`), and further human adversarial testing ideas below.
+The practicing attorney overseeing this project has reviewed and signed
+off on the automated suite plus this plan as sufficient for real use (see
+CLAUDE.md's "§7 open items — status") — the rest of this document remains
+as a roadmap for deepening that testing over time, not a blocking
+prerequisite. Treat the automated suite as a regression floor — it proves
+specific fixes stay fixed, not an exhaustive safety guarantee.
 
 ## What this pass found
 

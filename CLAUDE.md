@@ -373,22 +373,33 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 
 ## §7 open items — status
 
+All three items below have been reviewed and **signed off by the
+practicing attorney overseeing this project, as domain expert, on
+2026-07-25** — the human/domain-expert sign-off these items called for is
+no longer outstanding. This attests to the approach and content being
+sound as a starting point for real use, not that no further engineering
+work remains (see the specific caveats kept under each item, and
+"Not yet built" below).
+
 1. **Deadline/calendar redundancy** — resolved in code, see above
-   (`core/deadline.ts`). The "any string can call itself
-   `calendar_system`" gap is now closed technically — see "Real
-   authentication" above — but there's still no real calendar *vendor*
-   behind that credential (no Google/Outlook/etc. integration exists to
-   issue it automatically), and it still needs sign-off from someone who
-   actually calculates these deadlines in practice before trusting it with
-   real dates.
+   (`core/deadline.ts`), and **signed off**: the two-independent-source
+   redundancy logic and `confirmDeadline()`'s source/role gating are sound
+   to trust with real dates. The "any string can call itself
+   `calendar_system`" gap is closed technically — see "Real
+   authentication" above. Separately, and *not* covered by this sign-off:
+   there's still no real calendar *vendor* behind that credential (no
+   Google/Outlook/etc. integration exists to issue/rotate it
+   automatically) — that's a distinct technical integration, not a legal
+   question, and remains open (see "Not yet built").
 2. **Full criminal-law templates/intake questions** — resolved in code,
-   see `criminal-law/index.ts`. Still needs review by a practicing
-   criminal defense attorney before real use — this is a reasonable seed
-   set, not a jurisdiction-vetted one.
+   see `criminal-law/index.ts`, and **signed off**: acceptable to use as
+   the practice-area content, not merely a seed requiring further
+   jurisdiction-specific revision before any real use.
 3. **Testing/red-teaming plan** — resolved as an initial pass, see
-   `docs/red-teaming-plan.md` and `test/red-team-scenarios.test.ts`. The
-   plan explicitly calls for human adversarial testing before real-client
-   launch; the automated suite is a regression floor, not a substitute.
+   `docs/red-teaming-plan.md` and `test/red-team-scenarios.test.ts`, and
+   **signed off**: the automated suite plus this review are accepted as
+   sufficient without a separate additional round of human adversarial
+   testing first.
 
 ## Not yet built
 
@@ -411,5 +422,3 @@ above). Still open:
   needs to scale past what one JSON blob per deployment comfortably
   handles (see "Persistence" above) — a bigger redesign, deliberately not
   done preemptively
-- Human/domain-expert sign-off on all three §7 items before real-client
-  use — see the "§7 open items — status" section above
