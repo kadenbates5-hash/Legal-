@@ -20,6 +20,8 @@ import type { FirmConfig } from "../config/firm-config.js";
 import { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { VoiceboxSpeechToText, VoiceboxTextToSpeech } from "../integrations/voicebox.js";
+import { AssistantService } from "./assistant-service.js";
+import { AnthropicClient } from "../integrations/anthropic.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -161,6 +163,33 @@ const research = new ResearchService({
 });
 
 /**
+ * Backs the "Assistant" panel — an internal AI copilot for attorneys/
+ * paralegals (not receptionist-accessible; that's the separate,
+ * hard-coded receptionist chat agent). Its tools are thin wrappers
+ * around the exact same services the ordinary UI panels use, so it can
+ * never act outside the logged-in actor's own AccessControl scope — see
+ * assistant/tools.ts for the deliberate, permanent exclusions (no
+ * approve/release/reject, no deadline confirmation, no account
+ * management). Only wired up when ANTHROPIC_API_KEY is set — `/api/
+ * assistant/*` 404s otherwise, same pattern as every other optional
+ * integration here.
+ */
+const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"];
+const ANTHROPIC_MODEL = process.env["ANTHROPIC_MODEL"];
+const ANTHROPIC_BASE_URL = process.env["ANTHROPIC_BASE_URL"];
+const assistant = ANTHROPIC_API_KEY
+  ? new AssistantService({
+      client: new AnthropicClient({
+        apiKey: ANTHROPIC_API_KEY,
+        ...(ANTHROPIC_MODEL ? { model: ANTHROPIC_MODEL } : {}),
+        ...(ANTHROPIC_BASE_URL ? { baseUrl: ANTHROPIC_BASE_URL } : {}),
+      }),
+      auditLog: state.auditLog,
+      toolDeps: { drafting, documents, cases, research, scheduling: state.scheduling, reviewGate: service },
+    })
+  : undefined;
+
+/**
  * TLS is terminated upstream by a reverse proxy/load balancer, not by this
  * Node process — set TRUST_PROXY=true only when actually deployed behind
  * one that sets X-Forwarded-Proto itself (never on a directly-exposed
@@ -217,6 +246,7 @@ const server = createReviewServer(service, state.auth, {
   audit,
   research,
   trustProxy,
+  ...(assistant ? { assistant } : {}),
   ...voiceOptions,
 });
 
@@ -229,4 +259,5 @@ server.listen(port, () => {
   if (voiceOptions.twilio) {
     console.log(`Telephony integration active — point a Twilio phone number's voice webhook at ${PUBLIC_BASE_URL}/api/voice/twilio/incoming`);
   }
+  if (assistant) console.log("Assistant panel active (ANTHROPIC_API_KEY set).");
 });

@@ -427,6 +427,79 @@ to mean:
   other than the real CourtListener (used to verify this against a fake
   local server, since the real one isn't reachable from this sandbox).
 
+## AI Assistant — Claude (resolved)
+
+`src/integrations/anthropic.ts` / `src/assistant/` / `src/review-ui/
+assistant-service.ts` — Docket's internal "Assistant" panel: a
+tool-calling AI assistant for attorneys/paralegals, powered by the real
+Claude API. Distinct from the client-facing receptionist agent
+(`receptionist/chat-agent.ts`) — this one is staff-only and never talks
+to a caller.
+
+The central design constraint, straight from this project's non-negotiable
+rule (§1): **the assistant is never more privileged than the human it's
+acting for, and it can never be the human checkpoint itself.**
+
+- `integrations/anthropic.ts` — `AnthropicClient`, a real, high-confidence
+  Messages API client (hand-rolled via `fetch`, no SDK dependency, same
+  reasoning as every other integration here). `DEFAULT_MODEL` is
+  `claude-sonnet-5`, per this project's own guidance to default new AI
+  applications to the latest, most capable Claude model — override with
+  `ANTHROPIC_MODEL`. `ClaudeClient` is the vendor-agnostic interface
+  `AssistantSession` actually depends on (same pattern as
+  `SpeechToText`/`CaseLawSearchClient`), so tests use a scripted fake
+  instead of a real network call.
+- `assistant/tools.ts` — `createAssistantTools()`, the assistant's entire
+  capability surface. Every tool is a thin wrapper calling straight into
+  the same `DraftingService`/`DocumentsService`/`CasesService`/
+  `ResearchService`/`SchedulingService`/`ReviewGateService` (read-only
+  methods) the ordinary Docket panels already use — the executor passes
+  the actor straight through, so `AccessControl`'s matter-scoping applies
+  exactly as it does everywhere else. **Deliberately and permanently
+  absent, regardless of the actor's role:** `approve`/`reject`/
+  `request-revision`/`release`/`clear-flag` (the review-gate's human
+  checkpoint), deadline *confirmation* (the redundant-verification
+  requirement an LLM tool-call would defeat by design), and all account
+  management. The assistant can draft, revise, submit for review,
+  research, and schedule — it can never be the second, independent
+  signature on its own work.
+- `assistant/assistant-session.ts` — `AssistantSession`, the tool-calling
+  loop: send the conversation + tool definitions to Claude, execute any
+  `tool_use` blocks against the real services, feed `tool_result`s back,
+  repeat until Claude returns plain text (bounded by
+  `MAX_TOOL_ITERATIONS` — a real circuit breaker against a runaway loop
+  against a metered API). Every successfully executed tool call is
+  logged to the real `AuditLog` as `assistant_tool_call`, on top of
+  whatever access-grant/denial entries the underlying service call
+  already produces — so an attorney can review exactly what the
+  assistant did, and for whom, in the same Audit Log panel as everything
+  else. `DEFAULT_SYSTEM_PROMPT` states the hard limits above explicitly
+  rather than relying on the tool list alone to communicate them.
+- `review-ui/assistant-service.ts` — `AssistantService`, backing the
+  panel: role-gated to paralegal/attorney (not receptionist-accessible —
+  that's the separate agent's job). Sessions are in-memory and ephemeral
+  (never persisted to `system-state.ts` — a conversation is a scratch
+  workspace, not a case record) and bound to the actor that created them,
+  checked on every message, so one authenticated user can't guess
+  another's session id and read or continue their conversation — worth
+  the extra check specifically here since a conversation can touch
+  multiple matters' content over its lifetime, unlike a single-purpose
+  demo session.
+- `server.ts` wires it as `POST /api/assistant/start` /
+  `POST /api/assistant/:id/message` / `POST /api/assistant/:id/end`; only
+  configured when `ANTHROPIC_API_KEY` is set, `/api/assistant/*` 404s
+  otherwise. `ANTHROPIC_MODEL`/`ANTHROPIC_BASE_URL` are optional
+  overrides (the latter used to verify this against a fake local
+  Claude-compatible server during development).
+
+What this doesn't do: give the assistant any tool a logged-in user
+couldn't already reach themselves, let it act without the same
+`AccessControl` checks the rest of the app enforces, or let it touch the
+review-gate/deadline-confirmation/account-management surfaces under any
+circumstance. It also doesn't persist conversation history across a
+server restart — that's a deliberate scope line (ephemeral scratch
+workspace), not an oversight, matching `intake-demo.ts`'s reasoning.
+
 ## Real authentication (§5/§6 — resolved)
 
 `src/core/auth.ts` — `AuthService`. Replaces the earlier
@@ -486,9 +559,10 @@ panel enforces below.
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over nine panels — Review Queue, Deadlines, Scheduling,
-Live Intake Demo, Drafting, Cases, Research, Accounts, and Audit Log (the
-last five hidden from the nav for roles that can't use them). Review Queue and
+between sections) over ten panels — Review Queue, Deadlines, Scheduling,
+Live Intake Demo, Drafting, Cases, Research, Assistant, Accounts, and
+Audit Log (the last six hidden from the nav for roles that can't use
+them). Review Queue and
 Deadlines are themselves attorney-only server-side (`ReviewGateService`
 gates every method, including reads), so the dashboard only fires their
 initial load once `GET /api/me` confirms the role — a non-attorney
@@ -521,6 +595,8 @@ session sees an inline "attorney-only" message instead of a background
   entry above for what they do.
 - `research-service.ts` — `ResearchService`, backing the "Research" panel
   — see "Legal research — CourtListener" above for what it does.
+- `assistant-service.ts` — `AssistantService`, backing the "Assistant"
+  panel — see "AI Assistant — Claude" above for what it does.
 - `audit-service.ts` — `AuditService`, backing the "Audit Log" panel.
   `AuditLog.read()` already takes an explicit counsel-aware reader role
   (`"attorney"` vs. `"system_admin_no_content"`), but that's a parameter
@@ -535,11 +611,12 @@ session sees an inline "attorney-only" message instead of a background
   for the calendar integration's machine credential. `GET /` redirects to
   `/login.html` when there's no valid session; `POST /api/logout` clears
   it. `/api/intake/*`, `/api/accounts*`, `/api/drafting/*`,
-  `/api/documents/*`, `/api/cases*`, `/api/audit*`, and `/api/research/*`
-  are 404 if no `IntakeDemoSessions`/`AccountsService`/`DraftingService`/
-  `DocumentsService`/`CasesService`/`AuditService`/`ResearchService` was
-  passed to `createReviewServer`, respectively. `npm run build` copies
-  `public/` into `dist/` since `tsc` only compiles `.ts` files.
+  `/api/documents/*`, `/api/cases*`, `/api/audit*`, `/api/research/*`, and
+  `/api/assistant/*` are 404 if no `IntakeDemoSessions`/`AccountsService`/
+  `DraftingService`/`DocumentsService`/`CasesService`/`AuditService`/
+  `ResearchService`/`AssistantService` was passed to `createReviewServer`,
+  respectively. `npm run build` copies `public/` into `dist/` since `tsc`
+  only compiles `.ts` files.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
 - `public/index.html` — the Docket app shell: a dark sidebar (brand +
@@ -556,15 +633,17 @@ session sees an inline "attorney-only" message instead of a background
   download it back out as a data URI — alongside its drafted work product;
   same role gate as Drafting), Research (search case law, "Save to
   matter" on any result, and a per-matter quick-access list with a
-  Remove action — same role gate as Drafting), Accounts (add a login,
-  disable/re-enable one, and for paralegal accounts specifically,
+  Remove action — same role gate as Drafting), Assistant (a chat window
+  driving `assistant-service.ts` — "Start new conversation" then ask it
+  to search/draft/schedule; same role gate as Drafting), Accounts (add a
+  login, disable/re-enable one, and for paralegal accounts specifically,
   assign/unassign a matter — nav item hidden unless role is `attorney`),
   and Audit Log (every access grant/denial and work-product transition,
   append-only, optionally filtered by matter id — nav item hidden unless
-  role is `attorney`). All five hides are client-side convenience only;
+  role is `attorney`). All six hides are client-side convenience only;
   the real gate is server-side in
   `AccountsService`/`DraftingService`/`DocumentsService`/`CasesService`/
-  `ResearchService`/`AuditService`. Any `401` from the API redirects the
+  `ResearchService`/`AssistantService`/`AuditService`. Any `401` from the API redirects the
   browser back to `/login.html`.
 - `start.ts`'s boot-time bootstrap: if no accounts exist yet in the
   persisted state, it creates them from `ATTORNEY_USERNAME`/
@@ -677,6 +756,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
+# ANTHROPIC_API_KEY=sk-ant-...  ANTHROPIC_MODEL=claude-sonnet-5  npm run start:review-ui  # enable the Assistant panel; ANTHROPIC_MODEL/ANTHROPIC_BASE_URL are optional overrides
 ```
 
 ## §7 open items — status

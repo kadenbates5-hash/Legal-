@@ -260,6 +260,7 @@
     <button data-panel="drafting" id="navDrafting" hidden><span class="dot"></span>Drafting</button>
     <button data-panel="cases" id="navCases" hidden><span class="dot"></span>Cases</button>
     <button data-panel="research" id="navResearch" hidden><span class="dot"></span>Research</button>
+    <button data-panel="assistant" id="navAssistant" hidden><span class="dot"></span>Assistant</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
     <button data-panel="audit" id="navAudit" hidden><span class="dot"></span>Audit Log</button>
   </nav>
@@ -474,6 +475,23 @@
       </div>
     </section>
 
+    <!-- ===== Assistant (paralegal/attorney) ===== -->
+    <section class="panel" id="panel-assistant">
+      <p class="subtitle">An internal AI assistant that can search case law, draft and revise work product, manage research, and handle scheduling — scoped to exactly what your own login can already do. It can never approve, release, or reject work product, confirm a deadline, or touch account management; those stay human-only actions.</p>
+      <div class="card">
+        <div class="field-row">
+          <button class="btn primary" id="startAssistant">Start new conversation</button>
+        </div>
+        <div class="chat-window">
+          <div class="chat-log" id="assistantLog"></div>
+          <div class="chat-input">
+            <input id="assistantText" type="text" placeholder="Ask the assistant to search, draft, schedule…" disabled />
+            <button class="btn primary" id="assistantSend" disabled>Send</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ===== Accounts (attorney-only) ===== -->
     <section class="panel" id="panel-accounts">
       <p class="subtitle">Attorney-only. Add a login for a colleague, or disable one — access is revoked immediately, including "remember me" sessions. At least one enabled attorney account must always remain.</p>
@@ -525,6 +543,7 @@ const PANEL_TITLES = {
   drafting: "Drafting",
   cases: "Cases",
   research: "Research",
+  assistant: "Assistant",
   accounts: "Accounts",
   audit: "Audit Log",
 };
@@ -572,6 +591,7 @@ async function loadWhoami() {
       document.getElementById("navDrafting").hidden = false;
       document.getElementById("navCases").hidden = false;
       document.getElementById("navResearch").hidden = false;
+      document.getElementById("navAssistant").hidden = false;
     }
     // Review Queue and Deadlines are attorney-only server-side (ReviewGateService gates
     // every method, including reads) — only fetch them once we know the role, and only
@@ -1270,6 +1290,62 @@ document.getElementById("researchQuery").addEventListener("keydown", (e) => {
 });
 document.getElementById("loadResearchMatter").addEventListener("click", loadResearchMatter);
 document.getElementById("navResearch").addEventListener("click", loadResearchMatter);
+
+/* ===== Assistant ===== */
+let assistantSessionId = null;
+
+function appendAssistantBubble(kind, text) {
+  const log = document.getElementById("assistantLog");
+  const bubble = document.createElement("div");
+  bubble.className = `bubble ${kind}`;
+  bubble.textContent = text;
+  log.appendChild(bubble);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function startAssistant() {
+  showError("");
+  try {
+    document.getElementById("assistantLog").innerHTML = "";
+    const { sessionId } = await api("/api/assistant/start", { method: "POST", body: "{}" });
+    assistantSessionId = sessionId;
+    appendAssistantBubble("system", "New conversation started.");
+    document.getElementById("assistantText").disabled = false;
+    document.getElementById("assistantSend").disabled = false;
+    document.getElementById("assistantText").focus();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function sendAssistantMessage() {
+  const input = document.getElementById("assistantText");
+  const text = input.value.trim();
+  if (!text || !assistantSessionId) return;
+  appendAssistantBubble("caller", text);
+  input.value = "";
+  showError("");
+  const sendBtn = document.getElementById("assistantSend");
+  sendBtn.disabled = true;
+  try {
+    const { reply } = await api(`/api/assistant/${assistantSessionId}/message`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    appendAssistantBubble("agent", reply);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
+
+document.getElementById("startAssistant").addEventListener("click", startAssistant);
+document.getElementById("assistantSend").addEventListener("click", sendAssistantMessage);
+document.getElementById("assistantText").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendAssistantMessage();
+});
 
 /* ===== Accounts ===== */
 async function loadAccounts() {

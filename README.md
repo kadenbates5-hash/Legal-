@@ -36,14 +36,19 @@ against a shared calendar as the independent `calendar_system` source;
 a **Voicebox** STT/TTS integration behind the receptionist voice
 channel's vendor-agnostic interfaces (local, open-source — see
 CLAUDE.md's "Voicebox voice integration" for what that tradeoff means);
-and a **Twilio telephony integration** so a real phone call reaches the
+a **Twilio telephony integration** so a real phone call reaches the
 receptionist agent end to end (Twilio webhook → Voicebox transcribes →
 the same router/escalation state machine as chat → Voicebox speaks the
-reply back) — plus the interfaces a practice-area module and firm config
-plug into. See CLAUDE.md's "Not yet built" section for what's still
-ahead (the one-time Twilio console step of pointing a real phone number
-at this, password reset/MFA, Google Calendar key rotation/vendor
-due-diligence).
+reply back); and an **Assistant panel** — a real, tool-calling Claude API
+integration for attorneys/paralegals that can search case law, draft and
+revise work product, manage research, and handle scheduling, scoped to
+exactly what the logged-in user's own account can already do, and
+permanently barred from the review-gate/deadline-confirmation/account-
+management surfaces no matter who's using it — plus the interfaces a
+practice-area module and firm config plug into. See CLAUDE.md's "Not yet
+built" section for what's still ahead (the one-time Twilio console step
+of pointing a real phone number at this, password reset/MFA, Google
+Calendar key rotation/vendor due-diligence).
 
 ## Setup
 

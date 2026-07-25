@@ -14,6 +14,7 @@ import type { DocumentsService } from "./documents-service.js";
 import type { CasesService } from "./cases-service.js";
 import type { AuditService } from "./audit-service.js";
 import type { ResearchService } from "./research-service.js";
+import type { AssistantService } from "./assistant-service.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { verifyTwilioSignature, twimlPlayThenRecord, twimlPlayThenHangup, downloadTwilioRecording } from "../integrations/twilio-voice.js";
@@ -157,6 +158,7 @@ function errorStatus(err: unknown): number {
   if (err instanceof Error && err.message.startsWith("no user")) return 404;
   if (err instanceof Error && err.message.startsWith("no document")) return 404;
   if (err instanceof Error && err.message.startsWith("no saved reference")) return 404;
+  if (err instanceof Error && err.message.startsWith("no assistant session")) return 404;
   if (err instanceof Error && err.message.startsWith("cannot disable")) return 409;
   if (err instanceof Error && err.message.startsWith("matter assignment only applies")) return 400;
   if (err instanceof SchedulingError) {
@@ -225,6 +227,7 @@ export interface ReviewServerOptions {
   cases?: CasesService;
   audit?: AuditService;
   research?: ResearchService;
+  assistant?: AssistantService;
   /** Real-call telephony voice channel (see `receptionist/voice-call-sessions.ts`) — `voiceCalls`/`audioClips`/`twilio` must all be set together for `/api/voice/*` to be configured. */
   voiceCalls?: VoiceCallSessions;
   audioClips?: AudioClipStore;
@@ -256,6 +259,7 @@ async function handleRequest(
     cases,
     audit,
     research,
+    assistant,
     voiceCalls,
     audioClips,
     twilio,
@@ -386,6 +390,15 @@ async function handleRequest(
         return;
       }
       await handleResearchRequest(research, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/assistant")) {
+      if (!assistant) {
+        sendJson(res, 404, { error: "the assistant is not configured on this server" });
+        return;
+      }
+      await handleAssistantRequest(assistant, req, res, actor, url);
       return;
     }
 
@@ -814,6 +827,41 @@ async function handleResearchRequest(
     research.deleteReference(actor, matterId, segments[2]!);
     sendJson(res, 200, { ok: true });
     onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleAssistantRequest(
+  assistant: AssistantService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+): Promise<void> {
+  if (url.pathname === "/api/assistant/start" && req.method === "POST") {
+    sendJson(res, 200, assistant.start(actor));
+    return;
+  }
+
+  const segments = url.pathname.replace(/^\/api\/assistant\/?/, "").split("/").filter(Boolean);
+  if (segments.length !== 2 || req.method !== "POST") {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const sessionId = segments[0]!;
+
+  if (segments[1] === "message") {
+    const body = await readJsonBody(req);
+    const result = await assistant.sendMessage(actor, sessionId, String(body["text"] ?? ""));
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (segments[1] === "end") {
+    assistant.end(actor, sessionId);
+    sendJson(res, 200, { ok: true });
     return;
   }
 
