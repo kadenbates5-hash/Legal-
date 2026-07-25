@@ -54,6 +54,12 @@ export class AccessControl {
     this.#paralegalAssignments.delete(actorId);
   }
 
+  /** Read accessor for surfaces (e.g. the Accounts panel) that need to show/manage a paralegal's current assignment. */
+  getParalegalAssignment(actorId: string): ParalegalAssignment | undefined {
+    const assignment = this.#paralegalAssignments.get(actorId);
+    return assignment ? { ...assignment } : undefined;
+  }
+
   /** Throws AccessDeniedError on any violation; never returns a partial/degraded result. */
   authorize(request: AccessRequest): void {
     const { actor, matterId, category } = request;
@@ -99,5 +105,18 @@ export class AccessControl {
 
     // staff/system actors: default deny unless explicitly modeled above.
     return "role not authorized by default policy";
+  }
+
+  /** Plain-data snapshot for persistence — paralegal-matter assignments otherwise vanish on every restart. */
+  toSnapshot(): ParalegalAssignment[] {
+    return [...this.#paralegalAssignments.values()].map((a) => ({ ...a }));
+  }
+
+  static fromSnapshot(auditLog: AuditLog, snapshot: readonly ParalegalAssignment[]): AccessControl {
+    const accessControl = new AccessControl(auditLog);
+    for (const assignment of snapshot) {
+      accessControl.#paralegalAssignments.set(assignment.actorId, { ...assignment });
+    }
+    return accessControl;
   }
 }

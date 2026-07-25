@@ -9,6 +9,7 @@ import { SchedulingError, type AppointmentType, type SchedulingService } from ".
 import { ReviewGateService } from "./review-service.js";
 import type { IntakeDemoSessions } from "./intake-demo.js";
 import type { AccountsService } from "./accounts-service.js";
+import type { DraftingService } from "./drafting-service.js";
 import type { UserRole } from "../core/auth.js";
 
 /**
@@ -135,6 +136,7 @@ function errorStatus(err: unknown): number {
   if (err instanceof Error && err.message.startsWith("no intake demo session")) return 404;
   if (err instanceof Error && err.message.startsWith("no user")) return 404;
   if (err instanceof Error && err.message.startsWith("cannot disable")) return 409;
+  if (err instanceof Error && err.message.startsWith("matter assignment only applies")) return 400;
   if (err instanceof SchedulingError) {
     return err.message.startsWith("no appointment") ? 404 : 409;
   }
@@ -181,11 +183,12 @@ export function createReviewServer(
   scheduling?: SchedulingService,
   intake?: IntakeDemoSessions,
   accounts?: AccountsService,
+  drafting?: DraftingService,
   /** See the module doc comment above — off by default, only enable behind a real TLS-terminating proxy. */
   trustProxy = false,
 ): Server {
   return createServer((req, res) => {
-    void handleRequest(service, auth, req, res, onMutated, scheduling, intake, accounts, trustProxy);
+    void handleRequest(service, auth, req, res, onMutated, scheduling, intake, accounts, drafting, trustProxy);
   });
 }
 
@@ -198,6 +201,7 @@ async function handleRequest(
   scheduling?: SchedulingService,
   intake?: IntakeDemoSessions,
   accounts?: AccountsService,
+  drafting?: DraftingService,
   trustProxy = false,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -275,6 +279,15 @@ async function handleRequest(
         return;
       }
       await handleAccountsRequest(accounts, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/drafting")) {
+      if (!drafting) {
+        sendJson(res, 404, { error: "drafting is not configured on this server" });
+        return;
+      }
+      await handleDraftingRequest(drafting, req, res, actor, url, onMutated);
       return;
     }
 
@@ -465,10 +478,114 @@ async function handleAccountsRequest(
   if (segments.length === 2 && req.method === "POST") {
     const id = segments[0]!;
     const action = segments[1];
+    const body = await readJsonBody(req);
     let result;
-    if (action === "disable") result = accounts.disable(actor, id);
-    else if (action === "enable") result = accounts.enable(actor, id);
-    else {
+    switch (action) {
+      case "disable":
+        result = accounts.disable(actor, id);
+        break;
+      case "enable":
+        result = accounts.enable(actor, id);
+        break;
+      case "assign-matter":
+        result = accounts.assignMatter(
+          actor,
+          id,
+          String(body["matterId"] ?? ""),
+          body["highSensitivityGranted"] === true,
+        );
+        break;
+      case "unassign-matter":
+        result = accounts.unassignMatter(actor, id);
+        break;
+      default:
+        sendJson(res, 404, { error: "not found" });
+        return;
+    }
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleDraftingRequest(
+  drafting: DraftingService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  const segments = url.pathname.replace(/^\/api\/drafting\/?/, "").split("/").filter(Boolean);
+
+  if (segments.length === 1 && segments[0] === "templates" && req.method === "GET") {
+    sendJson(res, 200, drafting.listTemplates(actor));
+    return;
+  }
+
+  if (segments[0] !== "matters" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const matterId = segments[1]!;
+
+  if (segments.length === 2 && req.method === "GET") {
+    sendJson(res, 200, drafting.listMatterWorkProduct(actor, matterId));
+    return;
+  }
+
+  if (segments.length === 3 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    let result;
+    switch (segments[2]) {
+      case "draft-template":
+        result = drafting.draftFromTemplate(actor, matterId, {
+          templateId: String(body["templateId"] ?? ""),
+          content: String(body["content"] ?? ""),
+          ...(body["context"] && typeof body["context"] === "object" ? { context: body["context"] as Record<string, unknown> } : {}),
+          ...(typeof body["deadlineDate"] === "string" && body["deadlineDate"] ? { deadlineDate: body["deadlineDate"] } : {}),
+          ...(typeof body["deadlineType"] === "string" && body["deadlineType"] ? { deadlineType: body["deadlineType"] as DeadlineType } : {}),
+        });
+        break;
+      case "draft-research":
+        result = drafting.draftResearchSummary(actor, matterId, {
+          content: String(body["content"] ?? ""),
+          citations: Array.isArray(body["citations"]) ? (body["citations"] as string[]) : [],
+        });
+        break;
+      case "draft-billing":
+        result = drafting.draftBillingNarrative(actor, matterId, { content: String(body["content"] ?? "") });
+        break;
+      default:
+        sendJson(res, 404, { error: "not found" });
+        return;
+    }
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (segments[2] !== "work-products" || !segments[3]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const workProductId = segments[3]!;
+
+  if (segments.length === 4 && req.method === "GET") {
+    sendJson(res, 200, drafting.get(actor, matterId, workProductId));
+    return;
+  }
+
+  if (segments.length === 5 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    let result;
+    if (segments[4] === "revise") {
+      result = drafting.reviseDraft(actor, matterId, workProductId, String(body["content"] ?? ""));
+    } else if (segments[4] === "submit") {
+      result = drafting.submitForReview(actor, matterId, workProductId);
+    } else {
       sendJson(res, 404, { error: "not found" });
       return;
     }

@@ -6,6 +6,8 @@ import { ReviewGateService } from "../src/review-ui/review-service.js";
 import { AccountsService } from "../src/review-ui/accounts-service.js";
 import { WorkProductStore } from "../src/core/work-product-store.js";
 import { AuthService } from "../src/core/auth.js";
+import { AccessControl } from "../src/core/access-control.js";
+import { AuditLog } from "../src/core/audit.js";
 
 let server: Server;
 let baseUrl: string;
@@ -31,7 +33,7 @@ beforeEach(async () => {
   auth = new AuthService();
   auth.createUser({ username: "attorney1", password: "correct-horse", role: "attorney", actorId: "a1" });
   auth.createUser({ username: "paralegal1", password: "correct-horse", role: "paralegal", actorId: "p1" });
-  const accounts = new AccountsService(auth);
+  const accounts = new AccountsService(auth, new AccessControl(new AuditLog()));
   server = createReviewServer(new ReviewGateService(new WorkProductStore()), auth, undefined, undefined, undefined, accounts);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const { port } = server.address() as AddressInfo;

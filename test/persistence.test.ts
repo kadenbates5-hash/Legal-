@@ -188,4 +188,23 @@ describe("system-state persistence integration", () => {
       }),
     ).toThrow(/overlapping/);
   });
+
+  it("persists and reloads paralegal-matter assignments across a process restart", async () => {
+    const state = await loadSystemState(filePath);
+    state.accessControl.assignParalegal("p1", "m1", { highSensitivityGranted: true });
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.accessControl.getParalegalAssignment("p1")).toEqual({
+      actorId: "p1",
+      matterId: "m1",
+      highSensitivityGranted: true,
+    });
+
+    // Reloaded instance still enforces the rules.
+    expect(() =>
+      reloaded.accessControl.authorize({ actor: paralegal, matterId: "m2", category: "case_file" }),
+    ).toThrow(/different matter/);
+  });
 });

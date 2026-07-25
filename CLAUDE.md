@@ -117,6 +117,20 @@ of every practice area:
 - practice-area-specific hard triggers (Padilla, protective-order) are
   applied via `PracticeAreaModule.deriveWorkProductFlags()`
 
+`src/review-ui/drafting-service.ts` — `DraftingService`, the HTTP-facing
+wrapper backing Docket's "Drafting" panel (where a paralegal actually
+writes up contracts, motions, discovery requests, research summaries, and
+billing narratives, then submits them). `ParalegalDraftingSession`'s
+`reviseDraft`/`submitForReview` take a `WorkProduct` object reference
+directly — safe in-process, but exposed over HTTP by id instead, any
+authenticated caller could name an arbitrary work-product id, so this
+service adds its own `AccessControl` check (matching the draft's matterId
+against the caller's assignment) before ever calling into the drafting
+session. A `ParalegalDraftingSession` is cached per (actor, matter) pair
+and reused across requests, since `submitForReview`'s utilization-entry
+bookkeeping only finishes correctly if the same session instance saw the
+`start` from creation.
+
 ## Scheduling
 
 `src/core/scheduling.ts` — `SchedulingService`, §2's "Schedule/reschedule
@@ -217,7 +231,12 @@ and `AuthService.setDisabled()` revokes every one of that user's live
 sessions immediately, "remember me" included, not just at next check.
 `setDisabled()` also refuses to disable the last remaining *enabled*
 attorney account — there's no path to a Docket with zero attorneys able to
-log into it.
+log into it. It also owns matter assignment for paralegal accounts
+(`assignMatter`/`unassignMatter`, wrapping `AccessControl`'s
+`assignParalegal`/`revokeParalegalAssignment`) — a freshly created
+paralegal account has no case-file access at all until an attorney
+assigns it to a matter here, which is exactly the scoping the Drafting
+panel enforces below.
 
 ## Attorney review-gate UI — "Docket"
 
@@ -226,9 +245,9 @@ log into it.
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over five panels — Review Queue, Deadlines, Scheduling,
-Live Intake Demo, and Accounts (attorney-only, hidden from the nav for
-every other role).
+between sections) over six panels — Review Queue, Deadlines, Scheduling,
+Live Intake Demo, Drafting, and Accounts (the last two hidden from the nav
+for roles that can't use them).
 
 - `review-service.ts` — `ReviewGateService`. `review-gate.ts` already
   guards the status-transition methods against non-attorney actors, but
@@ -248,6 +267,9 @@ every other role).
   gets the same `AccessDeniedError` a misconfigured real session would.
 - `accounts-service.ts` — `AccountsService`, backing the "Accounts" panel
   — see "Real authentication" above for what it does and doesn't do.
+- `drafting-service.ts` — `DraftingService`, backing the "Drafting" panel
+  — see "Paralegal drafting agent" above for what it does and why it adds
+  its own `AccessControl` check on top of `ParalegalDraftingSession`.
 - `server.ts` — a small dependency-free JSON API (Node's built-in `http`,
   no framework) over the service, plus static-file serving for the
   dashboard. Actor identity comes from an `httpOnly` session cookie set by
@@ -255,9 +277,9 @@ every other role).
   (see "Real authentication" above) — or from an `x-system-api-key` header
   for the calendar integration's machine credential. `GET /` redirects to
   `/login.html` when there's no valid session; `POST /api/logout` clears
-  it. `/api/intake/*` and `/api/accounts*` are 404 if no
-  `IntakeDemoSessions`/`AccountsService` was passed to
-  `createReviewServer`, respectively. `npm run build` copies `public/`
+  it. `/api/intake/*`, `/api/accounts*`, and `/api/drafting/*` are 404 if
+  no `IntakeDemoSessions`/`AccountsService`/`DraftingService` was passed
+  to `createReviewServer`, respectively. `npm run build` copies `public/`
   into `dist/` since `tsc` only compiles `.ts` files.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
@@ -267,23 +289,33 @@ every other role).
   clear-flag/release), Deadlines (status check/independent confirmation/
   conflict list), Scheduling (book/list/reschedule/cancel/complete/
   reminders), Live Intake Demo (a chat window driving `intake-demo.ts` —
-  "Start new demo conversation" then type caller turns), and Accounts
-  (add a login, disable/re-enable one — nav item stays `hidden` unless
-  `GET /api/me` reports role `attorney`, though the real gate is
-  server-side in `AccountsService`, not this client-side hide). Any `401`
-  from the API redirects the browser back to `/login.html`.
+  "Start new demo conversation" then type caller turns), Drafting (pick a
+  matter, draft from a template/research summary/billing narrative, then
+  revise/submit — nav item hidden unless `GET /api/me` reports role
+  `attorney` or `paralegal`), and Accounts (add a login, disable/re-enable
+  one, and for paralegal accounts specifically, assign/unassign a matter —
+  nav item hidden unless role is `attorney`). Both hides are client-side
+  convenience only; the real gate is server-side in `AccountsService`/
+  `DraftingService`. Any `401` from the API redirects the browser back to
+  `/login.html`.
 - `start.ts`'s boot-time bootstrap: if no accounts exist yet in the
   persisted state, it creates them from `ATTORNEY_USERNAME`/
   `ATTORNEY_PASSWORD` (and optionally `PARALEGAL_USERNAME`/
   `RECEPTIONIST_USERNAME`/`STAFF_USERNAME` with matching `_PASSWORD`
   vars) — this is only for getting the very first attorney account into
   an empty system; it's a no-op forever once any account exists. Anything
-  after that goes through the Accounts panel. `start.ts` also sets the
+  after that goes through the Accounts panel (including assigning that
+  seeded paralegal to a matter, if one was seeded — the env-var bootstrap
+  creates the login but not a matter assignment). `start.ts` also sets the
   calendar-integration system key from `CALENDAR_SYSTEM_API_KEY`, or
   generates and logs a random one on first boot if that's unset, and
-  constructs the `IntakeDemoSessions`/`AccountsService` wired into the
-  server (the former sharing the real audit log with its own dedicated
-  `AccessControl` instance and the criminal-law pilot module).
+  constructs `IntakeDemoSessions`/`AccountsService`/`DraftingService`
+  wired into the server. `IntakeDemoSessions` gets its own throwaway
+  `AccessControl` (receptionist intake has nothing to do with paralegal
+  matter assignment); `AccountsService` and `DraftingService` share
+  `state.accessControl` — the canonical, *persisted* instance (see
+  "Persistence" below) — since one is where assignments are made and the
+  other is where they're enforced.
 
 `/api/appointments*` (see `scheduling.ts` above) is wired into the same
 server, gated by `SchedulingService`'s own optional `AccessControl`
@@ -315,19 +347,23 @@ two ways now: file-backed by default, or a real Postgres database when
   practice), via the `pg` driver. `CREATE TABLE IF NOT EXISTS` runs on
   every connect, so there's no separate migration step to run first.
 - `system-state.ts` — bundles the audit log, utilization tracker,
-  work-product store, deadline tracker, scheduling service, and auth into
-  one document via `loadSystemState`/`saveSystemState`, which accept
-  either a `StateStore` or (for convenience/backward compatibility) a
-  plain file-path string.
+  work-product store, deadline tracker, scheduling service, auth, and
+  access control into one document via `loadSystemState`/
+  `saveSystemState`, which accept either a `StateStore` or (for
+  convenience/backward compatibility) a plain file-path string.
 - Every stateful core object (`AuditLog`, `UtilizationTracker`,
   `WorkProduct`, `WorkProductStore`, `DeadlineTracker`,
-  `SchedulingService`, `AuthService`) has `toSnapshot()`/`fromSnapshot()`
-  round-tripping its exact state to plain data — including `WorkProduct`
-  states like `approved`/`released` that the normal constructor and
-  transition methods can't reach directly. A rehydrated `WorkProduct` is a
-  fully functional, rule-enforcing object afterward (content still locks,
-  unresolved flags still block approval), not just replayed JSON; a
-  rehydrated `SchedulingService` still enforces double-booking checks.
+  `SchedulingService`, `AuthService`, `AccessControl`) has
+  `toSnapshot()`/`fromSnapshot()` round-tripping its exact state to plain
+  data — including `WorkProduct` states like `approved`/`released` that
+  the normal constructor and transition methods can't reach directly. A
+  rehydrated `WorkProduct` is a fully functional, rule-enforcing object
+  afterward (content still locks, unresolved flags still block approval),
+  not just replayed JSON; a rehydrated `SchedulingService` still enforces
+  double-booking checks, and a rehydrated `AccessControl` still enforces
+  paralegal-matter scoping — without this, every paralegal-matter
+  assignment (see "Real authentication" above) would silently vanish on
+  every restart.
 - `review-ui/start.ts` wires this in: computes the store once at boot
   (`DATABASE_URL` set → Postgres, else `STATE_FILE`, default
   `./data/system-state.json`), loads state through it (plus an optional

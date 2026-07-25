@@ -3,6 +3,7 @@ import { createReviewServer } from "./server.js";
 import { ReviewGateService } from "./review-service.js";
 import { IntakeDemoSessions } from "./intake-demo.js";
 import { AccountsService } from "./accounts-service.js";
+import { DraftingService } from "./drafting-service.js";
 import { loadSystemState, saveSystemState } from "../persistence/system-state.js";
 import { readJsonFile } from "../persistence/json-file-store.js";
 import { createPostgresStateStore } from "../persistence/postgres-store.js";
@@ -103,7 +104,23 @@ const intake = new IntakeDemoSessions({
   ...(firmConfig ? { firmConfig } : {}),
 });
 
-const accounts = new AccountsService(state.auth);
+/**
+ * `state.accessControl` is the canonical, persisted AccessControl — the
+ * one whose paralegal-matter assignments actually matter and must survive
+ * a restart (unlike intake's throwaway one above). Shared by the Drafting
+ * panel (enforcing matter scoping on every draft/revise/submit) and the
+ * Accounts panel (the only place assignments are made/changed).
+ */
+const accounts = new AccountsService(state.auth, state.accessControl);
+
+const drafting = new DraftingService({
+  accessControl: state.accessControl,
+  auditLog: state.auditLog,
+  module: criminalLawModule,
+  store: state.workProductStore,
+  utilization: state.utilization,
+  deadlineTracker: state.deadlineTracker,
+});
 
 /**
  * TLS is terminated upstream by a reverse proxy/load balancer, not by this
@@ -124,6 +141,7 @@ const server = createReviewServer(
   state.scheduling,
   intake,
   accounts,
+  drafting,
   trustProxy,
 );
 

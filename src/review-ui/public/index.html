@@ -151,6 +151,17 @@
   }
   .field.checkbox { flex-direction: row; align-items: center; gap: 0.4rem; }
   .field.checkbox input { min-width: auto; }
+  .field textarea {
+    font-size: 0.88rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    background: var(--surface);
+    font-family: inherit;
+    resize: vertical;
+  }
+  .field.grow { flex: 1 1 100%; }
 
   ul.list { list-style: none; padding: 0; margin: 0; }
   ul.list li {
@@ -246,6 +257,7 @@
     <button data-panel="deadlines"><span class="dot"></span>Deadlines</button>
     <button data-panel="scheduling"><span class="dot"></span>Scheduling</button>
     <button data-panel="intake"><span class="dot"></span>Live Intake Demo</button>
+    <button data-panel="drafting" id="navDrafting" hidden><span class="dot"></span>Drafting</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
   </nav>
   <div class="sidebar-footer">Nothing here reaches a client, filing, or invoice without an attorney's sign-off.</div>
@@ -358,6 +370,73 @@
       </div>
     </section>
 
+    <!-- ===== Drafting (paralegal/attorney) ===== -->
+    <section class="panel" id="panel-drafting">
+      <p class="subtitle">Draft engagement letters, motions, discovery requests, research summaries, and billing narratives. Every draft is scoped to one matter and submits into the attorney's Review Queue — nothing here reaches a client on its own.</p>
+      <div class="card">
+        <div class="field-row">
+          <label class="field">Matter ID <input id="draftingMatterId" value="m1" /></label>
+          <button class="btn" id="loadMatterDrafts">Load matter</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Draft from template</h3>
+        <div class="field-row">
+          <label class="field">Template
+            <select id="draftTemplateId"></select>
+          </label>
+          <label class="field">Deadline date (optional) <input id="draftDeadlineDate" type="date" /></label>
+          <label class="field">Deadline type
+            <select id="draftDeadlineType">
+              <option value="speedy_trial">speedy_trial</option>
+              <option value="arraignment">arraignment</option>
+              <option value="bail_hearing">bail_hearing</option>
+              <option value="discovery_response">discovery_response</option>
+              <option value="other">other</option>
+            </select>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field grow">Content
+            <textarea id="draftTemplateContent" rows="4" placeholder="Draft text…"></textarea>
+          </label>
+        </div>
+        <button class="btn primary" id="createTemplateDraft">Create draft</button>
+      </div>
+
+      <div class="card">
+        <h3>Draft research summary</h3>
+        <div class="field-row">
+          <label class="field grow">Summary
+            <textarea id="researchContent" rows="3" placeholder="Summary of relevant law…"></textarea>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field grow">Citations (one per line)
+            <textarea id="researchCitations" rows="2" placeholder="State v. Doe, 123 P.3d 456"></textarea>
+          </label>
+        </div>
+        <button class="btn primary" id="createResearchDraft">Create draft</button>
+      </div>
+
+      <div class="card">
+        <h3>Draft billing narrative</h3>
+        <div class="field-row">
+          <label class="field grow">Narrative
+            <textarea id="billingContent" rows="2" placeholder="1.5 hrs reviewing discovery…"></textarea>
+          </label>
+        </div>
+        <button class="btn primary" id="createBillingDraft">Create draft</button>
+      </div>
+
+      <div class="card">
+        <h3>This matter's work product</h3>
+        <ul id="draftingList" class="list"></ul>
+      </div>
+      <div id="draftingDetail"></div>
+    </section>
+
     <!-- ===== Accounts (attorney-only) ===== -->
     <section class="panel" id="panel-accounts">
       <p class="subtitle">Attorney-only. Add a login for a colleague, or disable one — access is revoked immediately, including "remember me" sessions. At least one enabled attorney account must always remain.</p>
@@ -394,6 +473,7 @@ const PANEL_TITLES = {
   deadlines: "Deadlines",
   scheduling: "Scheduling",
   intake: "Live Intake Demo",
+  drafting: "Drafting",
   accounts: "Accounts",
 };
 
@@ -431,6 +511,9 @@ async function loadWhoami() {
     document.getElementById("whoami").textContent = `Signed in as ${me.username || me.id} (${me.role})`;
     if (me.role === "attorney") {
       document.getElementById("navAccounts").hidden = false;
+    }
+    if (me.role === "attorney" || me.role === "paralegal") {
+      document.getElementById("navDrafting").hidden = false;
     }
   } catch (err) {
     // api() already redirects to /login.html on 401.
@@ -727,6 +810,164 @@ document.getElementById("chatText").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendChat();
 });
 
+/* ===== Drafting ===== */
+function draftingMatterId() {
+  return document.getElementById("draftingMatterId").value;
+}
+
+async function loadTemplates() {
+  try {
+    const templates = await api("/api/drafting/templates");
+    const select = document.getElementById("draftTemplateId");
+    select.innerHTML = templates.map((t) => `<option value="${t.id}">${t.name}</option>`).join("");
+  } catch (err) {
+    // Non-fatal if this account can't draft (e.g. not yet assigned) — the matter list will surface that instead.
+  }
+}
+
+async function loadMatterDrafts() {
+  showError("");
+  document.getElementById("draftingDetail").innerHTML = "";
+  try {
+    const items = await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}`);
+    const list = document.getElementById("draftingList");
+    list.innerHTML = "";
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.innerHTML = `<strong>${item.kind}</strong>
+        <span class="badge ${item.status}">${item.status}</span>
+        ${item.flags.length ? `<div class="flags">Unresolved flags: ${item.flags.join(", ")}</div>` : ""}`;
+      li.addEventListener("click", () => loadDraftDetail(item.id));
+      list.appendChild(li);
+    }
+    if (items.length === 0) list.innerHTML = '<li class="static empty">No work product on this matter yet.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadDraftDetail(id) {
+  showError("");
+  try {
+    const wp = await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/work-products/${id}`);
+    const detail = document.getElementById("draftingDetail");
+    const editable = wp.status === "draft" || wp.status === "revision_requested";
+    detail.innerHTML = `
+      <div class="card">
+        <h3>${wp.kind} <span class="badge ${wp.status}">${wp.status}</span></h3>
+        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${f}</code>`).join(", ")}</div>` : ""}
+        <div class="field-row">
+          <label class="field grow">Content
+            <textarea id="draftDetailContent" rows="8" ${editable ? "" : "disabled"}>${wp.content}</textarea>
+          </label>
+        </div>
+        <div class="actions" id="draftDetailActions"></div>
+      </div>
+    `;
+    if (editable) {
+      const actions = document.getElementById("draftDetailActions");
+      const saveBtn = mkButton("Save revision", async () => {
+        showError("");
+        try {
+          const content = document.getElementById("draftDetailContent").value;
+          await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/work-products/${id}/revise`, {
+            method: "POST",
+            body: JSON.stringify({ content }),
+          });
+          await loadMatterDrafts();
+          await loadDraftDetail(id);
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+      const submitBtn = mkButton("Submit for review", async () => {
+        showError("");
+        try {
+          await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/work-products/${id}/submit`, {
+            method: "POST",
+            body: "{}",
+          });
+          await loadMatterDrafts();
+          await loadDraftDetail(id);
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+      submitBtn.classList.add("primary");
+      actions.append(saveBtn, submitBtn);
+    }
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function createTemplateDraft() {
+  showError("");
+  try {
+    const body = {
+      templateId: document.getElementById("draftTemplateId").value,
+      content: document.getElementById("draftTemplateContent").value,
+    };
+    const deadlineDate = document.getElementById("draftDeadlineDate").value;
+    if (deadlineDate) {
+      body.deadlineDate = deadlineDate;
+      body.deadlineType = document.getElementById("draftDeadlineType").value;
+    }
+    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-template`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    document.getElementById("draftTemplateContent").value = "";
+    document.getElementById("draftDeadlineDate").value = "";
+    await loadMatterDrafts();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function createResearchDraft() {
+  showError("");
+  try {
+    const citations = document
+      .getElementById("researchCitations")
+      .value.split("\n")
+      .map((c) => c.trim())
+      .filter(Boolean);
+    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-research`, {
+      method: "POST",
+      body: JSON.stringify({ content: document.getElementById("researchContent").value, citations }),
+    });
+    document.getElementById("researchContent").value = "";
+    document.getElementById("researchCitations").value = "";
+    await loadMatterDrafts();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function createBillingDraft() {
+  showError("");
+  try {
+    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-billing`, {
+      method: "POST",
+      body: JSON.stringify({ content: document.getElementById("billingContent").value }),
+    });
+    document.getElementById("billingContent").value = "";
+    await loadMatterDrafts();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("loadMatterDrafts").addEventListener("click", loadMatterDrafts);
+document.getElementById("createTemplateDraft").addEventListener("click", createTemplateDraft);
+document.getElementById("createResearchDraft").addEventListener("click", createResearchDraft);
+document.getElementById("createBillingDraft").addEventListener("click", createBillingDraft);
+document.getElementById("navDrafting").addEventListener("click", () => {
+  loadTemplates();
+  loadMatterDrafts();
+});
+
 /* ===== Accounts ===== */
 async function loadAccounts() {
   showError("");
@@ -739,7 +980,8 @@ async function loadAccounts() {
       li.classList.add("static");
       li.innerHTML = `<span class="status-dot ${acct.disabled ? "disabled" : ""}"></span><strong>${acct.username}</strong>
         <span class="badge">${acct.role}</span>
-        <span class="badge ${acct.disabled ? "rejected" : "approved"}">${acct.disabled ? "disabled" : "enabled"}</span>`;
+        <span class="badge ${acct.disabled ? "rejected" : "approved"}">${acct.disabled ? "disabled" : "enabled"}</span>
+        ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${acct.matterAssignment.matterId}</span>` : ""}`;
       const toggleBtn = mkButton(acct.disabled ? "Enable" : "Disable", async () => {
         showError("");
         try {
@@ -752,6 +994,40 @@ async function loadAccounts() {
       if (!acct.disabled) toggleBtn.classList.add("danger");
       li.appendChild(document.createElement("br"));
       li.appendChild(toggleBtn);
+
+      if (acct.role === "paralegal") {
+        const matterInput = document.createElement("input");
+        matterInput.placeholder = "matter id";
+        matterInput.style.marginLeft = "0.5rem";
+        matterInput.style.width = "110px";
+        matterInput.value = acct.matterAssignment ? acct.matterAssignment.matterId : "";
+        const assignBtn = mkButton("Assign", async () => {
+          showError("");
+          try {
+            await api(`/api/accounts/${acct.id}/assign-matter`, {
+              method: "POST",
+              body: JSON.stringify({ matterId: matterInput.value }),
+            });
+            await loadAccounts();
+          } catch (err) {
+            showError(err.message);
+          }
+        });
+        li.append(matterInput, assignBtn);
+        if (acct.matterAssignment) {
+          const unassignBtn = mkButton("Unassign", async () => {
+            showError("");
+            try {
+              await api(`/api/accounts/${acct.id}/unassign-matter`, { method: "POST", body: "{}" });
+              await loadAccounts();
+            } catch (err) {
+              showError(err.message);
+            }
+          });
+          unassignBtn.classList.add("danger");
+          li.appendChild(unassignBtn);
+        }
+      }
       list.appendChild(li);
     }
     if (accountsList.length === 0) list.innerHTML = '<li class="static empty">No accounts.</li>';

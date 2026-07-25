@@ -127,6 +127,7 @@ describe("session cookie Secure flag (trust-proxy model)", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       true, // trustProxy
     );
     await new Promise<void>((resolve) => proxiedServer.listen(0, resolve));
@@ -150,6 +151,7 @@ describe("session cookie Secure flag (trust-proxy model)", () => {
     const proxiedServer = createReviewServer(
       new ReviewGateService(new WorkProductStore()),
       proxiedAuth,
+      undefined,
       undefined,
       undefined,
       undefined,

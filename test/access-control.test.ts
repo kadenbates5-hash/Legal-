@@ -106,4 +106,49 @@ describe("access control", () => {
       ac.authorize({ actor: { id: "p1", role: "paralegal" }, matterId: "m1", category: "case_file" }),
     ).toThrow(AccessDeniedError);
   });
+
+  describe("getParalegalAssignment", () => {
+    it("returns undefined when there is no assignment", () => {
+      const ac = new AccessControl(new AuditLog());
+      expect(ac.getParalegalAssignment("p1")).toBeUndefined();
+    });
+
+    it("returns the current assignment, including the high-sensitivity grant", () => {
+      const ac = new AccessControl(new AuditLog());
+      ac.assignParalegal("p1", "m1", { highSensitivityGranted: true });
+      expect(ac.getParalegalAssignment("p1")).toEqual({ actorId: "p1", matterId: "m1", highSensitivityGranted: true });
+    });
+
+    it("returns undefined again after revocation", () => {
+      const ac = new AccessControl(new AuditLog());
+      ac.assignParalegal("p1", "m1");
+      ac.revokeParalegalAssignment("p1");
+      expect(ac.getParalegalAssignment("p1")).toBeUndefined();
+    });
+  });
+
+  describe("snapshot round-trip", () => {
+    it("preserves paralegal assignments, including the high-sensitivity grant", () => {
+      const auditLog = new AuditLog();
+      const ac = new AccessControl(auditLog);
+      ac.assignParalegal("p1", "m1", { highSensitivityGranted: true });
+      ac.assignParalegal("p2", "m2");
+
+      const restored = AccessControl.fromSnapshot(auditLog, ac.toSnapshot());
+      expect(restored.getParalegalAssignment("p1")).toEqual({ actorId: "p1", matterId: "m1", highSensitivityGranted: true });
+      expect(restored.getParalegalAssignment("p2")).toEqual({ actorId: "p2", matterId: "m2", highSensitivityGranted: false });
+
+      // Restored instance still enforces the rules, not just replayed data.
+      expect(() =>
+        restored.authorize({ actor: { id: "p1", role: "paralegal" }, matterId: "m2", category: "case_file" }),
+      ).toThrow(AccessDeniedError);
+    });
+
+    it("round-trips an empty assignment set", () => {
+      const auditLog = new AuditLog();
+      const ac = new AccessControl(auditLog);
+      const restored = AccessControl.fromSnapshot(auditLog, ac.toSnapshot());
+      expect(restored.getParalegalAssignment("p1")).toBeUndefined();
+    });
+  });
 });
