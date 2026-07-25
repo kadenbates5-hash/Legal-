@@ -27,11 +27,14 @@ scanned forms) and can click into any case to see its documents and
 drafted work product side by side, attorney-gated account management
 (add a login, disable/re-enable one, assign a paralegal to a matter —
 access is revoked/scoped immediately), and an attorney-only Audit Log
-panel over the append-only, privilege-sensitive audit trail; and
-**persistence** that's either file-backed or a real Postgres database —
+panel over the append-only, privilege-sensitive audit trail; **persistence**
+that's either file-backed or a real Postgres database; and a **Google
+Calendar integration** (`npm run sync:calendar`) that confirms deadlines
+against a shared calendar as the independent `calendar_system` source —
 plus the interfaces a practice-area module and firm config plug into.
 See CLAUDE.md's "Not yet built" section for what's still ahead (real
-STT/TTS vendor, password reset/MFA, a real calendar vendor).
+STT/TTS vendor, password reset/MFA, Google Calendar key rotation/vendor
+due-diligence).
 
 ## Setup
 

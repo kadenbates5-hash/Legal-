@@ -217,6 +217,59 @@ confirmation requires the calendar integration's own credential — an
 attorney cannot self-report as the calendar system. The dashboard's
 "Deadlines" panel exposes both the status check and the confirm action.
 
+## Google Calendar integration (§7 item #1's remaining piece — resolved)
+
+`src/integrations/` — the real vendor behind the `calendar_system`
+credential, chosen as Google (the firm's email/calendar platform).
+Read-only and deliberately narrow: it can only *confirm* deadlines that
+independently appear on a shared calendar, never write to or alter
+`DeadlineTracker` any other way.
+
+- `calendar-events-source.ts` — `CalendarEventsSource`, the vendor-
+  agnostic interface (one method: `listDeadlineEvents()`). A firm on
+  Outlook/Exchange would implement this interface instead of
+  `google-calendar.ts`; nothing else in this layer is Google-specific.
+- `google-calendar.ts` — `GoogleCalendarEventsSource`, the real Google
+  Calendar v3 API client. Service-account auth only (the firm shares one
+  calendar with the service account's email — no Google Workspace
+  domain-wide delegation, no per-attorney OAuth), hand-rolled as a JWT
+  bearer flow via `node:crypto` + `fetch` rather than pulling in
+  `googleapis`/`google-auth-library`, matching this project's
+  dependency-light style (`server.ts` is dependency-free; `pg` was the
+  one justified exception). Only events explicitly tagged
+  `extendedProperties.private.matterId`/`.deadlineType` (Google
+  Calendar's structured per-event data, not free-text titles/
+  descriptions) are treated as deadline confirmations — guessing wrong
+  here would mean confirming the wrong deadline. `parseDeadlineEvent()`
+  is exported specifically so the parsing rules are unit-testable
+  without a live Google Calendar.
+- `calendar-deadline-sync.ts` — `CalendarDeadlineSync`, the practice-
+  area/vendor-agnostic engine: reads events from whatever
+  `CalendarEventsSource` is configured and confirms each one against
+  Docket's own HTTP API using the `x-system-api-key` credential — the
+  same way any other API client would, never a shortcut straight into
+  `DeadlineTracker`. A per-event failure (wrong key, network error, a
+  date disagreement producing a `conflict`) is recorded per-event rather
+  than aborting the whole run.
+- `sync-calendar-deadlines.ts` — the standalone entry point (`npm run
+  sync:calendar`), deliberately outside the main Docket server process —
+  same reasoning as scheduling reminders staying "for a host process to
+  poll and actually send." Meant to run on its own schedule (e.g. a cron
+  job) against `GOOGLE_SERVICE_ACCOUNT_EMAIL`/
+  `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`/`GOOGLE_CALENDAR_ID` and
+  `DOCKET_BASE_URL`/`DOCKET_SYSTEM_API_KEY`.
+
+What this doesn't do: automate *rotating* the system API key (Google
+service-account keys are rotated by regenerating a new key file and
+updating `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`/`CALENDAR_SYSTEM_API_KEY`
+by hand), and it doesn't complete §5's vendor due-diligence checklist
+(zero-retention, no training on firm data, storage jurisdiction, subpoena
+risk, encryption) for Google Calendar specifically — that's the firm's
+decision to make about the vendor, separate from this technical
+integration. It also doesn't sync the other direction: `Appointment`s
+from `core/scheduling.ts` aren't pushed to Google Calendar as events —
+that would be a separate, additive piece if wanted later.
+
 ## Real authentication (§5/§6 — resolved)
 
 `src/core/auth.ts` — `AuthService`. Replaces the earlier
@@ -459,6 +512,7 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 # TRUST_PROXY=true npm run start:review-ui                               # only behind a real TLS-terminating reverse proxy — see "Real authentication"
 # FIRM_CONFIG_FILE=./data/firm-config.json npm run start:review-ui        # enable scheduling business-hours/attorney-assignment/branding
 # CALENDAR_SYSTEM_API_KEY=... npm run start:review-ui                     # pin the calendar-integration key instead of auto-generating one
+GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
 ```
 
 ## §7 open items — status
@@ -476,11 +530,11 @@ work remains (see the specific caveats kept under each item, and
    redundancy logic and `confirmDeadline()`'s source/role gating are sound
    to trust with real dates. The "any string can call itself
    `calendar_system`" gap is closed technically — see "Real
-   authentication" above. Separately, and *not* covered by this sign-off:
-   there's still no real calendar *vendor* behind that credential (no
-   Google/Outlook/etc. integration exists to issue/rotate it
-   automatically) — that's a distinct technical integration, not a legal
-   question, and remains open (see "Not yet built").
+   authentication" above. The real calendar vendor behind that credential
+   is now built too — see "Google Calendar integration" above — though
+   key *rotation* stays manual and §5's vendor due-diligence review of
+   Google Calendar itself is still the firm's call, not covered by this
+   sign-off (see "Not yet built").
 2. **Full criminal-law templates/intake questions** — resolved in code,
    see `criminal-law/index.ts`, and **signed off**: acceptable to use as
    the practice-area content, not merely a seed requiring further
@@ -501,10 +555,14 @@ above). Still open:
 - A real STT/TTS vendor integration behind `SpeechToText`/`TextToSpeech` —
   `voice-agent.ts` only has the interfaces and a test double so far, per
   §5's vendor due-diligence checklist (not yet completed for any vendor)
-- A real calendar *vendor* integration issuing/rotating the system API key
-  automatically (`core/auth.ts`'s `verifySystemApiKey` is the enforcement
-  point now — see "Real authentication" above — but no Google/Outlook/etc.
-  integration exists yet to be the thing presenting that key)
+- Automatic system-API-key *rotation* for the Google Calendar integration
+  (see "Google Calendar integration" above — today a key is rotated by
+  hand, regenerating the service-account key and re-running
+  `CALENDAR_SYSTEM_API_KEY`), and §5's vendor due-diligence review of
+  Google Calendar itself (zero-retention, storage jurisdiction, subpoena
+  risk) — a firm decision, not a technical one
+- Syncing the other direction: `Appointment`s aren't pushed to Google
+  Calendar as events, only deadline confirmations flow in from it
 - The rest of account management: password reset, MFA, and self-service
   invites (adding/disabling users after the one-time boot-time seed *is*
   built — see `AccountsService` above)
