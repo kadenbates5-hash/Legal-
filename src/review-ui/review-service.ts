@@ -126,9 +126,27 @@ export class ReviewGateService {
     return detail(wp);
   }
 
-  /** Records an independent (human or calendar-system) deadline calculation — never "agent". */
+  /**
+   * Records an independent (human or calendar-system) deadline calculation
+   * — never "agent". The source and the actor's role must match: a
+   * `calendar_system` confirmation must come from the calendar
+   * integration's own credential (role `"system"`, authenticated via
+   * `AuthService.verifySystemApiKey` — see `review-ui/server.ts`), not
+   * from an attorney who merely picked "calendar_system" in a dropdown.
+   * Without this, "two independent sources" in `core/deadline.ts` would be
+   * enforceable in name only — any human could self-report as the second,
+   * supposedly-independent source.
+   */
   confirmDeadline(actor: Actor, matterId: string, type: DeadlineType, date: string, source: "human" | "calendar_system"): DeadlineStatus {
-    requireAttorney(actor);
+    if (source === "calendar_system") {
+      if (actor.role !== "system") {
+        throw new AccessDeniedError(
+          "a 'calendar_system' confirmation requires the calendar integration's own credential, not a human actor",
+        );
+      }
+    } else {
+      requireAttorney(actor);
+    }
     if (!this.#deadlineTracker) {
       throw new Error("no deadline tracker configured");
     }

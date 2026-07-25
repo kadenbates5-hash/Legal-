@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Sign in — Attorney Review Queue</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 360px; margin: 4rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.3rem; }
+  label { display: block; margin-top: 1rem; font-size: 0.9rem; }
+  input[type="text"], input[type="password"] { width: 100%; padding: 0.5rem; margin-top: 0.25rem; box-sizing: border-box; }
+  .remember { display: flex; align-items: center; gap: 0.4rem; margin-top: 1rem; }
+  .remember input { width: auto; }
+  button { margin-top: 1.5rem; padding: 0.5rem 1rem; width: 100%; }
+  .error { color: #b00020; margin-top: 1rem; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<h1>Attorney Review Queue</h1>
+<p>Sign in to continue. Real, credentialed accounts only — no header shortcuts.</p>
+
+<form id="loginForm">
+  <label>Username <input id="username" type="text" autocomplete="username" required /></label>
+  <label>Password <input id="password" type="password" autocomplete="current-password" required /></label>
+  <div class="remember">
+    <input id="remember" type="checkbox" />
+    <label for="remember" style="display: inline; margin: 0;">Remember me on this device</label>
+  </div>
+  <button type="submit">Sign in</button>
+  <div id="error" class="error"></div>
+</form>
+
+<script>
+document.getElementById("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById("error");
+  errorEl.textContent = "";
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        username: document.getElementById("username").value,
+        password: document.getElementById("password").value,
+        remember: document.getElementById("remember").checked,
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "sign-in failed");
+    window.location.href = "/";
+  } catch (err) {
+    errorEl.textContent = err.message;
+  }
+});
+</script>
+</body>
+</html>

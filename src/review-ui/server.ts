@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { AccessDeniedError, ReviewGateError, type Actor } from "../core/types.js";
+import { AuthError, type AuthService } from "../core/auth.js";
 import type { DeadlineType } from "../core/deadline.js";
 import { SchedulingError, type AppointmentType, type SchedulingService } from "../core/scheduling.js";
 import { ReviewGateService } from "./review-service.js";
@@ -10,24 +11,72 @@ import { ReviewGateService } from "./review-service.js";
 /**
  * Attorney review-gate UI backend (§8 build order step 5): a small JSON API
  * over `ReviewGateService`, plus the static dashboard page in `public/`.
- * Deliberately dependency-free (Node's built-in `http`, no framework) —
- * this is a seed implementation to prove the UI surface end to end, not a
- * production auth story. Actor identity comes from `x-actor-id`/
- * `x-actor-role` request headers, which is a stand-in for real
- * authentication (§5/§6 flag real auth/session handling as launch
- * prerequisites, not yet built here).
+ * Deliberately dependency-free (Node's built-in `http`, no framework).
+ *
+ * Actor identity comes from a session cookie issued by `POST /api/login`
+ * and validated against `AuthService` on every request — the earlier
+ * `x-actor-id`/`x-actor-role` header stand-in is gone. There is no code
+ * path to a valid `Actor` that doesn't go through a real login at least
+ * once; "remember me" only extends how long that session lasts (see
+ * `core/auth.ts`), it never skips authentication.
+ *
+ * The one exception is `x-system-api-key`: the calendar-integration
+ * machine credential (§5's due-diligence item), which authenticates as
+ * role `"system"` without a human session — see `handleDeadlineRequest`'s
+ * `calendar_system`-source gating and `review-service.ts`.
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
-
-function actorFromHeaders(req: IncomingMessage): Actor {
-  const id = firstHeader(req.headers["x-actor-id"]) ?? "unknown";
-  const role = firstHeader(req.headers["x-actor-role"]) ?? "unknown";
-  return { id, role: role as Actor["role"] };
-}
+const SESSION_COOKIE_NAME = "session_token";
 
 function firstHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function parseCookies(req: IncomingMessage): Record<string, string> {
+  const header = req.headers.cookie;
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    if (key) out[key] = decodeURIComponent(value);
+  }
+  return out;
+}
+
+function sessionCookieHeader(token: string, expiresAt: string): string {
+  const maxAgeSeconds = Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
+  return `${SESSION_COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
+}
+
+function clearSessionCookieHeader(): string {
+  return `${SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`;
+}
+
+/**
+ * Resolves the caller's Actor. Checks the system API key first (the
+ * calendar integration authenticates as a machine credential, not a human
+ * session), then falls back to the session cookie. Throws AuthError if
+ * neither is present/valid — callers must catch this and respond 401.
+ */
+function resolveActor(req: IncomingMessage, auth: AuthService): Actor {
+  const apiKey = firstHeader(req.headers["x-system-api-key"]);
+  if (apiKey) {
+    if (!auth.verifySystemApiKey(apiKey)) {
+      throw new AuthError("invalid system API key");
+    }
+    return { id: "calendar-integration", role: "system" };
+  }
+
+  const token = parseCookies(req)[SESSION_COOKIE_NAME];
+  const actor = auth.actorForToken(token);
+  if (!actor) {
+    throw new AuthError("authentication required");
+  }
+  return actor as Actor;
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -41,13 +90,14 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   }
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+function sendJson(res: ServerResponse, status: number, body: unknown, extraHeaders?: Record<string, string>): void {
   const payload = JSON.stringify(body);
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", ...extraHeaders });
   res.end(payload);
 }
 
 function errorStatus(err: unknown): number {
+  if (err instanceof AuthError) return 401;
   if (err instanceof AccessDeniedError) return 403;
   if (err instanceof ReviewGateError) return 409;
   if (err instanceof Error && err.message.startsWith("no work product")) return 404;
@@ -63,6 +113,7 @@ const MIME_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
 };
 
+/** Static assets other than the dashboard itself are always servable (the login page has to be reachable while logged out). */
 async function serveStatic(res: ServerResponse, requestPath: string): Promise<void> {
   const relative = requestPath === "/" ? "index.html" : requestPath.slice(1);
   const resolved = path.normalize(path.join(PUBLIC_DIR, relative));
@@ -83,19 +134,26 @@ async function serveStatic(res: ServerResponse, requestPath: string): Promise<vo
 /**
  * `onMutated` fires after any successful state-changing request (approve,
  * reject, request-revision, release, clear-flag, appointment booking/
- * changes) — a persistence layer can hook this to save after every
- * mutation without this file knowing anything about how or where state is
- * persisted. See `review-ui/start.ts` for the file-backed wiring.
- * `scheduling` is optional — omit it and `/api/appointments*` 404s.
+ * changes, login, logout) — a persistence layer can hook this to save
+ * after every mutation without this file knowing anything about how or
+ * where state is persisted. See `review-ui/start.ts` for the file-backed
+ * wiring. `scheduling` is optional — omit it and `/api/appointments*`
+ * 404s.
  */
-export function createReviewServer(service: ReviewGateService, onMutated?: () => void, scheduling?: SchedulingService): Server {
+export function createReviewServer(
+  service: ReviewGateService,
+  auth: AuthService,
+  onMutated?: () => void,
+  scheduling?: SchedulingService,
+): Server {
   return createServer((req, res) => {
-    void handleRequest(service, req, res, onMutated, scheduling);
+    void handleRequest(service, auth, req, res, onMutated, scheduling);
   });
 }
 
 async function handleRequest(
   service: ReviewGateService,
+  auth: AuthService,
   req: IncomingMessage,
   res: ServerResponse,
   onMutated?: () => void,
@@ -103,14 +161,49 @@ async function handleRequest(
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
 
+  if (url.pathname === "/api/login" && req.method === "POST") {
+    await handleLogin(auth, req, res, onMutated);
+    return;
+  }
+
+  if (url.pathname === "/api/logout" && req.method === "POST") {
+    const token = parseCookies(req)[SESSION_COOKIE_NAME];
+    if (token) auth.logout(token);
+    sendJson(res, 200, { ok: true }, { "Set-Cookie": clearSessionCookieHeader() });
+    onMutated?.();
+    return;
+  }
+
+  if (url.pathname === "/api/me" && req.method === "GET") {
+    try {
+      const actor = resolveActor(req, auth);
+      const user = auth.userForToken(parseCookies(req)[SESSION_COOKIE_NAME]);
+      sendJson(res, 200, { id: actor.id, role: actor.role, username: user?.username });
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+    }
+    return;
+  }
+
   if (!url.pathname.startsWith("/api/")) {
-    if (req.method === "GET") await serveStatic(res, url.pathname);
-    else sendJson(res, 405, { error: "method not allowed" });
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "method not allowed" });
+      return;
+    }
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      const token = parseCookies(req)[SESSION_COOKIE_NAME];
+      if (!auth.actorForToken(token)) {
+        res.writeHead(302, { Location: "/login.html" });
+        res.end();
+        return;
+      }
+    }
+    await serveStatic(res, url.pathname);
     return;
   }
 
   try {
-    const actor = actorFromHeaders(req);
+    const actor = resolveActor(req, auth);
 
     if (url.pathname.startsWith("/api/deadlines")) {
       await handleDeadlineRequest(service, req, res, actor, url, onMutated);
@@ -183,6 +276,31 @@ async function handleRequest(
     sendJson(res, 404, { error: "not found" });
   } catch (err) {
     sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+  }
+}
+
+async function handleLogin(
+  auth: AuthService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  onMutated?: () => void,
+): Promise<void> {
+  try {
+    const body = await readJsonBody(req);
+    const username = String(body["username"] ?? "");
+    const password = String(body["password"] ?? "");
+    const remember = body["remember"] === true;
+    const session = auth.login(username, password, remember);
+    const user = auth.userForToken(session.token);
+    sendJson(
+      res,
+      200,
+      { id: user?.actorId, role: user?.role, username: user?.username },
+      { "Set-Cookie": sessionCookieHeader(session.token, session.expiresAt) },
+    );
+    onMutated?.();
+  } catch (err) {
+    sendJson(res, err instanceof AuthError ? 401 : 400, { error: err instanceof Error ? err.message : "invalid request" });
   }
 }
 

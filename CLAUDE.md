@@ -158,10 +158,48 @@ This isn't just advisory — `ReviewGateService.clearFlag()` refuses to
 clear `DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG` unless
 `DeadlineTracker.isConfirmed()` is actually true for the matter/type in
 question (requiring a `deadlineType` parameter on that call specifically).
-`confirmDeadline()` is how an attorney records the independent human/
-calendar-system side — it rejects `source: "agent"` outright, since that
-path exists to be the second, non-agent source. The dashboard's
+`confirmDeadline()` is how the independent human/calendar-system side gets
+recorded — it rejects `source: "agent"` outright, since that path exists
+to be the second, non-agent source, and it enforces *who* may record
+*which* source (see "Real authentication" below): a `"human"`
+confirmation requires an attorney session, a `"calendar_system"`
+confirmation requires the calendar integration's own credential — an
+attorney cannot self-report as the calendar system. The dashboard's
 "Deadlines" panel exposes both the status check and the confirm action.
+
+## Real authentication (§5/§6 — resolved)
+
+`src/core/auth.ts` — `AuthService`. Replaces the earlier
+`x-actor-id`/`x-actor-role` header stand-in with real, credentialed
+accounts:
+
+- Passwords are hashed with `scrypt` (never stored or compared in plain
+  text; comparison is timing-safe via `timingSafeEqual`).
+- `login()` issues a session token; there is no code path to a valid actor
+  that doesn't go through `login()` at least once — login is always
+  required.
+- "Remember me" (`login(..., remember: true)`) only extends how long the
+  session lasts (30 days vs. the 12-hour default) — it never skips
+  authentication.
+- A `"system"` actor role (already part of `Actor` in `core/types.ts`) is
+  deliberately *not* created via username/password. It's the calendar
+  integration's own machine credential — see `setSystemApiKey()`/
+  `verifySystemApiKey()` — which closes the "any string can call itself
+  `calendar_system`" gap noted below: `ReviewGateService.confirmDeadline()`
+  now requires role `"system"` specifically for a `calendar_system`
+  source, and role `"attorney"` for a `"human"` source.
+- `AuthService` snapshots into `persistence/system-state.ts` like every
+  other stateful core object, so accounts, live sessions ("remember me"
+  survives a restart), and the system key persist across process
+  restarts.
+
+This is still a real-vendor-shaped seed, not a finished identity system:
+there's no password reset, no MFA, and no account-management UI — accounts
+are created once at boot from environment variables (see "Attorney
+review-gate UI" below) and otherwise unmanaged. It replaces the *trust*
+gap (headers anyone could set) with a *real* one (credentialed sessions),
+which is the prerequisite §5/§6 called for, not the last word on
+production auth.
 
 ## Attorney review-gate UI
 
@@ -178,20 +216,36 @@ in-memory registry that makes drafted `WorkProduct`s discoverable (a
   surface at all, not just get blocked on the mutating calls.
 - `server.ts` — a small dependency-free JSON API (Node's built-in `http`,
   no framework) over the service, plus static-file serving for the
-  dashboard. Actor identity comes from `x-actor-id`/`x-actor-role`
-  headers — a stand-in for real auth, which is not yet built (see §5/§6).
-  `npm run build` copies `public/` into `dist/` since `tsc` only compiles
-  `.ts` files.
-- `public/index.html` — a minimal vanilla-JS dashboard: lists work product
-  pending review, shows content/flags/history, lets an attorney
-  approve/reject/request-revision/clear-flag/release, and includes
-  "Deadlines" and "Scheduling" panels over their respective APIs.
+  dashboard. Actor identity comes from an `httpOnly` session cookie set by
+  `POST /api/login` and validated against `AuthService` on every request
+  (see "Real authentication" above) — or from an `x-system-api-key` header
+  for the calendar integration's machine credential. `GET /` redirects to
+  `/login.html` when there's no valid session; `POST /api/logout` clears
+  it. `npm run build` copies `public/` into `dist/` since `tsc` only
+  compiles `.ts` files.
+- `public/login.html` — username/password + a "remember me" checkbox,
+  posting to `/api/login`.
+- `public/index.html` — a minimal vanilla-JS dashboard: shows who's signed
+  in, lists work product pending review, shows content/flags/history, lets
+  an attorney approve/reject/request-revision/clear-flag/release, and
+  includes "Deadlines" and "Scheduling" panels over their respective APIs.
+  Any `401` from the API redirects the browser back to `/login.html`.
+- `start.ts`'s boot-time bootstrap: if no accounts exist yet in the
+  persisted state, it creates them from `ATTORNEY_USERNAME`/
+  `ATTORNEY_PASSWORD` (and optionally `PARALEGAL_USERNAME`/
+  `RECEPTIONIST_USERNAME`/`STAFF_USERNAME` with matching `_PASSWORD`
+  vars). This only ever runs once — once any account exists, it's a no-op
+  forever, by design (re-seeding/resetting credentials belongs to a real
+  account-management flow, not a boot-time env var). It also sets the
+  calendar-integration system key from `CALENDAR_SYSTEM_API_KEY`, or
+  generates and logs a random one on first boot if that's unset.
 
 `/api/appointments*` (see `scheduling.ts` above) is wired into the same
 server, gated by `SchedulingService`'s own optional `AccessControl`
 integration rather than `ReviewGateService` — scheduling is a
 receptionist-role concern, not attorney-only, so it deliberately isn't
-behind the attorney-only service.
+behind the attorney-only service. It still requires a logged-in session
+(any role) like every other `/api/*` route.
 
 ## Persistence
 
@@ -244,18 +298,23 @@ attorney clears them via `workProduct.clearFlag(...)`.
 npm install
 npm run typecheck        # tsc --noEmit
 npm test                  # vitest run
-npm run start:review-ui   # attorney review-gate dashboard at http://localhost:3000
+ATTORNEY_USERNAME=you ATTORNEY_PASSWORD=at-least-8-chars npm run start:review-ui   # first boot: seeds your login
+npm run start:review-ui   # subsequent boots — attorney review-gate dashboard at http://localhost:3000
 # STATE_FILE=./data/system-state.json PORT=3000 npm run start:review-ui  # override defaults
 # FIRM_CONFIG_FILE=./data/firm-config.json npm run start:review-ui        # enable scheduling business-hours/attorney-assignment/branding
+# CALENDAR_SYSTEM_API_KEY=... npm run start:review-ui                     # pin the calendar-integration key instead of auto-generating one
 ```
 
 ## §7 open items — status
 
 1. **Deadline/calendar redundancy** — resolved in code, see above
-   (`core/deadline.ts`). Still needs a real calendar-system integration
-   (currently any string source can call itself `"calendar_system"`) and
-   sign-off from someone who actually calculates these deadlines in
-   practice before trusting it with real dates.
+   (`core/deadline.ts`). The "any string can call itself
+   `calendar_system`" gap is now closed technically — see "Real
+   authentication" above — but there's still no real calendar *vendor*
+   behind that credential (no Google/Outlook/etc. integration exists to
+   issue it automatically), and it still needs sign-off from someone who
+   actually calculates these deadlines in practice before trusting it with
+   real dates.
 2. **Full criminal-law templates/intake questions** — resolved in code,
    see `criminal-law/index.ts`. Still needs review by a practicing
    criminal defense attorney before real use — this is a reasonable seed
@@ -274,11 +333,15 @@ but is single-process/single-file. Still open:
 - A real STT/TTS vendor integration behind `SpeechToText`/`TextToSpeech` —
   `voice-agent.ts` only has the interfaces and a test double so far, per
   §5's vendor due-diligence checklist (not yet completed for any vendor)
-- Real authentication for the review-gate UI (currently header-based, a
-  stand-in — see `server.ts`)
 - A real multi-user database in place of the file-backed persistence
   adapter, before this goes near real clients
-- A real calendar-system integration for `DeadlineTracker` (currently any
-  caller can self-report as `"calendar_system"`)
+- A real calendar *vendor* integration issuing/rotating the system API key
+  automatically (`core/auth.ts`'s `verifySystemApiKey` is the enforcement
+  point now — see "Real authentication" above — but no Google/Outlook/etc.
+  integration exists yet to be the thing presenting that key)
+- Account management for the review-gate UI: password reset, MFA, adding/
+  disabling users after the one-time boot-time seed, and TLS termination
+  in front of the session cookie (currently unset `Secure` flag, meant for
+  local/behind-a-TLS-proxy deployment — see `server.ts`'s cookie helpers)
 - Human/domain-expert sign-off on all three §7 items before real-client
   use — see the "§7 open items — status" section above

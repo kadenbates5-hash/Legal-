@@ -3,10 +3,12 @@ import { ReviewGateService } from "../src/review-ui/review-service.js";
 import { WorkProductStore } from "../src/core/work-product-store.js";
 import { WorkProduct } from "../src/core/review-gate.js";
 import { AuditLog } from "../src/core/audit.js";
+import { DeadlineTracker } from "../src/core/deadline.js";
 import { AccessDeniedError, ReviewGateError, type Actor } from "../src/core/types.js";
 
 const attorney: Actor = { id: "a1", role: "attorney" };
 const paralegal: Actor = { id: "p1", role: "paralegal" };
+const calendarSystem: Actor = { id: "calendar-integration", role: "system" };
 
 function makeService() {
   const store = new WorkProductStore();
@@ -78,5 +80,35 @@ describe("ReviewGateService (attorney-only surface)", () => {
     wp.submitForReview(paralegal);
     const rejected = service.reject(attorney, "wp1", "not viable");
     expect(rejected.status).toBe("rejected");
+  });
+});
+
+describe("ReviewGateService.confirmDeadline source/role gating", () => {
+  it("accepts a 'calendar_system' source only from a system-role actor", () => {
+    const service = new ReviewGateService(new WorkProductStore(), new DeadlineTracker());
+    expect(() => service.confirmDeadline(attorney, "m1", "speedy_trial", "2026-09-01", "calendar_system")).toThrow(
+      AccessDeniedError,
+    );
+    expect(() =>
+      service.confirmDeadline(calendarSystem, "m1", "speedy_trial", "2026-09-01", "calendar_system"),
+    ).not.toThrow();
+  });
+
+  it("accepts a 'human' source only from an attorney, not the system credential", () => {
+    const service = new ReviewGateService(new WorkProductStore(), new DeadlineTracker());
+    expect(() => service.confirmDeadline(calendarSystem, "m1", "speedy_trial", "2026-09-01", "human")).toThrow(
+      AccessDeniedError,
+    );
+    expect(() => service.confirmDeadline(attorney, "m1", "speedy_trial", "2026-09-01", "human")).not.toThrow();
+  });
+
+  it("a paralegal can confirm neither source", () => {
+    const service = new ReviewGateService(new WorkProductStore(), new DeadlineTracker());
+    expect(() => service.confirmDeadline(paralegal, "m1", "speedy_trial", "2026-09-01", "human")).toThrow(
+      AccessDeniedError,
+    );
+    expect(() => service.confirmDeadline(paralegal, "m1", "speedy_trial", "2026-09-01", "calendar_system")).toThrow(
+      AccessDeniedError,
+    );
   });
 });

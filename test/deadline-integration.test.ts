@@ -10,6 +10,7 @@ import { ReviewGateError, type Actor } from "../src/core/types.js";
 
 const paralegal: Actor = { id: "p1", role: "paralegal" };
 const attorney: Actor = { id: "a1", role: "attorney" };
+const calendarSystem: Actor = { id: "calendar-integration", role: "system" };
 
 function makeRig() {
   const auditLog = new AuditLog();
@@ -47,7 +48,7 @@ describe("deadline redundancy end to end: drafting -> review gate", () => {
     ).toThrow(ReviewGateError);
   });
 
-  it("clears once an attorney records an independent confirmation matching the agent's date", () => {
+  it("clears once the calendar integration records an independent confirmation matching the agent's date", () => {
     const { draftingSession, reviewService } = makeRig();
     const wp = draftingSession.draftFromTemplate({
       templateId: "discovery_request",
@@ -57,7 +58,7 @@ describe("deadline redundancy end to end: drafting -> review gate", () => {
     });
     draftingSession.submitForReview(wp);
 
-    reviewService.confirmDeadline(attorney, "m1", "speedy_trial", "2026-09-01", "calendar_system");
+    reviewService.confirmDeadline(calendarSystem, "m1", "speedy_trial", "2026-09-01", "calendar_system");
     const cleared = reviewService.clearFlag(attorney, wp.id, DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG, "speedy_trial");
     expect(cleared.flags).not.toContain(DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG);
 
