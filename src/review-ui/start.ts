@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createReviewServer } from "./server.js";
 import { ReviewGateService } from "./review-service.js";
 import { IntakeDemoSessions } from "./intake-demo.js";
+import { AccountsService } from "./accounts-service.js";
 import { loadSystemState, saveSystemState } from "../persistence/system-state.js";
 import { readJsonFile } from "../persistence/json-file-store.js";
 import { AccessControl } from "../core/access-control.js";
@@ -28,9 +29,11 @@ const state = await loadSystemState(STATE_FILE, firmConfig ? { firmConfig } : {}
 /**
  * First-run bootstrap only: if the persisted state has no accounts yet,
  * seed them from environment variables. Once any user exists, this is a
- * no-op forever — there is no way to re-seed or reset credentials through
- * this path, by design (that belongs to a real account-management flow,
- * not a boot-time env var).
+ * no-op forever — env vars are for getting the very first attorney
+ * account into an empty system, not an ongoing credential-management
+ * path. Adding/disabling accounts after that goes through Docket's
+ * Accounts panel (see AccountsService below), which is attorney-gated
+ * like everything else.
  */
 function bootstrapAccount(envPrefix: string, role: UserRole): void {
   const username = process.env[`${envPrefix}_USERNAME`];
@@ -90,6 +93,8 @@ const intake = new IntakeDemoSessions({
   ...(firmConfig ? { firmConfig } : {}),
 });
 
+const accounts = new AccountsService(state.auth);
+
 const server = createReviewServer(
   service,
   state.auth,
@@ -98,6 +103,7 @@ const server = createReviewServer(
   },
   state.scheduling,
   intake,
+  accounts,
 );
 
 const port = Number(process.env["PORT"] ?? 3000);

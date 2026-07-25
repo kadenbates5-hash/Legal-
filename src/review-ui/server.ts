@@ -8,6 +8,8 @@ import type { DeadlineType } from "../core/deadline.js";
 import { SchedulingError, type AppointmentType, type SchedulingService } from "../core/scheduling.js";
 import { ReviewGateService } from "./review-service.js";
 import type { IntakeDemoSessions } from "./intake-demo.js";
+import type { AccountsService } from "./accounts-service.js";
+import type { UserRole } from "../core/auth.js";
 
 /**
  * Attorney review-gate UI backend (§8 build order step 5): a small JSON API
@@ -98,11 +100,19 @@ function sendJson(res: ServerResponse, status: number, body: unknown, extraHeade
 }
 
 function errorStatus(err: unknown): number {
-  if (err instanceof AuthError) return 401;
+  if (err instanceof AuthError) {
+    // Account-creation validation (bad password/duplicate username) is a
+    // 400 from an already-authenticated caller, not an auth failure —
+    // only login/system-key mismatches are genuinely 401.
+    if (err.message.includes("already exists") || err.message.includes("must be at least")) return 400;
+    return 401;
+  }
   if (err instanceof AccessDeniedError) return 403;
   if (err instanceof ReviewGateError) return 409;
   if (err instanceof Error && err.message.startsWith("no work product")) return 404;
   if (err instanceof Error && err.message.startsWith("no intake demo session")) return 404;
+  if (err instanceof Error && err.message.startsWith("no user")) return 404;
+  if (err instanceof Error && err.message.startsWith("cannot disable")) return 409;
   if (err instanceof SchedulingError) {
     return err.message.startsWith("no appointment") ? 404 : 409;
   }
@@ -148,9 +158,10 @@ export function createReviewServer(
   onMutated?: () => void,
   scheduling?: SchedulingService,
   intake?: IntakeDemoSessions,
+  accounts?: AccountsService,
 ): Server {
   return createServer((req, res) => {
-    void handleRequest(service, auth, req, res, onMutated, scheduling, intake);
+    void handleRequest(service, auth, req, res, onMutated, scheduling, intake, accounts);
   });
 }
 
@@ -162,6 +173,7 @@ async function handleRequest(
   onMutated?: () => void,
   scheduling?: SchedulingService,
   intake?: IntakeDemoSessions,
+  accounts?: AccountsService,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
 
@@ -229,6 +241,15 @@ async function handleRequest(
         return;
       }
       await handleIntakeRequest(intake, req, res, actor, url);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/accounts")) {
+      if (!accounts) {
+        sendJson(res, 404, { error: "account management is not configured on this server" });
+        return;
+      }
+      await handleAccountsRequest(accounts, req, res, actor, url, onMutated);
       return;
     }
 
@@ -382,6 +403,51 @@ async function handleIntakeRequest(
     const body = await readJsonBody(req);
     const turn = intake.handleMessage(sessionId, String(body["text"] ?? ""));
     sendJson(res, 200, turn);
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleAccountsRequest(
+  accounts: AccountsService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  if (url.pathname === "/api/accounts" && req.method === "GET") {
+    sendJson(res, 200, accounts.list(actor));
+    return;
+  }
+
+  if (url.pathname === "/api/accounts" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = accounts.create(actor, {
+      username: String(body["username"] ?? ""),
+      password: String(body["password"] ?? ""),
+      role: body["role"] as UserRole,
+      ...(typeof body["actorId"] === "string" && body["actorId"] ? { actorId: body["actorId"] } : {}),
+    });
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  const segments = url.pathname.replace(/^\/api\/accounts\/?/, "").split("/").filter(Boolean);
+  if (segments.length === 2 && req.method === "POST") {
+    const id = segments[0]!;
+    const action = segments[1];
+    let result;
+    if (action === "disable") result = accounts.disable(actor, id);
+    else if (action === "enable") result = accounts.enable(actor, id);
+    else {
+      sendJson(res, 404, { error: "not found" });
+      return;
+    }
+    sendJson(res, 200, result);
+    onMutated?.();
     return;
   }
 

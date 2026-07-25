@@ -137,4 +137,90 @@ describe("AuthService", () => {
       vi.useRealTimers();
     }
   });
+
+  describe("account management (disable/enable)", () => {
+    it("creates accounts enabled by default", () => {
+      const auth = new AuthService();
+      const user = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      expect(user.disabled).toBe(false);
+    });
+
+    it("a disabled account can no longer log in, with the same generic error as a wrong password", () => {
+      const auth = new AuthService();
+      const user = auth.createUser({ username: "alice", password: "correct-horse", role: "paralegal" });
+      auth.setDisabled(user.id, true);
+
+      let message: string | undefined;
+      try {
+        auth.login("alice", "correct-horse", false);
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toMatch(/invalid username or password/);
+    });
+
+    it("disabling revokes every live session for that user immediately, including 'remember me'", () => {
+      const auth = new AuthService();
+      const user = auth.createUser({ username: "alice", password: "correct-horse", role: "paralegal" });
+      const session = auth.login("alice", "correct-horse", true);
+      expect(auth.actorForToken(session.token)).toBeDefined();
+
+      auth.setDisabled(user.id, true);
+      expect(auth.actorForToken(session.token)).toBeUndefined();
+    });
+
+    it("re-enabling restores the ability to log in", () => {
+      const auth = new AuthService();
+      const user = auth.createUser({ username: "alice", password: "correct-horse", role: "paralegal" });
+      auth.setDisabled(user.id, true);
+      auth.setDisabled(user.id, false);
+      expect(() => auth.login("alice", "correct-horse", false)).not.toThrow();
+    });
+
+    it("refuses to disable the last remaining enabled attorney account", () => {
+      const auth = new AuthService();
+      const onlyAttorney = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      expect(() => auth.setDisabled(onlyAttorney.id, true)).toThrow(/at least one enabled attorney/);
+    });
+
+    it("allows disabling an attorney once another enabled attorney exists", () => {
+      const auth = new AuthService();
+      const first = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      auth.createUser({ username: "bob", password: "correct-horse", role: "attorney" });
+      expect(() => auth.setDisabled(first.id, true)).not.toThrow();
+    });
+
+    it("the last-attorney safeguard doesn't block disabling non-attorney roles", () => {
+      const auth = new AuthService();
+      auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      const paralegal = auth.createUser({ username: "carol", password: "correct-horse", role: "paralegal" });
+      expect(() => auth.setDisabled(paralegal.id, true)).not.toThrow();
+    });
+
+    it("throws for an unknown user id", () => {
+      const auth = new AuthService();
+      expect(() => auth.setDisabled("nope", true)).toThrow(/no user/);
+    });
+
+    it("listUsers includes disabled accounts", () => {
+      const auth = new AuthService();
+      auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      const bob = auth.createUser({ username: "bob", password: "correct-horse", role: "attorney" });
+      auth.setDisabled(bob.id, true);
+      const usernames = auth.listUsers().map((u) => `${u.username}:${u.disabled}`);
+      expect(usernames).toContain("alice:false");
+      expect(usernames).toContain("bob:true");
+    });
+
+    it("round-trips the disabled flag through a snapshot", () => {
+      const auth = new AuthService();
+      auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      const bob = auth.createUser({ username: "bob", password: "correct-horse", role: "attorney" });
+      auth.setDisabled(bob.id, true);
+
+      const restored = AuthService.fromSnapshot(auth.toSnapshot());
+      expect(() => restored.login("bob", "correct-horse", false)).toThrow(AuthError);
+      expect(() => restored.login("alice", "correct-horse", false)).not.toThrow();
+    });
+  });
 });

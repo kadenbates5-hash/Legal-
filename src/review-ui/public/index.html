@@ -85,6 +85,7 @@
   nav.nav button.active { background: var(--accent); color: #fff; }
   nav.nav .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.55; flex-shrink: 0; }
   nav.nav button.active .dot { opacity: 1; }
+  nav.nav button[hidden] { display: none; }
 
   .sidebar-footer { margin-top: auto; padding: 0.5rem; font-size: 0.72rem; color: #6b7280; line-height: 1.5; }
 
@@ -230,6 +231,10 @@
     font-size: 0.88rem;
   }
   .chat-input input:disabled, .chat-input button:disabled { opacity: 0.5; }
+
+  /* ---------- Accounts ---------- */
+  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 0.4rem; background: var(--ok); }
+  .status-dot.disabled { background: var(--danger); }
 </style>
 </head>
 <body>
@@ -241,6 +246,7 @@
     <button data-panel="deadlines"><span class="dot"></span>Deadlines</button>
     <button data-panel="scheduling"><span class="dot"></span>Scheduling</button>
     <button data-panel="intake"><span class="dot"></span>Live Intake Demo</button>
+    <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
   </nav>
   <div class="sidebar-footer">Nothing here reaches a client, filing, or invoice without an attorney's sign-off.</div>
 </aside>
@@ -351,6 +357,34 @@
         </div>
       </div>
     </section>
+
+    <!-- ===== Accounts (attorney-only) ===== -->
+    <section class="panel" id="panel-accounts">
+      <p class="subtitle">Attorney-only. Add a login for a colleague, or disable one — access is revoked immediately, including "remember me" sessions. At least one enabled attorney account must always remain.</p>
+      <div class="card">
+        <h3>Add an account</h3>
+        <div class="field-row">
+          <label class="field">Username <input id="newAccountUsername" /></label>
+          <label class="field">Temporary password <input id="newAccountPassword" type="text" placeholder="8+ characters" /></label>
+          <label class="field">Role
+            <select id="newAccountRole">
+              <option value="attorney">attorney</option>
+              <option value="paralegal">paralegal</option>
+              <option value="receptionist">receptionist</option>
+              <option value="staff">staff</option>
+            </select>
+          </label>
+          <button class="btn primary" id="createAccount">Add account</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="field-row">
+          <h3 style="margin:0;flex:1 0 100%;">All accounts</h3>
+          <button class="btn" id="refreshAccounts">Refresh</button>
+        </div>
+        <ul id="accountList" class="list"></ul>
+      </div>
+    </section>
   </div>
 </div>
 
@@ -360,6 +394,7 @@ const PANEL_TITLES = {
   deadlines: "Deadlines",
   scheduling: "Scheduling",
   intake: "Live Intake Demo",
+  accounts: "Accounts",
 };
 
 for (const btn of document.querySelectorAll("nav.nav button")) {
@@ -394,6 +429,9 @@ async function loadWhoami() {
   try {
     const me = await api("/api/me");
     document.getElementById("whoami").textContent = `Signed in as ${me.username || me.id} (${me.role})`;
+    if (me.role === "attorney") {
+      document.getElementById("navAccounts").hidden = false;
+    }
   } catch (err) {
     // api() already redirects to /login.html on 401.
   }
@@ -688,6 +726,58 @@ document.getElementById("chatSend").addEventListener("click", sendChat);
 document.getElementById("chatText").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendChat();
 });
+
+/* ===== Accounts ===== */
+async function loadAccounts() {
+  showError("");
+  try {
+    const accountsList = await api("/api/accounts");
+    const list = document.getElementById("accountList");
+    list.innerHTML = "";
+    for (const acct of accountsList) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<span class="status-dot ${acct.disabled ? "disabled" : ""}"></span><strong>${acct.username}</strong>
+        <span class="badge">${acct.role}</span>
+        <span class="badge ${acct.disabled ? "rejected" : "approved"}">${acct.disabled ? "disabled" : "enabled"}</span>`;
+      const toggleBtn = mkButton(acct.disabled ? "Enable" : "Disable", async () => {
+        showError("");
+        try {
+          await api(`/api/accounts/${acct.id}/${acct.disabled ? "enable" : "disable"}`, { method: "POST", body: "{}" });
+          await loadAccounts();
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+      if (!acct.disabled) toggleBtn.classList.add("danger");
+      li.appendChild(document.createElement("br"));
+      li.appendChild(toggleBtn);
+      list.appendChild(li);
+    }
+    if (accountsList.length === 0) list.innerHTML = '<li class="static empty">No accounts.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function createAccount() {
+  showError("");
+  try {
+    const username = document.getElementById("newAccountUsername").value;
+    const password = document.getElementById("newAccountPassword").value;
+    const role = document.getElementById("newAccountRole").value;
+    await api("/api/accounts", { method: "POST", body: JSON.stringify({ username, password, role }) });
+    document.getElementById("newAccountUsername").value = "";
+    document.getElementById("newAccountPassword").value = "";
+    await loadAccounts();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("createAccount").addEventListener("click", createAccount);
+document.getElementById("refreshAccounts").addEventListener("click", loadAccounts);
+document.getElementById("navAccounts").addEventListener("click", loadAccounts);
 </script>
 </body>
 </html>

@@ -25,6 +25,8 @@ export interface User {
   readonly role: UserRole;
   /** The Actor.id this user maps to for authorization checks (access-control, scheduling assignment, etc.). */
   readonly actorId: string;
+  /** Disabled accounts can never log in again and have every live session revoked immediately — see `setDisabled`. */
+  readonly disabled: boolean;
 }
 
 export interface Session {
@@ -102,16 +104,22 @@ export class AuthService {
       salt,
       role: params.role,
       actorId: params.actorId ?? params.username,
+      disabled: false,
     };
     this.#usersById.set(user.id, user);
     this.#usersByUsername.set(key, user);
     return user;
   }
 
-  /** Verifies credentials and issues a new session. Throws AuthError on any mismatch — never reveals which field was wrong. */
+  /**
+   * Verifies credentials and issues a new session. Throws AuthError on any
+   * mismatch — a disabled account fails with the exact same message as a
+   * wrong password, so probing a username never reveals whether it exists
+   * or has been disabled.
+   */
   login(username: string, password: string, remember: boolean): Session {
     const user = this.#usersByUsername.get(username.trim().toLowerCase());
-    if (!user || !timingSafeStringEqual(hashSecret(password, user.salt), user.passwordHash)) {
+    if (!user || user.disabled || !timingSafeStringEqual(hashSecret(password, user.salt), user.passwordHash)) {
       throw new AuthError("invalid username or password");
     }
     const now = Date.now();
@@ -129,6 +137,43 @@ export class AuthService {
 
   logout(token: string): void {
     this.#sessions.delete(token);
+  }
+
+  /** Every account, including disabled ones — for an attorney-facing account-management view. Never exposed unfiltered over the wire; callers must drop passwordHash/salt themselves (see AccountsService). */
+  listUsers(): User[] {
+    return [...this.#usersById.values()].map((u) => ({ ...u }));
+  }
+
+  /**
+   * Enables or disables an account. Disabling revokes every one of that
+   * user's live sessions immediately — including "remember me" ones — so
+   * access is cut off the moment an attorney acts, not the next time the
+   * session would otherwise have been checked. Refuses to disable the
+   * last remaining enabled attorney account, since that would leave
+   * nobody able to run this — or any other attorney-only — surface.
+   */
+  setDisabled(userId: string, disabled: boolean): User {
+    const user = this.#usersById.get(userId);
+    if (!user) {
+      throw new Error(`no user '${userId}'`);
+    }
+    if (disabled && user.role === "attorney") {
+      const anotherEnabledAttorney = [...this.#usersById.values()].some(
+        (u) => u.id !== userId && u.role === "attorney" && !u.disabled,
+      );
+      if (!anotherEnabledAttorney) {
+        throw new Error(`cannot disable '${user.username}': at least one enabled attorney account must remain`);
+      }
+    }
+    const updated: User = { ...user, disabled };
+    this.#usersById.set(user.id, updated);
+    this.#usersByUsername.set(user.username.trim().toLowerCase(), updated);
+    if (disabled) {
+      for (const [token, session] of this.#sessions) {
+        if (session.userId === userId) this.#sessions.delete(token);
+      }
+    }
+    return updated;
   }
 
   /** Resolves a session token to the {id, role} actor shape the rest of the system already speaks. Expired sessions are pruned on access. */
@@ -192,8 +237,10 @@ export class AuthService {
   static fromSnapshot(snapshot: AuthSnapshot): AuthService {
     const service = new AuthService();
     for (const user of snapshot.users) {
-      service.#usersById.set(user.id, { ...user });
-      service.#usersByUsername.set(user.username.trim().toLowerCase(), { ...user });
+      // `disabled` defaults to false for state files saved before this field existed.
+      const restored: User = { ...user, disabled: user.disabled ?? false };
+      service.#usersById.set(user.id, restored);
+      service.#usersByUsername.set(user.username.trim().toLowerCase(), restored);
     }
     const now = Date.now();
     for (const session of snapshot.sessions) {

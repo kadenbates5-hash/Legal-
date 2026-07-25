@@ -199,12 +199,25 @@ accounts:
   restarts.
 
 This is still a real-vendor-shaped seed, not a finished identity system:
-there's no password reset, no MFA, and no account-management UI — accounts
-are created once at boot from environment variables (see "Attorney
-review-gate UI" below) and otherwise unmanaged. It replaces the *trust*
-gap (headers anyone could set) with a *real* one (credentialed sessions),
+there's no password reset and no MFA. Adding/disabling accounts after the
+one-time boot-time seed *is* built now — see `AccountsService` below — but
+it's attorney-gated, in-app account management, not a self-service flow
+(no email verification, no invite links). It replaces the *trust* gap
+(headers anyone could set) with a *real* one (credentialed sessions),
 which is the prerequisite §5/§6 called for, not the last word on
 production auth.
+
+`AccountsService` (`src/review-ui/accounts-service.ts`) wraps `AuthService`
+the same way `ReviewGateService` wraps `review-gate.ts`: every method,
+including plain reads, requires an attorney actor. It adds accounts
+(`list`/`create`), and disables/re-enables them (`disable`/`enable`) — a
+disabled account fails login with the exact same generic "invalid username
+or password" message a wrong password would (no user-enumeration signal),
+and `AuthService.setDisabled()` revokes every one of that user's live
+sessions immediately, "remember me" included, not just at next check.
+`setDisabled()` also refuses to disable the last remaining *enabled*
+attorney account — there's no path to a Docket with zero attorneys able to
+log into it.
 
 ## Attorney review-gate UI — "Docket"
 
@@ -213,8 +226,9 @@ production auth.
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over four panels — Review Queue, Deadlines, Scheduling,
-and Live Intake Demo.
+between sections) over five panels — Review Queue, Deadlines, Scheduling,
+Live Intake Demo, and Accounts (attorney-only, hidden from the nav for
+every other role).
 
 - `review-service.ts` — `ReviewGateService`. `review-gate.ts` already
   guards the status-transition methods against non-attorney actors, but
@@ -232,6 +246,8 @@ and Live Intake Demo.
   ends, never touching `system-state.ts` or a real matter. A logged-in
   actor whose role wouldn't be allowed to run intake (e.g. `paralegal`)
   gets the same `AccessDeniedError` a misconfigured real session would.
+- `accounts-service.ts` — `AccountsService`, backing the "Accounts" panel
+  — see "Real authentication" above for what it does and doesn't do.
 - `server.ts` — a small dependency-free JSON API (Node's built-in `http`,
   no framework) over the service, plus static-file serving for the
   dashboard. Actor identity comes from an `httpOnly` session cookie set by
@@ -239,33 +255,35 @@ and Live Intake Demo.
   (see "Real authentication" above) — or from an `x-system-api-key` header
   for the calendar integration's machine credential. `GET /` redirects to
   `/login.html` when there's no valid session; `POST /api/logout` clears
-  it. `/api/intake/start` and `/api/intake/:sessionId/message` are 404 if
-  no `IntakeDemoSessions` was passed to `createReviewServer`. `npm run
-  build` copies `public/` into `dist/` since `tsc` only compiles `.ts`
-  files.
+  it. `/api/intake/*` and `/api/accounts*` are 404 if no
+  `IntakeDemoSessions`/`AccountsService` was passed to
+  `createReviewServer`, respectively. `npm run build` copies `public/`
+  into `dist/` since `tsc` only compiles `.ts` files.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
 - `public/index.html` — the Docket app shell: a dark sidebar (brand +
-  four-panel nav), a top bar showing who's signed in, and one panel each
-  for the Review Queue (list/detail/approve/reject/request-revision/
+  panel nav), a top bar showing who's signed in, and one panel each for
+  the Review Queue (list/detail/approve/reject/request-revision/
   clear-flag/release), Deadlines (status check/independent confirmation/
   conflict list), Scheduling (book/list/reschedule/cancel/complete/
-  reminders), and Live Intake Demo (a chat window driving
-  `intake-demo.ts` — "Start new demo conversation" then type caller
-  turns). Any `401` from the API redirects the browser back to
-  `/login.html`.
+  reminders), Live Intake Demo (a chat window driving `intake-demo.ts` —
+  "Start new demo conversation" then type caller turns), and Accounts
+  (add a login, disable/re-enable one — nav item stays `hidden` unless
+  `GET /api/me` reports role `attorney`, though the real gate is
+  server-side in `AccountsService`, not this client-side hide). Any `401`
+  from the API redirects the browser back to `/login.html`.
 - `start.ts`'s boot-time bootstrap: if no accounts exist yet in the
   persisted state, it creates them from `ATTORNEY_USERNAME`/
   `ATTORNEY_PASSWORD` (and optionally `PARALEGAL_USERNAME`/
   `RECEPTIONIST_USERNAME`/`STAFF_USERNAME` with matching `_PASSWORD`
-  vars). This only ever runs once — once any account exists, it's a no-op
-  forever, by design (re-seeding/resetting credentials belongs to a real
-  account-management flow, not a boot-time env var). It also sets the
+  vars) — this is only for getting the very first attorney account into
+  an empty system; it's a no-op forever once any account exists. Anything
+  after that goes through the Accounts panel. `start.ts` also sets the
   calendar-integration system key from `CALENDAR_SYSTEM_API_KEY`, or
   generates and logs a random one on first boot if that's unset, and
-  constructs the `IntakeDemoSessions` wired into the server (sharing the
-  real audit log, its own dedicated `AccessControl` instance, and the
-  criminal-law pilot module).
+  constructs the `IntakeDemoSessions`/`AccountsService` wired into the
+  server (the former sharing the real audit log with its own dedicated
+  `AccessControl` instance and the criminal-law pilot module).
 
 `/api/appointments*` (see `scheduling.ts` above) is wired into the same
 server, gated by `SchedulingService`'s own optional `AccessControl`
@@ -366,8 +384,9 @@ but is single-process/single-file. Still open:
   automatically (`core/auth.ts`'s `verifySystemApiKey` is the enforcement
   point now — see "Real authentication" above — but no Google/Outlook/etc.
   integration exists yet to be the thing presenting that key)
-- Account management for the review-gate UI: password reset, MFA, adding/
-  disabling users after the one-time boot-time seed, and TLS termination
+- The rest of account management: password reset, MFA, and self-service
+  invites (adding/disabling users after the one-time boot-time seed is
+  built — see `AccountsService` above). Also still open: TLS termination
   in front of the session cookie (currently unset `Secure` flag, meant for
   local/behind-a-TLS-proxy deployment — see `server.ts`'s cookie helpers)
 - Human/domain-expert sign-off on all three §7 items before real-client
