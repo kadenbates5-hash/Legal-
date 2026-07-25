@@ -520,9 +520,12 @@ function showError(message) {
   document.getElementById("error").textContent = message || "";
 }
 
+let currentRole = null;
+
 async function loadWhoami() {
   try {
     const me = await api("/api/me");
+    currentRole = me.role;
     document.getElementById("whoami").textContent = `Signed in as ${me.username || me.id} (${me.role})`;
     if (me.role === "attorney") {
       document.getElementById("navAccounts").hidden = false;
@@ -531,9 +534,23 @@ async function loadWhoami() {
       document.getElementById("navDrafting").hidden = false;
       document.getElementById("navCases").hidden = false;
     }
+    // Review Queue and Deadlines are attorney-only server-side (ReviewGateService gates
+    // every method, including reads) — only fetch them once we know the role, and only
+    // for an attorney, so a paralegal/receptionist session doesn't 403 on page load.
+    if (me.role === "attorney") {
+      loadQueue();
+      loadConflicts();
+    } else {
+      renderAttorneyOnly("queue", "Review Queue is attorney-only.");
+      renderAttorneyOnly("conflictList", "Deadlines are attorney-only.");
+    }
   } catch (err) {
     // api() already redirects to /login.html on 401.
   }
+}
+
+function renderAttorneyOnly(listId, message) {
+  document.getElementById(listId).innerHTML = `<li class="static empty">${message}</li>`;
 }
 
 document.getElementById("logout").addEventListener("click", async () => {
@@ -546,6 +563,10 @@ loadWhoami();
 /* ===== Review Queue ===== */
 async function loadQueue() {
   showError("");
+  if (currentRole && currentRole !== "attorney") {
+    renderAttorneyOnly("queue", "Review Queue is attorney-only.");
+    return;
+  }
   try {
     const items = await api("/api/work-products?status=pending_review");
     const list = document.getElementById("queue");
@@ -638,11 +659,14 @@ async function act(path, body, id) {
 }
 
 document.getElementById("refresh").addEventListener("click", loadQueue);
-loadQueue();
 
 /* ===== Deadlines ===== */
 async function checkDeadline() {
   showError("");
+  if (currentRole && currentRole !== "attorney") {
+    document.getElementById("deadlineStatus").innerHTML = '<p class="empty">Deadlines are attorney-only.</p>';
+    return;
+  }
   try {
     const matterId = document.getElementById("deadlineMatterId").value;
     const type = document.getElementById("deadlineType").value;
@@ -663,6 +687,9 @@ async function checkDeadline() {
 
 async function confirmDeadline() {
   showError("");
+  if (currentRole && currentRole !== "attorney") {
+    return;
+  }
   try {
     await api("/api/deadlines/confirm", {
       method: "POST",
@@ -680,18 +707,25 @@ async function confirmDeadline() {
 }
 
 async function loadConflicts() {
-  const conflicts = await api("/api/deadlines/conflicts");
-  const list = document.getElementById("conflictList");
-  list.innerHTML = conflicts.length
-    ? conflicts
-        .map((c) => `<li class="static">${c.matterId} / ${c.type}: ${c.calculations.map((x) => `${x.source}=${x.date}`).join(", ")}</li>`)
-        .join("")
-    : '<li class="static empty">None.</li>';
+  if (currentRole && currentRole !== "attorney") {
+    renderAttorneyOnly("conflictList", "Deadlines are attorney-only.");
+    return;
+  }
+  try {
+    const conflicts = await api("/api/deadlines/conflicts");
+    const list = document.getElementById("conflictList");
+    list.innerHTML = conflicts.length
+      ? conflicts
+          .map((c) => `<li class="static">${c.matterId} / ${c.type}: ${c.calculations.map((x) => `${x.source}=${x.date}`).join(", ")}</li>`)
+          .join("")
+      : '<li class="static empty">None.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
 }
 
 document.getElementById("checkDeadline").addEventListener("click", checkDeadline);
 document.getElementById("confirmDeadline").addEventListener("click", confirmDeadline);
-loadConflicts();
 
 /* ===== Scheduling ===== */
 async function bookAppointment() {
