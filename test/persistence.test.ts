@@ -224,4 +224,15 @@ describe("system-state persistence integration", () => {
     expect(reloaded.documentStore.get(uploaded.id)).toEqual(uploaded);
     expect(reloaded.documentStore.listByMatter("m1")).toHaveLength(1);
   });
+
+  it("persists and reloads saved research references across a process restart", async () => {
+    const state = await loadSystemState(filePath);
+    const saved = state.researchLibrary.save({ matterId: "m1", citation: "410 U.S. 113", title: "Roe v. Wade", savedBy: "p1" });
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.researchLibrary.get(saved.id)).toEqual(saved);
+    expect(reloaded.researchLibrary.listByMatter("m1")).toHaveLength(1);
+  });
 });

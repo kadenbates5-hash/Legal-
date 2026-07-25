@@ -7,6 +7,8 @@ import { DraftingService } from "./drafting-service.js";
 import { DocumentsService } from "./documents-service.js";
 import { CasesService } from "./cases-service.js";
 import { AuditService } from "./audit-service.js";
+import { ResearchService } from "./research-service.js";
+import { CourtListenerClient } from "../integrations/courtlistener.js";
 import { loadSystemState, saveSystemState } from "../persistence/system-state.js";
 import { readJsonFile } from "../persistence/json-file-store.js";
 import { createPostgresStateStore } from "../persistence/postgres-store.js";
@@ -141,6 +143,24 @@ const cases = new CasesService({
 const audit = new AuditService(state.auditLog);
 
 /**
+ * Backs the "Research" panel: general case-law search against
+ * CourtListener (see integrations/courtlistener.ts) plus a matter-scoped
+ * library of references someone explicitly saved (persisted via
+ * state.researchLibrary). COURTLISTENER_API_TOKEN is optional — search
+ * works unauthenticated, just at a lower rate limit.
+ */
+const COURTLISTENER_API_TOKEN = process.env["COURTLISTENER_API_TOKEN"];
+const COURTLISTENER_BASE_URL = process.env["COURTLISTENER_BASE_URL"];
+const research = new ResearchService({
+  accessControl: state.accessControl,
+  library: state.researchLibrary,
+  searchClient: new CourtListenerClient({
+    ...(COURTLISTENER_BASE_URL ? { baseUrl: COURTLISTENER_BASE_URL } : {}),
+    ...(COURTLISTENER_API_TOKEN ? { apiToken: COURTLISTENER_API_TOKEN } : {}),
+  }),
+});
+
+/**
  * TLS is terminated upstream by a reverse proxy/load balancer, not by this
  * Node process — set TRUST_PROXY=true only when actually deployed behind
  * one that sets X-Forwarded-Proto itself (never on a directly-exposed
@@ -195,6 +215,7 @@ const server = createReviewServer(service, state.auth, {
   documents,
   cases,
   audit,
+  research,
   trustProxy,
   ...voiceOptions,
 });

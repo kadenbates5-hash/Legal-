@@ -370,14 +370,62 @@ console configuration step, not something this codebase can do for you.
 
 `createReviewServer`'s signature changed as part of this: it now takes a
 single `ReviewServerOptions` object (`{ scheduling?, intake?, accounts?,
-drafting?, documents?, cases?, audit?, voiceCalls?, audioClips?, twilio?,
-onMutated?, trustProxy? }`) instead of a long positional-parameter list.
-That list had grown past a dozen optional pieces and a purely positional
-signature that long had already caused real bugs more than once —
-inserting a new parameter silently shifted every later positional
-argument in existing call sites, with no type error since they're all
-optional. A missing or misspelled option key is a much safer failure mode
-than a silent off-by-one.
+drafting?, documents?, cases?, audit?, research?, voiceCalls?,
+audioClips?, twilio?, onMutated?, trustProxy? }`) instead of a long
+positional-parameter list. That list had grown past a dozen optional
+pieces and a purely positional signature that long had already caused
+real bugs more than once — inserting a new parameter silently shifted
+every later positional argument in existing call sites, with no type
+error since they're all optional. A missing or misspelled option key is
+a much safer failure mode than a silent off-by-one.
+
+## Legal research — CourtListener (resolved)
+
+`src/core/research-library.ts` / `src/integrations/courtlistener.ts` /
+`src/review-ui/research-service.ts` — the "Research" panel: a paralegal
+or attorney can search real case law and keep a quick-access list of
+citations saved against a matter. Two deliberately separate pieces, per
+the two different things "look up a law" and "relevant cases" turned out
+to mean:
+
+- **Search** (`integrations/courtlistener.ts` — `CourtListenerClient`) —
+  general case-law search against CourtListener (courtlistener.com, the
+  Free Law Project's public API), not scoped to any matter. Chosen
+  because it's a genuine external case-law database with a free API,
+  unlike Westlaw/Lexis-style products this project can't provision
+  credentials for. Case law is public record, so there's no §5-style
+  confidentiality/subpoena due-diligence question the way there is for
+  STT/TTS or calendar vendors — the only caveat is accuracy, which the
+  Research panel says outright: a search result is not a verified
+  citation. `parseSearchResult()` is exported for testing the
+  response-parsing rules in isolation, same pattern as
+  `google-calendar.ts`'s `parseDeadlineEvent()` — this sandbox's network
+  policy blocked reaching `courtlistener.com` directly while building
+  this (same constraint as `docs.voicebox.sh`), so the exact response
+  field names are written from documented/training knowledge and are
+  best-effort, not verified against a live call.
+- **Quick access** (`core/research-library.ts` — `ResearchLibrary`) — a
+  registry of references someone explicitly saved against a matter.
+  Deliberately manual only (no auto-suggested "relevant cases" from
+  search text): saving is always a human action, consistent with this
+  project not inferring which case matters to which matter on its own.
+  A saved reference is a bookmark, not agent-generated text, so it never
+  touches the review-gate — it's a research aid, not something delivered
+  to a client. Persisted like every other stateful core object.
+- `research-service.ts` — `ResearchService`, same shape as
+  `DocumentsService`: `search()` is role-gated (paralegal/attorney) but
+  not matter-scoped (nothing to authorize per-matter for a public case-law
+  search); `listMatterReferences()`/`saveReference()`/`deleteReference()`
+  additionally authorize via `AccessControl` before touching the library,
+  since a reference is exposed over HTTP by matter id/reference id that
+  any authenticated caller could otherwise name arbitrarily.
+- `server.ts` wires it as `GET /api/research/search?q=...` and
+  `GET|POST /api/research/matters/:matterId` /
+  `DELETE /api/research/matters/:matterId/:id`; `COURTLISTENER_API_TOKEN`
+  is optional (search works unauthenticated, just at a lower rate limit)
+  and `COURTLISTENER_BASE_URL` exists purely for pointing at something
+  other than the real CourtListener (used to verify this against a fake
+  local server, since the real one isn't reachable from this sandbox).
 
 ## Real authentication (§5/§6 — resolved)
 
@@ -438,9 +486,9 @@ panel enforces below.
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over eight panels — Review Queue, Deadlines, Scheduling,
-Live Intake Demo, Drafting, Cases, Accounts, and Audit Log (the last four
-hidden from the nav for roles that can't use them). Review Queue and
+between sections) over nine panels — Review Queue, Deadlines, Scheduling,
+Live Intake Demo, Drafting, Cases, Research, Accounts, and Audit Log (the
+last five hidden from the nav for roles that can't use them). Review Queue and
 Deadlines are themselves attorney-only server-side (`ReviewGateService`
 gates every method, including reads), so the dashboard only fires their
 initial load once `GET /api/me` confirms the role — a non-attorney
@@ -471,6 +519,8 @@ session sees an inline "attorney-only" message instead of a background
 - `documents-service.ts` / `cases-service.ts` — `DocumentsService` and
   `CasesService`, backing the "Cases" panel — see `document-store.ts`'s
   entry above for what they do.
+- `research-service.ts` — `ResearchService`, backing the "Research" panel
+  — see "Legal research — CourtListener" above for what it does.
 - `audit-service.ts` — `AuditService`, backing the "Audit Log" panel.
   `AuditLog.read()` already takes an explicit counsel-aware reader role
   (`"attorney"` vs. `"system_admin_no_content"`), but that's a parameter
@@ -485,11 +535,11 @@ session sees an inline "attorney-only" message instead of a background
   for the calendar integration's machine credential. `GET /` redirects to
   `/login.html` when there's no valid session; `POST /api/logout` clears
   it. `/api/intake/*`, `/api/accounts*`, `/api/drafting/*`,
-  `/api/documents/*`, `/api/cases*`, and `/api/audit*` are 404 if no
-  `IntakeDemoSessions`/`AccountsService`/`DraftingService`/
-  `DocumentsService`/`CasesService`/`AuditService` was passed to
-  `createReviewServer`, respectively. `npm run build` copies `public/`
-  into `dist/` since `tsc` only compiles `.ts` files.
+  `/api/documents/*`, `/api/cases*`, `/api/audit*`, and `/api/research/*`
+  are 404 if no `IntakeDemoSessions`/`AccountsService`/`DraftingService`/
+  `DocumentsService`/`CasesService`/`AuditService`/`ResearchService` was
+  passed to `createReviewServer`, respectively. `npm run build` copies
+  `public/` into `dist/` since `tsc` only compiles `.ts` files.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
 - `public/index.html` — the Docket app shell: a dark sidebar (brand +
@@ -504,16 +554,18 @@ session sees an inline "attorney-only" message instead of a background
   `attorney` or `paralegal`), Cases (a clickable list of every matter,
   expanding into that matter's uploaded documents — upload a file and
   download it back out as a data URI — alongside its drafted work product;
-  same role gate as Drafting), Accounts (add a login, disable/re-enable
-  one, and for paralegal accounts specifically, assign/unassign a
-  matter — nav item hidden unless role is `attorney`), and Audit Log
-  (every access grant/denial and work-product transition, append-only,
-  optionally filtered by matter id — nav item hidden unless role is
-  `attorney`). All four hides are client-side convenience only; the real
-  gate is server-side in
+  same role gate as Drafting), Research (search case law, "Save to
+  matter" on any result, and a per-matter quick-access list with a
+  Remove action — same role gate as Drafting), Accounts (add a login,
+  disable/re-enable one, and for paralegal accounts specifically,
+  assign/unassign a matter — nav item hidden unless role is `attorney`),
+  and Audit Log (every access grant/denial and work-product transition,
+  append-only, optionally filtered by matter id — nav item hidden unless
+  role is `attorney`). All five hides are client-side convenience only;
+  the real gate is server-side in
   `AccountsService`/`DraftingService`/`DocumentsService`/`CasesService`/
-  `AuditService`. Any `401` from the API redirects the browser back to
-  `/login.html`.
+  `ResearchService`/`AuditService`. Any `401` from the API redirects the
+  browser back to `/login.html`.
 - `start.ts`'s boot-time bootstrap: if no accounts exist yet in the
   persisted state, it creates them from `ATTORNEY_USERNAME`/
   `ATTORNEY_PASSWORD` (and optionally `PARALEGAL_USERNAME`/
@@ -563,13 +615,13 @@ two ways now: file-backed by default, or a real Postgres database when
   practice), via the `pg` driver. `CREATE TABLE IF NOT EXISTS` runs on
   every connect, so there's no separate migration step to run first.
 - `system-state.ts` — bundles the audit log, utilization tracker,
-  work-product store, document store, deadline tracker, scheduling
-  service, auth, and access control into one document via
+  work-product store, document store, research library, deadline tracker,
+  scheduling service, auth, and access control into one document via
   `loadSystemState`/`saveSystemState`, which accept either a `StateStore`
   or (for convenience/backward compatibility) a plain file-path string.
 - Every stateful core object (`AuditLog`, `UtilizationTracker`,
-  `WorkProduct`, `WorkProductStore`, `DocumentStore`, `DeadlineTracker`,
-  `SchedulingService`, `AuthService`, `AccessControl`) has
+  `WorkProduct`, `WorkProductStore`, `DocumentStore`, `ResearchLibrary`,
+  `DeadlineTracker`, `SchedulingService`, `AuthService`, `AccessControl`) has
   `toSnapshot()`/`fromSnapshot()` round-tripping its exact state to plain
   data — including `WorkProduct` states like `approved`/`released` that
   the normal constructor and transition methods can't reach directly. A
@@ -624,6 +676,7 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
+# COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
 ```
 
 ## §7 open items — status

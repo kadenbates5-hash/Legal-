@@ -13,6 +13,7 @@ import type { DraftingService } from "./drafting-service.js";
 import type { DocumentsService } from "./documents-service.js";
 import type { CasesService } from "./cases-service.js";
 import type { AuditService } from "./audit-service.js";
+import type { ResearchService } from "./research-service.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { verifyTwilioSignature, twimlPlayThenRecord, twimlPlayThenHangup, downloadTwilioRecording } from "../integrations/twilio-voice.js";
@@ -155,6 +156,7 @@ function errorStatus(err: unknown): number {
   if (err instanceof Error && err.message.startsWith("no intake demo session")) return 404;
   if (err instanceof Error && err.message.startsWith("no user")) return 404;
   if (err instanceof Error && err.message.startsWith("no document")) return 404;
+  if (err instanceof Error && err.message.startsWith("no saved reference")) return 404;
   if (err instanceof Error && err.message.startsWith("cannot disable")) return 409;
   if (err instanceof Error && err.message.startsWith("matter assignment only applies")) return 400;
   if (err instanceof SchedulingError) {
@@ -222,6 +224,7 @@ export interface ReviewServerOptions {
   documents?: DocumentsService;
   cases?: CasesService;
   audit?: AuditService;
+  research?: ResearchService;
   /** Real-call telephony voice channel (see `receptionist/voice-call-sessions.ts`) — `voiceCalls`/`audioClips`/`twilio` must all be set together for `/api/voice/*` to be configured. */
   voiceCalls?: VoiceCallSessions;
   audioClips?: AudioClipStore;
@@ -243,8 +246,21 @@ async function handleRequest(
   res: ServerResponse,
   options: ReviewServerOptions,
 ): Promise<void> {
-  const { onMutated, scheduling, intake, accounts, drafting, documents, cases, audit, voiceCalls, audioClips, twilio, trustProxy = false } =
-    options;
+  const {
+    onMutated,
+    scheduling,
+    intake,
+    accounts,
+    drafting,
+    documents,
+    cases,
+    audit,
+    research,
+    voiceCalls,
+    audioClips,
+    twilio,
+    trustProxy = false,
+  } = options;
   const url = new URL(req.url ?? "/", "http://localhost");
 
   if (url.pathname.startsWith("/api/voice/")) {
@@ -361,6 +377,15 @@ async function handleRequest(
         return;
       }
       sendJson(res, 200, audit.list(actor, url.searchParams.get("matterId") ?? undefined));
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/research")) {
+      if (!research) {
+        sendJson(res, 404, { error: "research is not configured on this server" });
+        return;
+      }
+      await handleResearchRequest(research, req, res, actor, url, onMutated);
       return;
     }
 
@@ -740,6 +765,55 @@ async function handleCasesRequest(
 
   if (segments.length === 1 && req.method === "GET") {
     sendJson(res, 200, cases.getCase(actor, segments[0]!));
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleResearchRequest(
+  research: ResearchService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  if (url.pathname === "/api/research/search" && req.method === "GET") {
+    const results = await research.search(actor, url.searchParams.get("q") ?? "");
+    sendJson(res, 200, results);
+    return;
+  }
+
+  const segments = url.pathname.replace(/^\/api\/research\/?/, "").split("/").filter(Boolean);
+  if (segments[0] !== "matters" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const matterId = segments[1]!;
+
+  if (segments.length === 2 && req.method === "GET") {
+    sendJson(res, 200, research.listMatterReferences(actor, matterId));
+    return;
+  }
+
+  if (segments.length === 2 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = research.saveReference(actor, matterId, {
+      citation: String(body["citation"] ?? ""),
+      title: String(body["title"] ?? ""),
+      ...(typeof body["url"] === "string" && body["url"] ? { url: body["url"] } : {}),
+      ...(typeof body["note"] === "string" && body["note"] ? { note: body["note"] } : {}),
+    });
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 3 && req.method === "DELETE") {
+    research.deleteReference(actor, matterId, segments[2]!);
+    sendJson(res, 200, { ok: true });
+    onMutated?.();
     return;
   }
 

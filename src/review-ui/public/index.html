@@ -259,6 +259,7 @@
     <button data-panel="intake"><span class="dot"></span>Live Intake Demo</button>
     <button data-panel="drafting" id="navDrafting" hidden><span class="dot"></span>Drafting</button>
     <button data-panel="cases" id="navCases" hidden><span class="dot"></span>Cases</button>
+    <button data-panel="research" id="navResearch" hidden><span class="dot"></span>Research</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
     <button data-panel="audit" id="navAudit" hidden><span class="dot"></span>Audit Log</button>
   </nav>
@@ -452,6 +453,27 @@
       <div id="caseDetail"></div>
     </section>
 
+    <!-- ===== Research (paralegal/attorney) ===== -->
+    <section class="panel" id="panel-research">
+      <p class="subtitle">Search real case law via CourtListener, and save citations for quick access on a matter. Search results are exactly what CourtListener returns — always verify a citation before relying on it in a filing.</p>
+      <div class="card">
+        <h3>Search case law</h3>
+        <div class="field-row">
+          <label class="field grow">Query <input id="researchQuery" placeholder="e.g. Miranda rights, or a citation" /></label>
+          <button class="btn primary" id="researchSearchBtn">Search</button>
+        </div>
+        <ul id="researchResults" class="list"></ul>
+      </div>
+      <div class="card">
+        <h3>Quick access — saved to a matter</h3>
+        <div class="field-row">
+          <label class="field">Matter ID <input id="researchMatterId" value="m1" /></label>
+          <button class="btn" id="loadResearchMatter">Load matter</button>
+        </div>
+        <ul id="researchSavedList" class="list"></ul>
+      </div>
+    </section>
+
     <!-- ===== Accounts (attorney-only) ===== -->
     <section class="panel" id="panel-accounts">
       <p class="subtitle">Attorney-only. Add a login for a colleague, or disable one — access is revoked immediately, including "remember me" sessions. At least one enabled attorney account must always remain.</p>
@@ -502,6 +524,7 @@ const PANEL_TITLES = {
   intake: "Live Intake Demo",
   drafting: "Drafting",
   cases: "Cases",
+  research: "Research",
   accounts: "Accounts",
   audit: "Audit Log",
 };
@@ -548,6 +571,7 @@ async function loadWhoami() {
     if (me.role === "attorney" || me.role === "paralegal") {
       document.getElementById("navDrafting").hidden = false;
       document.getElementById("navCases").hidden = false;
+      document.getElementById("navResearch").hidden = false;
     }
     // Review Queue and Deadlines are attorney-only server-side (ReviewGateService gates
     // every method, including reads) — only fetch them once we know the role, and only
@@ -1161,6 +1185,91 @@ async function loadCaseDetail(matterId) {
 
 document.getElementById("refreshCases").addEventListener("click", loadCases);
 document.getElementById("navCases").addEventListener("click", loadCases);
+
+/* ===== Research ===== */
+async function searchResearch() {
+  showError("");
+  try {
+    const query = document.getElementById("researchQuery").value.trim();
+    if (!query) return;
+    const results = await api(`/api/research/search?q=${encodeURIComponent(query)}`);
+    const list = document.getElementById("researchResults");
+    list.innerHTML = "";
+    for (const result of results) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>${escapeHtml(result.caseName)}</strong>
+        ${result.citations.length ? `<span class="badge">${escapeHtml(result.citations.join(", "))}</span>` : ""}
+        ${result.court ? `<div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">${escapeHtml(result.court)}${result.dateFiled ? ` — ${escapeHtml(result.dateFiled)}` : ""}</div>` : ""}
+        ${result.snippet ? `<div style="font-size:0.85rem;margin-top:0.3rem;">${escapeHtml(result.snippet)}</div>` : ""}
+        <div style="margin-top:0.4rem;"><a href="${result.url}" target="_blank" rel="noopener">View on CourtListener</a></div>`;
+      const saveBtn = mkButton("Save to matter", async () => {
+        showError("");
+        try {
+          const matterId = document.getElementById("researchMatterId").value;
+          await api(`/api/research/matters/${encodeURIComponent(matterId)}`, {
+            method: "POST",
+            body: JSON.stringify({
+              citation: result.citations.join(", ") || result.caseName,
+              title: result.caseName,
+              url: result.url,
+            }),
+          });
+          await loadResearchMatter();
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+      saveBtn.classList.add("primary");
+      li.appendChild(saveBtn);
+      list.appendChild(li);
+    }
+    if (results.length === 0) list.innerHTML = '<li class="static empty">No results.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadResearchMatter() {
+  showError("");
+  try {
+    const matterId = document.getElementById("researchMatterId").value;
+    const refs = await api(`/api/research/matters/${encodeURIComponent(matterId)}`);
+    const list = document.getElementById("researchSavedList");
+    list.innerHTML = "";
+    for (const ref of refs) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>${escapeHtml(ref.title)}</strong>
+        <span class="badge">${escapeHtml(ref.citation)}</span>
+        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">Saved by ${escapeHtml(ref.savedBy)} on ${new Date(ref.savedAt).toLocaleString()}</div>
+        ${ref.url ? `<div style="margin-top:0.3rem;"><a href="${ref.url}" target="_blank" rel="noopener">View source</a></div>` : ""}`;
+      const removeBtn = mkButton("Remove", async () => {
+        showError("");
+        try {
+          await api(`/api/research/matters/${encodeURIComponent(matterId)}/${ref.id}`, { method: "DELETE" });
+          await loadResearchMatter();
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+      removeBtn.classList.add("danger");
+      li.appendChild(document.createElement("br"));
+      li.appendChild(removeBtn);
+      list.appendChild(li);
+    }
+    if (refs.length === 0) list.innerHTML = '<li class="static empty">No saved references for this matter yet.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("researchSearchBtn").addEventListener("click", searchResearch);
+document.getElementById("researchQuery").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") searchResearch();
+});
+document.getElementById("loadResearchMatter").addEventListener("click", loadResearchMatter);
+document.getElementById("navResearch").addEventListener("click", loadResearchMatter);
 
 /* ===== Accounts ===== */
 async function loadAccounts() {

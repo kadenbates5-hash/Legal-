@@ -3,6 +3,7 @@ import { UtilizationTracker, type UtilizationSnapshot } from "../core/utilizatio
 import { WorkProductStore } from "../core/work-product-store.js";
 import type { WorkProductSnapshot } from "../core/review-gate.js";
 import { DocumentStore, type CaseDocument } from "../core/document-store.js";
+import { ResearchLibrary, type SavedReference } from "../core/research-library.js";
 import { DeadlineTracker, type DeadlineCalculation } from "../core/deadline.js";
 import { SchedulingService, type Appointment } from "../core/scheduling.js";
 import { AuthService, type AuthSnapshot } from "../core/auth.js";
@@ -34,6 +35,8 @@ export interface SystemStateSnapshot {
   paralegalAssignments?: ParalegalAssignment[];
   /** Uploaded case documents (see core/document-store.ts), backing the Cases panel. */
   documents?: CaseDocument[];
+  /** Saved statute/case-law references (see core/research-library.ts), backing the Research panel's "quick access" list. */
+  savedReferences?: SavedReference[];
 }
 
 export interface SystemState {
@@ -46,6 +49,7 @@ export interface SystemState {
   /** The canonical, persisted AccessControl instance — shared by DraftingService and AccountsService's matter-assignment feature. Distinct from `LoadSystemStateOptions.accessControl`, which is only an optional external gate for SchedulingService. */
   accessControl: AccessControl;
   documentStore: DocumentStore;
+  researchLibrary: ResearchLibrary;
 }
 
 export interface LoadSystemStateOptions {
@@ -64,6 +68,7 @@ function emptySnapshot(): SystemStateSnapshot {
     auth: { users: [], sessions: [] },
     paralegalAssignments: [],
     documents: [],
+    savedReferences: [],
   };
 }
 
@@ -81,7 +86,8 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const auth = AuthService.fromSnapshot(snapshot.auth ?? { users: [], sessions: [] });
   const accessControl = AccessControl.fromSnapshot(auditLog, snapshot.paralegalAssignments ?? []);
   const documentStore = DocumentStore.fromSnapshot(snapshot.documents ?? []);
-  return { auditLog, utilization, workProductStore, deadlineTracker, scheduling, auth, accessControl, documentStore };
+  const researchLibrary = ResearchLibrary.fromSnapshot(snapshot.savedReferences ?? []);
+  return { auditLog, utilization, workProductStore, deadlineTracker, scheduling, auth, accessControl, documentStore, researchLibrary };
 }
 
 export async function saveSystemState(source: string | StateStore, state: SystemState): Promise<void> {
@@ -95,6 +101,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     auth: state.auth.toSnapshot(),
     paralegalAssignments: state.accessControl.toSnapshot(),
     documents: state.documentStore.toSnapshot(),
+    savedReferences: state.researchLibrary.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }

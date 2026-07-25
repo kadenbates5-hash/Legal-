@@ -24,7 +24,9 @@ up contracts/motions/discovery requests/research summaries/billing
 narratives and submits them for review, a Cases panel where a paralegal
 uploads and names the actual files for a matter (contracts, exhibits,
 scanned forms) and can click into any case to see its documents and
-drafted work product side by side, attorney-gated account management
+drafted work product side by side, a Research panel where a paralegal or
+attorney searches real case law (via CourtListener) and saves citations
+for quick access on a matter, attorney-gated account management
 (add a login, disable/re-enable one, assign a paralegal to a matter —
 access is revoked/scoped immediately), and an attorney-only Audit Log
 panel over the append-only, privilege-sensitive audit trail; **persistence**
