@@ -12,6 +12,7 @@ import type { AccountsService } from "./accounts-service.js";
 import type { DraftingService } from "./drafting-service.js";
 import type { DocumentsService } from "./documents-service.js";
 import type { CasesService } from "./cases-service.js";
+import type { AuditService } from "./audit-service.js";
 import type { UserRole } from "../core/auth.js";
 
 /**
@@ -189,11 +190,12 @@ export function createReviewServer(
   drafting?: DraftingService,
   documents?: DocumentsService,
   cases?: CasesService,
+  audit?: AuditService,
   /** See the module doc comment above — off by default, only enable behind a real TLS-terminating proxy. */
   trustProxy = false,
 ): Server {
   return createServer((req, res) => {
-    void handleRequest(service, auth, req, res, onMutated, scheduling, intake, accounts, drafting, documents, cases, trustProxy);
+    void handleRequest(service, auth, req, res, onMutated, scheduling, intake, accounts, drafting, documents, cases, audit, trustProxy);
   });
 }
 
@@ -209,6 +211,7 @@ async function handleRequest(
   drafting?: DraftingService,
   documents?: DocumentsService,
   cases?: CasesService,
+  audit?: AuditService,
   trustProxy = false,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -313,6 +316,15 @@ async function handleRequest(
         return;
       }
       await handleCasesRequest(cases, req, res, actor, url);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/audit")) {
+      if (!audit) {
+        sendJson(res, 404, { error: "the audit log is not configured on this server" });
+        return;
+      }
+      sendJson(res, 200, audit.list(actor, url.searchParams.get("matterId") ?? undefined));
       return;
     }
 

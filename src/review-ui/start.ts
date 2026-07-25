@@ -6,6 +6,7 @@ import { AccountsService } from "./accounts-service.js";
 import { DraftingService } from "./drafting-service.js";
 import { DocumentsService } from "./documents-service.js";
 import { CasesService } from "./cases-service.js";
+import { AuditService } from "./audit-service.js";
 import { loadSystemState, saveSystemState } from "../persistence/system-state.js";
 import { readJsonFile } from "../persistence/json-file-store.js";
 import { createPostgresStateStore } from "../persistence/postgres-store.js";
@@ -132,6 +133,9 @@ const cases = new CasesService({
   documentStore: state.documentStore,
 });
 
+/** Backs the attorney-only "Audit Log" panel — see audit-service.ts. */
+const audit = new AuditService(state.auditLog);
+
 /**
  * TLS is terminated upstream by a reverse proxy/load balancer, not by this
  * Node process — set TRUST_PROXY=true only when actually deployed behind
@@ -154,6 +158,7 @@ const server = createReviewServer(
   drafting,
   documents,
   cases,
+  audit,
   trustProxy,
 );
 

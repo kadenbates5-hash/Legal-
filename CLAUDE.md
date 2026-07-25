@@ -276,9 +276,14 @@ panel enforces below.
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over seven panels — Review Queue, Deadlines, Scheduling,
-Live Intake Demo, Drafting, Cases, and Accounts (the last three hidden
-from the nav for roles that can't use them).
+between sections) over eight panels — Review Queue, Deadlines, Scheduling,
+Live Intake Demo, Drafting, Cases, Accounts, and Audit Log (the last four
+hidden from the nav for roles that can't use them). Review Queue and
+Deadlines are themselves attorney-only server-side (`ReviewGateService`
+gates every method, including reads), so the dashboard only fires their
+initial load once `GET /api/me` confirms the role — a non-attorney
+session sees an inline "attorney-only" message instead of a background
+403 on login.
 
 - `review-service.ts` — `ReviewGateService`. `review-gate.ts` already
   guards the status-transition methods against non-attorney actors, but
@@ -304,6 +309,12 @@ from the nav for roles that can't use them).
 - `documents-service.ts` / `cases-service.ts` — `DocumentsService` and
   `CasesService`, backing the "Cases" panel — see `document-store.ts`'s
   entry above for what they do.
+- `audit-service.ts` — `AuditService`, backing the "Audit Log" panel.
+  `AuditLog.read()` already takes an explicit counsel-aware reader role
+  (`"attorney"` vs. `"system_admin_no_content"`), but that's a parameter
+  any caller could pass — this service is the actual gate, requiring an
+  attorney actor on its one method (`list`, optionally filtered by
+  `matterId`) before ever reading with role `"attorney"`.
 - `server.ts` — a small dependency-free JSON API (Node's built-in `http`,
   no framework) over the service, plus static-file serving for the
   dashboard. Actor identity comes from an `httpOnly` session cookie set by
@@ -312,11 +323,11 @@ from the nav for roles that can't use them).
   for the calendar integration's machine credential. `GET /` redirects to
   `/login.html` when there's no valid session; `POST /api/logout` clears
   it. `/api/intake/*`, `/api/accounts*`, `/api/drafting/*`,
-  `/api/documents/*`, and `/api/cases*` are 404 if no
+  `/api/documents/*`, `/api/cases*`, and `/api/audit*` are 404 if no
   `IntakeDemoSessions`/`AccountsService`/`DraftingService`/
-  `DocumentsService`/`CasesService` was passed to `createReviewServer`,
-  respectively. `npm run build` copies `public/` into `dist/` since `tsc`
-  only compiles `.ts` files.
+  `DocumentsService`/`CasesService`/`AuditService` was passed to
+  `createReviewServer`, respectively. `npm run build` copies `public/`
+  into `dist/` since `tsc` only compiles `.ts` files.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
 - `public/index.html` — the Docket app shell: a dark sidebar (brand +
@@ -331,12 +342,16 @@ from the nav for roles that can't use them).
   `attorney` or `paralegal`), Cases (a clickable list of every matter,
   expanding into that matter's uploaded documents — upload a file and
   download it back out as a data URI — alongside its drafted work product;
-  same role gate as Drafting), and Accounts (add a login, disable/
-  re-enable one, and for paralegal accounts specifically, assign/unassign
-  a matter — nav item hidden unless role is `attorney`). All three hides
-  are client-side convenience only; the real gate is server-side in
-  `AccountsService`/`DraftingService`/`DocumentsService`/`CasesService`.
-  Any `401` from the API redirects the browser back to `/login.html`.
+  same role gate as Drafting), Accounts (add a login, disable/re-enable
+  one, and for paralegal accounts specifically, assign/unassign a
+  matter — nav item hidden unless role is `attorney`), and Audit Log
+  (every access grant/denial and work-product transition, append-only,
+  optionally filtered by matter id — nav item hidden unless role is
+  `attorney`). All four hides are client-side convenience only; the real
+  gate is server-side in
+  `AccountsService`/`DraftingService`/`DocumentsService`/`CasesService`/
+  `AuditService`. Any `401` from the API redirects the browser back to
+  `/login.html`.
 - `start.ts`'s boot-time bootstrap: if no accounts exist yet in the
   persisted state, it creates them from `ATTORNEY_USERNAME`/
   `ATTORNEY_PASSWORD` (and optionally `PARALEGAL_USERNAME`/

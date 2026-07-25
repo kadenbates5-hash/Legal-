@@ -24,13 +24,14 @@ up contracts/motions/discovery requests/research summaries/billing
 narratives and submits them for review, a Cases panel where a paralegal
 uploads and names the actual files for a matter (contracts, exhibits,
 scanned forms) and can click into any case to see its documents and
-drafted work product side by side, and attorney-gated account management
+drafted work product side by side, attorney-gated account management
 (add a login, disable/re-enable one, assign a paralegal to a matter —
-access is revoked/scoped immediately); and **persistence** that's either
-file-backed or a real Postgres database — plus the interfaces a
-practice-area module and firm config plug into. See CLAUDE.md's "Not yet
-built" section for what's still ahead (real STT/TTS vendor, password
-reset/MFA, a real calendar vendor).
+access is revoked/scoped immediately), and an attorney-only Audit Log
+panel over the append-only, privilege-sensitive audit trail; and
+**persistence** that's either file-backed or a real Postgres database —
+plus the interfaces a practice-area module and firm config plug into.
+See CLAUDE.md's "Not yet built" section for what's still ahead (real
+STT/TTS vendor, password reset/MFA, a real calendar vendor).
 
 ## Setup
 

@@ -260,6 +260,7 @@
     <button data-panel="drafting" id="navDrafting" hidden><span class="dot"></span>Drafting</button>
     <button data-panel="cases" id="navCases" hidden><span class="dot"></span>Cases</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
+    <button data-panel="audit" id="navAudit" hidden><span class="dot"></span>Audit Log</button>
   </nav>
   <div class="sidebar-footer">Nothing here reaches a client, filing, or invoice without an attorney's sign-off.</div>
 </aside>
@@ -478,6 +479,18 @@
         <ul id="accountList" class="list"></ul>
       </div>
     </section>
+
+    <!-- ===== Audit Log (attorney-only) ===== -->
+    <section class="panel" id="panel-audit">
+      <p class="subtitle">Attorney-only. Every access grant/denial, escalation, and work-product transition, append-only and privilege-sensitive — nothing here is ever edited or deleted.</p>
+      <div class="card">
+        <div class="field-row">
+          <label class="field">Matter ID (optional) <input id="auditMatterId" placeholder="leave blank for all" /></label>
+          <button class="btn" id="refreshAudit">Refresh</button>
+        </div>
+        <ul id="auditList" class="list"></ul>
+      </div>
+    </section>
   </div>
 </div>
 
@@ -490,6 +503,7 @@ const PANEL_TITLES = {
   drafting: "Drafting",
   cases: "Cases",
   accounts: "Accounts",
+  audit: "Audit Log",
 };
 
 for (const btn of document.querySelectorAll("nav.nav button")) {
@@ -529,6 +543,7 @@ async function loadWhoami() {
     document.getElementById("whoami").textContent = `Signed in as ${me.username || me.id} (${me.role})`;
     if (me.role === "attorney") {
       document.getElementById("navAccounts").hidden = false;
+      document.getElementById("navAudit").hidden = false;
     }
     if (me.role === "attorney" || me.role === "paralegal") {
       document.getElementById("navDrafting").hidden = false;
@@ -637,6 +652,12 @@ async function loadDetail(id) {
   } catch (err) {
     showError(err.message);
   }
+}
+
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value == null ? "" : String(value);
+  return div.innerHTML;
 }
 
 function mkButton(label, onClick) {
@@ -1227,6 +1248,34 @@ async function createAccount() {
 document.getElementById("createAccount").addEventListener("click", createAccount);
 document.getElementById("refreshAccounts").addEventListener("click", loadAccounts);
 document.getElementById("navAccounts").addEventListener("click", loadAccounts);
+
+/* ===== Audit Log ===== */
+async function loadAudit() {
+  showError("");
+  try {
+    const matterId = document.getElementById("auditMatterId").value.trim();
+    const path = matterId ? `/api/audit?matterId=${encodeURIComponent(matterId)}` : "/api/audit";
+    const entries = await api(path);
+    const list = document.getElementById("auditList");
+    list.innerHTML = "";
+    for (const entry of [...entries].reverse()) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>${escapeHtml(entry.action)}</strong>
+        <span class="badge">${escapeHtml(entry.actor.role)} ${escapeHtml(entry.actor.id)}</span>
+        ${entry.matterId ? `<span class="badge">matter ${escapeHtml(entry.matterId)}</span>` : ""}
+        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">${new Date(entry.timestamp).toLocaleString()}</div>
+        ${entry.detail ? `<div style="font-size:0.85rem;margin-top:0.3rem;">${escapeHtml(entry.detail)}</div>` : ""}`;
+      list.appendChild(li);
+    }
+    if (entries.length === 0) list.innerHTML = '<li class="static empty">No audit entries.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("refreshAudit").addEventListener("click", loadAudit);
+document.getElementById("navAudit").addEventListener("click", loadAudit);
 </script>
 </body>
 </html>
