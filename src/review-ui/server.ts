@@ -27,6 +27,15 @@ import type { UserRole } from "../core/auth.js";
  * machine credential (§5's due-diligence item), which authenticates as
  * role `"system"` without a human session — see `handleDeadlineRequest`'s
  * `calendar_system`-source gating and `review-service.ts`.
+ *
+ * TLS itself is terminated upstream (a reverse proxy / load balancer), not
+ * by this Node process — see `review-ui/start.ts`'s `TRUST_PROXY` env var.
+ * When `trustProxy` is on, the session cookie gets the `Secure` flag
+ * whenever the proxy reports the original request was HTTPS
+ * (`X-Forwarded-Proto: https`); when it's off (the default — safe for
+ * local `http://localhost` dev), the header is never trusted and the
+ * cookie is never marked `Secure`, since an untrusted proxy could forge
+ * that header to make a browser send the cookie over plain HTTP anyway.
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -50,9 +59,22 @@ function parseCookies(req: IncomingMessage): Record<string, string> {
   return out;
 }
 
-function sessionCookieHeader(token: string, expiresAt: string): string {
+/**
+ * Only meaningful when `trustProxy` is true — otherwise a request is never
+ * considered secure, no matter what headers it carries, since believing
+ * `X-Forwarded-Proto` from an untrusted network path would let anyone
+ * forge "this was HTTPS" and get a `Secure` cookie set over plain HTTP.
+ */
+function isSecureRequest(req: IncomingMessage, trustProxy: boolean): boolean {
+  if (!trustProxy) return false;
+  const proto = firstHeader(req.headers["x-forwarded-proto"]);
+  if (!proto) return false;
+  return proto.split(",")[0]!.trim().toLowerCase() === "https";
+}
+
+function sessionCookieHeader(token: string, expiresAt: string, secure: boolean): string {
   const maxAgeSeconds = Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
-  return `${SESSION_COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
+  return `${SESSION_COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure ? "; Secure" : ""}`;
 }
 
 function clearSessionCookieHeader(): string {
@@ -159,9 +181,11 @@ export function createReviewServer(
   scheduling?: SchedulingService,
   intake?: IntakeDemoSessions,
   accounts?: AccountsService,
+  /** See the module doc comment above — off by default, only enable behind a real TLS-terminating proxy. */
+  trustProxy = false,
 ): Server {
   return createServer((req, res) => {
-    void handleRequest(service, auth, req, res, onMutated, scheduling, intake, accounts);
+    void handleRequest(service, auth, req, res, onMutated, scheduling, intake, accounts, trustProxy);
   });
 }
 
@@ -174,11 +198,12 @@ async function handleRequest(
   scheduling?: SchedulingService,
   intake?: IntakeDemoSessions,
   accounts?: AccountsService,
+  trustProxy = false,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
 
   if (url.pathname === "/api/login" && req.method === "POST") {
-    await handleLogin(auth, req, res, onMutated);
+    await handleLogin(auth, req, res, onMutated, trustProxy);
     return;
   }
 
@@ -318,6 +343,7 @@ async function handleLogin(
   req: IncomingMessage,
   res: ServerResponse,
   onMutated?: () => void,
+  trustProxy = false,
 ): Promise<void> {
   try {
     const body = await readJsonBody(req);
@@ -330,7 +356,7 @@ async function handleLogin(
       res,
       200,
       { id: user?.actorId, role: user?.role, username: user?.username },
-      { "Set-Cookie": sessionCookieHeader(session.token, session.expiresAt) },
+      { "Set-Cookie": sessionCookieHeader(session.token, session.expiresAt, isSecureRequest(req, trustProxy)) },
     );
     onMutated?.();
   } catch (err) {

@@ -7,15 +7,17 @@ import { SchedulingService, type Appointment } from "../core/scheduling.js";
 import { AuthService, type AuthSnapshot } from "../core/auth.js";
 import type { AccessControl } from "../core/access-control.js";
 import type { FirmConfig } from "../config/firm-config.js";
-import { readJsonFile, writeJsonFile } from "./json-file-store.js";
+import { fileStateStore, type StateStore } from "./state-store.js";
 
 /**
  * Bundles the stateful core stores (audit log, utilization tracker,
- * work-product store, deadline tracker, scheduling service) into one
- * persisted JSON document. This is the concrete stopgap for §8's "not yet
- * built — persistence": file-backed rather than in-memory-only, but still
- * a single-process, single-file store — not a substitute for a real
- * multi-user database before this goes anywhere near real clients.
+ * work-product store, deadline tracker, scheduling service, auth) into
+ * one persisted JSON document, read/written through a `StateStore` (see
+ * `state-store.ts`) — file-backed by default, or a real database (see
+ * `postgres-store.ts`) when one is configured. Either way this is a
+ * single JSON blob, not a normalized schema — every domain object already
+ * reduces to plain data via `toSnapshot()`/`fromSnapshot()`, so the
+ * storage backend never needs to know what's inside it.
  */
 export interface SystemStateSnapshot {
   version: 1;
@@ -55,8 +57,12 @@ function emptySnapshot(): SystemStateSnapshot {
   };
 }
 
-export async function loadSystemState(filePath: string, options?: LoadSystemStateOptions): Promise<SystemState> {
-  const snapshot = await readJsonFile<SystemStateSnapshot>(filePath, emptySnapshot());
+function resolveStore(source: string | StateStore): StateStore {
+  return typeof source === "string" ? fileStateStore(source) : source;
+}
+
+export async function loadSystemState(source: string | StateStore, options?: LoadSystemStateOptions): Promise<SystemState> {
+  const snapshot = await resolveStore(source).read<SystemStateSnapshot>(emptySnapshot());
   const auditLog = AuditLog.fromSnapshot(snapshot.auditLog);
   const utilization = UtilizationTracker.fromSnapshot(snapshot.utilization);
   const workProductStore = WorkProductStore.fromSnapshot(snapshot.workProducts, auditLog);
@@ -66,7 +72,7 @@ export async function loadSystemState(filePath: string, options?: LoadSystemStat
   return { auditLog, utilization, workProductStore, deadlineTracker, scheduling, auth };
 }
 
-export async function saveSystemState(filePath: string, state: SystemState): Promise<void> {
+export async function saveSystemState(source: string | StateStore, state: SystemState): Promise<void> {
   const snapshot: SystemStateSnapshot = {
     version: 1,
     auditLog: state.auditLog.toSnapshot(),
@@ -76,5 +82,5 @@ export async function saveSystemState(filePath: string, state: SystemState): Pro
     appointments: state.scheduling.toSnapshot(),
     auth: state.auth.toSnapshot(),
   };
-  await writeJsonFile(filePath, snapshot);
+  await resolveStore(source).write(snapshot);
 }

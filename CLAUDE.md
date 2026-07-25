@@ -294,34 +294,53 @@ behind the attorney-only service. It still requires a logged-in session
 
 ## Persistence
 
-`src/persistence/` — file-backed persistence, the concrete stopgap for
-§8's "not yet built — persistence." Still single-process/single-file, not
-a substitute for a real multi-user database before this goes near real
-clients, but it's real durability, not an in-memory-only demo:
+`src/persistence/` — real durability behind a storage-agnostic seam, not
+an in-memory-only demo. §8's "not yet built — persistence" is resolved
+two ways now: file-backed by default, or a real Postgres database when
+`DATABASE_URL` is set.
 
+- `state-store.ts` — the seam: `StateStore` is `{ read(default), write(data) }`
+  over a single opaque JSON blob. `system-state.ts` and everything upstream
+  of it (core, receptionist, paralegal, review-ui) only ever speaks in
+  plain-data snapshots via each domain object's `toSnapshot()`/
+  `fromSnapshot()`, so neither storage backend needs to know what a
+  `WorkProduct` or a `User` is.
 - `json-file-store.ts` — dependency-free, atomic JSON-file read/write
   (temp file + rename, so a crash mid-write can't leave a corrupt state
-  file).
+  file). `fileStateStore(path)` wraps it as a `StateStore`.
+- `postgres-store.ts` — `createPostgresStateStore({ connectionString })`,
+  the real-database swap. Deliberately not a normalized relational schema:
+  it stores the same single JSON snapshot in one `JSONB` column
+  (`docket_state`, keyed by an opaque string — one row per deployment in
+  practice), via the `pg` driver. `CREATE TABLE IF NOT EXISTS` runs on
+  every connect, so there's no separate migration step to run first.
 - `system-state.ts` — bundles the audit log, utilization tracker,
-  work-product store, deadline tracker, and scheduling service into one
-  JSON document via `loadSystemState`/`saveSystemState`.
+  work-product store, deadline tracker, scheduling service, and auth into
+  one document via `loadSystemState`/`saveSystemState`, which accept
+  either a `StateStore` or (for convenience/backward compatibility) a
+  plain file-path string.
 - Every stateful core object (`AuditLog`, `UtilizationTracker`,
   `WorkProduct`, `WorkProductStore`, `DeadlineTracker`,
-  `SchedulingService`) has `toSnapshot()`/`fromSnapshot()` round-tripping
-  its exact state to plain data — including `WorkProduct` states like
-  `approved`/`released` that the normal constructor and transition
-  methods can't reach directly. A rehydrated `WorkProduct` is a fully
-  functional, rule-enforcing object afterward (content still locks,
+  `SchedulingService`, `AuthService`) has `toSnapshot()`/`fromSnapshot()`
+  round-tripping its exact state to plain data — including `WorkProduct`
+  states like `approved`/`released` that the normal constructor and
+  transition methods can't reach directly. A rehydrated `WorkProduct` is a
+  fully functional, rule-enforcing object afterward (content still locks,
   unresolved flags still block approval), not just replayed JSON; a
   rehydrated `SchedulingService` still enforces double-booking checks.
-- `review-ui/start.ts` wires this in: loads state on boot (plus an
-  optional `FIRM_CONFIG_FILE` for business hours/attorney auto-assignment/
-  branding), and `server.ts`'s `onMutated` hook saves after every
-  state-changing request.
+- `review-ui/start.ts` wires this in: computes the store once at boot
+  (`DATABASE_URL` set → Postgres, else `STATE_FILE`, default
+  `./data/system-state.json`), loads state through it (plus an optional
+  `FIRM_CONFIG_FILE` for business hours/attorney auto-assignment/
+  branding), and `server.ts`'s `onMutated` hook saves through the same
+  store instance after every state-changing request — the connection pool
+  is created once, not per mutation.
 
-Swapping the file-backed adapter for a real database later only means
-replacing `json-file-store.ts` — the snapshot shapes and every caller stay
-the same.
+Postgres is still single-instance/single-database, not a sharded or
+read-replica setup — the right next step if this needs to scale past one
+firm's traffic, but a normalized relational schema (rather than one JSON
+blob) would be the more valuable change before that, and is a bigger
+redesign deliberately out of scope here.
 
 ## Practice-area module contract
 
@@ -342,10 +361,12 @@ attorney clears them via `workProduct.clearFlag(...)`.
 ```
 npm install
 npm run typecheck        # tsc --noEmit
-npm test                  # vitest run
+npm test                  # vitest run — Postgres-backed persistence tests skip cleanly if TEST_DATABASE_URL / a local Postgres isn't reachable
 ATTORNEY_USERNAME=you ATTORNEY_PASSWORD=at-least-8-chars npm run start:review-ui   # first boot: seeds your login
 npm run start:review-ui   # subsequent boots — attorney review-gate dashboard at http://localhost:3000
-# STATE_FILE=./data/system-state.json PORT=3000 npm run start:review-ui  # override defaults
+# STATE_FILE=./data/system-state.json PORT=3000 npm run start:review-ui  # override the file-backed default
+# DATABASE_URL=postgres://user:pass@host:5432/docket npm run start:review-ui  # use Postgres instead of the file store
+# TRUST_PROXY=true npm run start:review-ui                               # only behind a real TLS-terminating reverse proxy — see "Real authentication"
 # FIRM_CONFIG_FILE=./data/firm-config.json npm run start:review-ui        # enable scheduling business-hours/attorney-assignment/branding
 # CALENDAR_SYSTEM_API_KEY=... npm run start:review-ui                     # pin the calendar-integration key instead of auto-generating one
 ```
@@ -372,22 +393,23 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 ## Not yet built
 
 All six numbered steps of §8's build order are implemented (chat, then
-voice, for the receptionist). File-backed persistence exists (see above)
-but is single-process/single-file. Still open:
+voice, for the receptionist). Persistence, TLS-aware cookies, and account
+management are resolved (see "Persistence" and "Real authentication"
+above). Still open:
 
 - A real STT/TTS vendor integration behind `SpeechToText`/`TextToSpeech` —
   `voice-agent.ts` only has the interfaces and a test double so far, per
   §5's vendor due-diligence checklist (not yet completed for any vendor)
-- A real multi-user database in place of the file-backed persistence
-  adapter, before this goes near real clients
 - A real calendar *vendor* integration issuing/rotating the system API key
   automatically (`core/auth.ts`'s `verifySystemApiKey` is the enforcement
   point now — see "Real authentication" above — but no Google/Outlook/etc.
   integration exists yet to be the thing presenting that key)
 - The rest of account management: password reset, MFA, and self-service
-  invites (adding/disabling users after the one-time boot-time seed is
-  built — see `AccountsService` above). Also still open: TLS termination
-  in front of the session cookie (currently unset `Secure` flag, meant for
-  local/behind-a-TLS-proxy deployment — see `server.ts`'s cookie helpers)
+  invites (adding/disabling users after the one-time boot-time seed *is*
+  built — see `AccountsService` above)
+- A normalized relational schema for the Postgres adapter, if this ever
+  needs to scale past what one JSON blob per deployment comfortably
+  handles (see "Persistence" above) — a bigger redesign, deliberately not
+  done preemptively
 - Human/domain-expert sign-off on all three §7 items before real-client
   use — see the "§7 open items — status" section above

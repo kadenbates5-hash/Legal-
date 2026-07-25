@@ -5,6 +5,8 @@ import { IntakeDemoSessions } from "./intake-demo.js";
 import { AccountsService } from "./accounts-service.js";
 import { loadSystemState, saveSystemState } from "../persistence/system-state.js";
 import { readJsonFile } from "../persistence/json-file-store.js";
+import { createPostgresStateStore } from "../persistence/postgres-store.js";
+import type { StateStore } from "../persistence/state-store.js";
 import { AccessControl } from "../core/access-control.js";
 import { criminalLawModule } from "../modules/criminal-law/index.js";
 import type { UserRole } from "../core/auth.js";
@@ -14,17 +16,25 @@ import type { FirmConfig } from "../config/firm-config.js";
  * Standalone entry point for the attorney review-gate UI (`npm run
  * start:review-ui`). Loads persisted state on boot (including accounts/
  * sessions — see `core/auth.ts`) and saves after every mutation (see
- * `server.ts`'s `onMutated` hook) — file-backed via `src/persistence/`,
- * not the in-memory-only store earlier steps used. Still single-process/
- * single-file (§8's "not yet built" still flags a real database as a
- * prerequisite before real clients).
+ * `server.ts`'s `onMutated` hook), through whichever `StateStore` is
+ * configured (see `persistence/state-store.ts`): file-backed by default,
+ * or Postgres when `DATABASE_URL` is set (see `persistence/postgres-store.ts`).
  */
 const STATE_FILE = process.env["STATE_FILE"] ?? "./data/system-state.json";
 const FIRM_CONFIG_FILE = process.env["FIRM_CONFIG_FILE"];
+const DATABASE_URL = process.env["DATABASE_URL"];
 
 const firmConfig = FIRM_CONFIG_FILE ? await readJsonFile<FirmConfig | null>(FIRM_CONFIG_FILE, null) : null;
 
-const state = await loadSystemState(STATE_FILE, firmConfig ? { firmConfig } : {});
+/**
+ * `store` is either the Postgres adapter (when DATABASE_URL is set) or a
+ * plain file path string — `loadSystemState`/`saveSystemState` accept
+ * either. Computed once here and reused for every save, so a Postgres
+ * connection pool isn't recreated per mutation.
+ */
+const store: string | StateStore = DATABASE_URL ? await createPostgresStateStore({ connectionString: DATABASE_URL }) : STATE_FILE;
+
+const state = await loadSystemState(store, firmConfig ? { firmConfig } : {});
 
 /**
  * First-run bootstrap only: if the persisted state has no accounts yet,
@@ -74,7 +84,7 @@ if (!state.auth.hasSystemApiKey()) {
 }
 
 if (seeded) {
-  await saveSystemState(STATE_FILE, state);
+  await saveSystemState(store, state);
 }
 
 const service = new ReviewGateService(state.workProductStore, state.deadlineTracker);
@@ -95,20 +105,32 @@ const intake = new IntakeDemoSessions({
 
 const accounts = new AccountsService(state.auth);
 
+/**
+ * TLS is terminated upstream by a reverse proxy/load balancer, not by this
+ * Node process — set TRUST_PROXY=true only when actually deployed behind
+ * one that sets X-Forwarded-Proto itself (never on a directly-exposed
+ * process, where that header could be forged by anyone). See server.ts's
+ * module doc comment for what this actually gates: the session cookie's
+ * Secure flag.
+ */
+const trustProxy = process.env["TRUST_PROXY"] === "true";
+
 const server = createReviewServer(
   service,
   state.auth,
   () => {
-    void saveSystemState(STATE_FILE, state);
+    void saveSystemState(store, state);
   },
   state.scheduling,
   intake,
   accounts,
+  trustProxy,
 );
 
 const port = Number(process.env["PORT"] ?? 3000);
 server.listen(port, () => {
   console.log(`Docket listening on http://localhost:${port}`);
-  console.log(`State persisted to ${STATE_FILE}`);
+  console.log(DATABASE_URL ? "State persisted to Postgres (DATABASE_URL)" : `State persisted to ${STATE_FILE}`);
   if (firmConfig) console.log(`Firm config loaded from ${FIRM_CONFIG_FILE}`);
+  if (trustProxy) console.log("TRUST_PROXY is on — trusting X-Forwarded-Proto from the upstream proxy.");
 });

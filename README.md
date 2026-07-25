@@ -17,12 +17,13 @@ deadline tracking, consultation scheduling/reminders, and AI utilization
 tracking); the **receptionist agent** (chat and voice channels); the
 **paralegal drafting agent**; **Docket**, the attorney-facing app, with
 real, credentialed login (scrypt-hashed passwords, session cookies, an
-optional "remember me"), a live in-app demo of the receptionist agent, and
-attorney-gated account management (add a login, disable/re-enable one —
-access is revoked immediately); and file-backed **persistence** — plus the
-interfaces a practice-area module and firm config plug into. See
-CLAUDE.md's "Not yet built" section for what's still ahead (real STT/TTS
-vendor, password reset/MFA, a production database, a real calendar
+optional "remember me", and TLS-aware cookies behind a real reverse
+proxy), a live in-app demo of the receptionist agent, and attorney-gated
+account management (add a login, disable/re-enable one — access is
+revoked immediately); and **persistence** that's either file-backed or a
+real Postgres database — plus the interfaces a practice-area module and
+firm config plug into. See CLAUDE.md's "Not yet built" section for what's
+still ahead (real STT/TTS vendor, password reset/MFA, a real calendar
 vendor).
 
 ## Setup
@@ -39,3 +40,10 @@ generated calendar-integration API key (or set `CALENDAR_SYSTEM_API_KEY`
 yourself) — see CLAUDE.md's "Real authentication" section. Subsequent
 boots just need `npm run start:review-ui`; visit
 http://localhost:3000/login.html to sign in.
+
+By default state is a local JSON file (`STATE_FILE`, default
+`./data/system-state.json`). Set `DATABASE_URL` to use Postgres instead —
+the table (`docket_state`) is created automatically on first connect. Set
+`TRUST_PROXY=true` only when actually deployed behind a reverse proxy that
+terminates TLS and sets `X-Forwarded-Proto` itself — never on a
+directly-exposed process.

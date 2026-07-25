@@ -106,6 +106,72 @@ describe("auth HTTP API", () => {
   });
 });
 
+describe("session cookie Secure flag (trust-proxy model)", () => {
+  it("never marks the cookie Secure when trustProxy is off, even if the request claims to be https", async () => {
+    const res = await fetch(`${baseUrl}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-Proto": "https" },
+      body: JSON.stringify({ username: "attorney1", password: "correct-horse" }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).not.toMatch(/Secure/);
+  });
+
+  it("marks the cookie Secure when trustProxy is on and X-Forwarded-Proto says https", async () => {
+    const proxiedAuth = new AuthService();
+    proxiedAuth.createUser({ username: "attorney1", password: "correct-horse", role: "attorney", actorId: "a1" });
+    const proxiedServer = createReviewServer(
+      new ReviewGateService(new WorkProductStore()),
+      proxiedAuth,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true, // trustProxy
+    );
+    await new Promise<void>((resolve) => proxiedServer.listen(0, resolve));
+    const { port } = proxiedServer.address() as AddressInfo;
+    const proxiedUrl = `http://127.0.0.1:${port}`;
+
+    const res = await fetch(`${proxiedUrl}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-Proto": "https" },
+      body: JSON.stringify({ username: "attorney1", password: "correct-horse" }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toMatch(/Secure/);
+
+    await new Promise<void>((resolve) => proxiedServer.close(() => resolve()));
+  });
+
+  it("does not mark the cookie Secure when trustProxy is on but the proxy reports plain http", async () => {
+    const proxiedAuth = new AuthService();
+    proxiedAuth.createUser({ username: "attorney1", password: "correct-horse", role: "attorney", actorId: "a1" });
+    const proxiedServer = createReviewServer(
+      new ReviewGateService(new WorkProductStore()),
+      proxiedAuth,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true, // trustProxy
+    );
+    await new Promise<void>((resolve) => proxiedServer.listen(0, resolve));
+    const { port } = proxiedServer.address() as AddressInfo;
+    const proxiedUrl = `http://127.0.0.1:${port}`;
+
+    const res = await fetch(`${proxiedUrl}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-Proto": "http" },
+      body: JSON.stringify({ username: "attorney1", password: "correct-horse" }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).not.toMatch(/Secure/);
+
+    await new Promise<void>((resolve) => proxiedServer.close(() => resolve()));
+  });
+});
+
 describe("review-gate HTTP API", () => {
   it("lists pending-review work product for an attorney", async () => {
     const cookie = await loginCookie(baseUrl, "attorney1", "correct-horse");
