@@ -270,6 +270,54 @@ integration. It also doesn't sync the other direction: `Appointment`s
 from `core/scheduling.ts` aren't pushed to Google Calendar as events —
 that would be a separate, additive piece if wanted later.
 
+## Voicebox voice integration (§8 build order step 6's remaining piece — resolved)
+
+`src/integrations/voicebox.ts` — `VoiceboxSpeechToText`/
+`VoiceboxTextToSpeech`, the real vendor behind `voice-agent.ts`'s
+vendor-agnostic `SpeechToText`/`TextToSpeech` interfaces, chosen as
+Voicebox (https://voicebox.sh). `voice-agent.ts` itself needed **no
+changes** — that's the payoff of keeping those interfaces vendor-
+agnostic from the start.
+
+Voicebox is architecturally different from a cloud STT/TTS vendor worth
+being explicit about: it's a local, open-source voice studio (Whisper for
+transcription, cloned voices for synthesis) that runs its own REST API on
+the *same machine* by default (`http://127.0.0.1:17493`), not a hosted
+service reached with a per-request API key.
+
+- §5's due-diligence checklist (zero-retention, no training on firm data,
+  storage jurisdiction, subpoena risk) is close to moot in the strongest
+  possible sense here — audio never leaves the machine running Voicebox,
+  so there's no third-party retention/training/jurisdiction surface to
+  review — but that's *because* there's no managed vendor with an SLA
+  behind it, not a substitute for one.
+- Whatever process handles real calls and the Voicebox process must be
+  co-located or reachable over a trusted private network; `baseUrl` is
+  configurable specifically so this isn't hardcoded to localhost, but
+  exposing Voicebox beyond localhost is a network-security decision this
+  class doesn't make for you.
+- `VoiceboxSpeechToText.transcribe()`/`VoiceboxTextToSpeech.synthesize()`
+  narrow the interfaces' opaque `unknown` audio type to a concrete shape
+  this adapter expects (`{ data: Buffer, mimeType: string }` in,
+  `Buffer` out) — whatever eventually captures/plays real call audio has
+  to agree on that shape, since the interface itself stays intentionally
+  opaque.
+- The `/generate` (TTS) request shape is confirmed against Voicebox's
+  public docs; the `/transcribe` (STT) endpoint is written best-effort —
+  this sandbox's network policy blocked fetching `docs.voicebox.sh`
+  directly while building this, so confirm the exact path/payload against
+  a running instance's own interactive docs (`<baseUrl>/docs`) before
+  pointing this at a real call.
+- Voicebox is a young, single-machine, single-process tool, not something
+  with the concurrency/uptime guarantees a live phone line needs — that
+  tradeoff is inherent to the vendor choice, not something this adapter
+  can paper over.
+
+There's still no telephony/carrier integration (no Twilio-equivalent
+webhook exists anywhere in this codebase) — `VoiceReceptionistSession` is
+exercised by tests only, same as before this integration. Wiring a real
+phone number to it is a separate, distinct piece of work.
+
 ## Real authentication (§5/§6 — resolved)
 
 `src/core/auth.ts` — `AuthService`. Replaces the earlier
@@ -552,9 +600,12 @@ voice, for the receptionist). Persistence, TLS-aware cookies, and account
 management are resolved (see "Persistence" and "Real authentication"
 above). Still open:
 
-- A real STT/TTS vendor integration behind `SpeechToText`/`TextToSpeech` —
-  `voice-agent.ts` only has the interfaces and a test double so far, per
-  §5's vendor due-diligence checklist (not yet completed for any vendor)
+- A telephony/carrier integration (no Twilio-equivalent webhook exists)
+  to actually route a real phone call into `VoiceReceptionistSession` —
+  see "Voicebox voice integration" above for what *is* now built (the
+  STT/TTS vendor adapter itself) and its specific caveats (best-effort
+  `/transcribe` contract, no concurrency/uptime guarantees, must run
+  co-located with whatever answers the call)
 - Automatic system-API-key *rotation* for the Google Calendar integration
   (see "Google Calendar integration" above — today a key is rotated by
   hand, regenerating the service-account key and re-running

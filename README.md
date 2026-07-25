@@ -30,11 +30,14 @@ access is revoked/scoped immediately), and an attorney-only Audit Log
 panel over the append-only, privilege-sensitive audit trail; **persistence**
 that's either file-backed or a real Postgres database; and a **Google
 Calendar integration** (`npm run sync:calendar`) that confirms deadlines
-against a shared calendar as the independent `calendar_system` source —
+against a shared calendar as the independent `calendar_system` source;
+and a **Voicebox** STT/TTS integration behind the receptionist voice
+channel's vendor-agnostic interfaces (local, open-source — see
+CLAUDE.md's "Voicebox voice integration" for what that tradeoff means) —
 plus the interfaces a practice-area module and firm config plug into.
-See CLAUDE.md's "Not yet built" section for what's still ahead (real
-STT/TTS vendor, password reset/MFA, Google Calendar key rotation/vendor
-due-diligence).
+See CLAUDE.md's "Not yet built" section for what's still ahead (a real
+telephony/carrier integration to route an actual phone call, password
+reset/MFA, Google Calendar key rotation/vendor due-diligence).
 
 ## Setup
 
