@@ -1,9 +1,11 @@
-# Legal AI Receptionist & Paralegal System
+# Docket — AI Receptionist & Paralegal System
 
 AI system with two coordinated agents for a law firm — a client-facing
 receptionist agent and an attorney-facing paralegal agent — built as a
 practice-area-agnostic core plus swappable modules. Pilot practice area is
-criminal law.
+criminal law. **Docket** is the attorney-facing app that ties it together:
+a review queue, deadline tracking, scheduling, and a live receptionist
+demo, behind real login.
 
 See `docs/spec.md` for the full project specification and `CLAUDE.md` for
 the architecture of what's implemented so far.
@@ -13,12 +15,13 @@ order (§8): the **core layer** (routing, escalation, confidentiality/
 access-control, human-in-the-loop review gates, audit logging, redundant
 deadline tracking, consultation scheduling/reminders, and AI utilization
 tracking); the **receptionist agent** (chat and voice channels); the
-**paralegal drafting agent**; the **attorney review-gate UI** with real,
-credentialed login (scrypt-hashed passwords, session cookies, an optional
-"remember me"); and file-backed **persistence** — plus the interfaces a
-practice-area module and firm config plug into. See CLAUDE.md's "Not yet
-built" section for what's still ahead (real STT/TTS vendor, account
-management/MFA, a production database, a real calendar vendor).
+**paralegal drafting agent**; **Docket**, the attorney-facing app, with
+real, credentialed login (scrypt-hashed passwords, session cookies, an
+optional "remember me") and a live in-app demo of the receptionist agent;
+and file-backed **persistence** — plus the interfaces a practice-area
+module and firm config plug into. See CLAUDE.md's "Not yet built" section
+for what's still ahead (real STT/TTS vendor, account management/MFA, a
+production database, a real calendar vendor).
 
 ## Setup
 

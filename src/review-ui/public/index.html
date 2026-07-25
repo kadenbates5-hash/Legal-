@@ -2,88 +2,375 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Attorney Review Queue</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Docket</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
-  h1 { font-size: 1.4rem; }
-  .actor-bar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; font-size: 0.9rem; }
-  .actor-bar input { padding: 0.3rem 0.5rem; }
-  ul.queue { list-style: none; padding: 0; }
-  ul.queue li { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.6rem; cursor: pointer; }
-  ul.queue li:hover { background: #f7f7f7; }
-  .status { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px; font-size: 0.75rem; background: #eee; }
-  .flags { color: #b00020; font-size: 0.85rem; margin-top: 0.25rem; }
-  #detail { border-top: 2px solid #333; margin-top: 1.5rem; padding-top: 1rem; }
-  #detail pre { white-space: pre-wrap; background: #f7f7f7; padding: 0.75rem; border-radius: 6px; }
-  button { margin-right: 0.5rem; margin-top: 0.5rem; padding: 0.4rem 0.8rem; }
-  .error { color: #b00020; }
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --border: #e3e5ea;
+    --text: #1a1d24;
+    --text-muted: #6b7280;
+    --accent: #3454d1;
+    --accent-hover: #2a44ac;
+    --accent-soft: #ebeffc;
+    --danger: #c02b3a;
+    --danger-soft: #fbe9eb;
+    --warn: #a06600;
+    --warn-soft: #fdf3dc;
+    --ok: #1a7d4a;
+    --ok-soft: #e7f6ee;
+    --sidebar-bg: #14171f;
+    --sidebar-text: #c7cad3;
+    --sidebar-text-active: #ffffff;
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(20, 23, 31, 0.06), 0 1px 8px rgba(20, 23, 31, 0.04);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    width: 216px;
+    flex-shrink: 0;
+    background: var(--sidebar-bg);
+    color: var(--sidebar-text);
+    display: flex;
+    flex-direction: column;
+    padding: 1.25rem 0.75rem;
+  }
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    padding: 0 0.5rem 1.5rem;
+  }
+  .brand .mark {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    background: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 700;
+    font-size: 0.85rem;
+  }
+  .brand .name { font-weight: 700; font-size: 1.05rem; color: #fff; letter-spacing: -0.01em; }
+
+  nav.nav { display: flex; flex-direction: column; gap: 0.15rem; }
+  nav.nav button {
+    all: unset;
+    cursor: pointer;
+    padding: 0.55rem 0.65rem;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    color: var(--sidebar-text);
+    transition: background 0.15s ease, color 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  nav.nav button:hover { background: rgba(255, 255, 255, 0.06); color: var(--sidebar-text-active); }
+  nav.nav button.active { background: var(--accent); color: #fff; }
+  nav.nav .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.55; flex-shrink: 0; }
+  nav.nav button.active .dot { opacity: 1; }
+
+  .sidebar-footer { margin-top: auto; padding: 0.5rem; font-size: 0.72rem; color: #6b7280; line-height: 1.5; }
+
+  /* ---------- Main ---------- */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.9rem 1.75rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar h1 { font-size: 1.05rem; margin: 0; font-weight: 600; }
+  .topbar .who { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; color: var(--text-muted); }
+  .btn {
+    all: unset;
+    cursor: pointer;
+    padding: 0.45rem 0.9rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .btn:hover { background: var(--bg); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary:hover { background: var(--accent-hover); }
+  .btn.danger { color: var(--danger); border-color: var(--danger-soft); }
+  .btn.danger:hover { background: var(--danger-soft); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+
+  .content { flex: 1; padding: 1.75rem; overflow-y: auto; }
+  section.panel { display: none; animation: fade-in 0.15s ease; }
+  section.panel.active { display: block; }
+  @keyframes fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+  .panel h2 { font-size: 1.15rem; margin: 0 0 0.25rem; }
+  .panel .subtitle { color: var(--text-muted); font-size: 0.88rem; margin: 0 0 1.25rem; max-width: 62ch; line-height: 1.5; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1.1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .card h3 { margin: 0 0 0.75rem; font-size: 0.95rem; }
+
+  .field-row { display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: flex-end; margin-bottom: 0.5rem; }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; color: var(--text-muted); }
+  .field input, .field select {
+    font-size: 0.88rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    background: var(--surface);
+    min-width: 160px;
+  }
+  .field.checkbox { flex-direction: row; align-items: center; gap: 0.4rem; }
+  .field.checkbox input { min-width: auto; }
+
+  ul.list { list-style: none; padding: 0; margin: 0; }
+  ul.list li {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.55rem;
+    cursor: pointer;
+    background: var(--surface);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  ul.list li:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+  ul.list li.static { cursor: default; }
+  ul.list li.static:hover { border-color: var(--border); box-shadow: none; }
+
+  .badge {
+    display: inline-block;
+    padding: 0.12rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: var(--bg);
+    color: var(--text-muted);
+  }
+  .badge.pending_review { background: var(--warn-soft); color: var(--warn); }
+  .badge.approved, .badge.confirmed, .badge.scheduled { background: var(--ok-soft); color: var(--ok); }
+  .badge.rejected, .badge.conflict { background: var(--danger-soft); color: var(--danger); }
+  .badge.released, .badge.completed { background: var(--accent-soft); color: var(--accent); }
+
+  .flags { color: var(--danger); font-size: 0.82rem; margin-top: 0.35rem; }
+  .flags code { background: var(--danger-soft); padding: 0.05rem 0.35rem; border-radius: 4px; }
+
+  #detail pre {
+    white-space: pre-wrap;
+    background: var(--bg);
+    padding: 0.85rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    border: 1px solid var(--border);
+  }
+  #detail .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.85rem; }
+
+  .error {
+    color: var(--danger);
+    background: var(--danger-soft);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+    display: none;
+  }
+  .error:not(:empty) { display: block; }
+
+  .empty { color: var(--text-muted); font-size: 0.85rem; padding: 0.5rem 0; }
+
+  /* ---------- Intake demo chat ---------- */
+  .chat-window {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    height: 420px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .chat-log { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+  .bubble { max-width: 75%; padding: 0.55rem 0.8rem; border-radius: 12px; font-size: 0.88rem; line-height: 1.45; }
+  .bubble.agent { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); border-bottom-left-radius: 3px; }
+  .bubble.caller { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
+  .bubble.system { align-self: center; background: var(--warn-soft); color: var(--warn); font-size: 0.78rem; border-radius: 8px; }
+  .chat-input { display: flex; gap: 0.5rem; padding: 0.7rem; border-top: 1px solid var(--border); }
+  .chat-input input {
+    flex: 1;
+    padding: 0.5rem 0.7rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 0.88rem;
+  }
+  .chat-input input:disabled, .chat-input button:disabled { opacity: 0.5; }
 </style>
 </head>
 <body>
-<h1>Attorney Review Queue</h1>
-<p>Nothing renders or mutates without a real, logged-in <code>attorney</code> session.</p>
 
-<div class="actor-bar">
-  <span id="whoami"></span>
-  <button id="refresh">Refresh queue</button>
-  <button id="logout">Log out</button>
-</div>
+<aside class="sidebar">
+  <div class="brand"><span class="mark">D</span><span class="name">Docket</span></div>
+  <nav class="nav">
+    <button data-panel="queue" class="active"><span class="dot"></span>Review Queue</button>
+    <button data-panel="deadlines"><span class="dot"></span>Deadlines</button>
+    <button data-panel="scheduling"><span class="dot"></span>Scheduling</button>
+    <button data-panel="intake"><span class="dot"></span>Live Intake Demo</button>
+  </nav>
+  <div class="sidebar-footer">Nothing here reaches a client, filing, or invoice without an attorney's sign-off.</div>
+</aside>
 
-<div id="error" class="error"></div>
-<ul id="queue" class="queue"></ul>
-<div id="detail"></div>
+<div class="main">
+  <div class="topbar">
+    <h1 id="panelTitle">Review Queue</h1>
+    <div class="who">
+      <span id="whoami"></span>
+      <button class="btn" id="logout">Log out</button>
+    </div>
+  </div>
 
-<div id="deadlines">
-  <h2>Deadlines — never single-sourced</h2>
-  <p>A deadline confirms only once a second, independent source (human or calendar system) agrees with the agent's calculated date. Disagreement is a conflict, surfaced here — never silently resolved.</p>
-  <div class="actor-bar">
-    <label>Matter ID <input id="deadlineMatterId" value="m1" /></label>
-    <label>Type
-      <select id="deadlineType">
-        <option value="speedy_trial">speedy_trial</option>
-        <option value="arraignment">arraignment</option>
-        <option value="bail_hearing">bail_hearing</option>
-        <option value="discovery_response">discovery_response</option>
-        <option value="other">other</option>
-      </select>
-    </label>
-    <button id="checkDeadline">Check status</button>
-  </div>
-  <div id="deadlineStatus"></div>
-  <div class="actor-bar">
-    <label>Confirm date <input id="deadlineDate" type="date" /></label>
-    <label>Source
-      <select id="deadlineSource">
-        <option value="human">human</option>
-        <option value="calendar_system">calendar_system</option>
-      </select>
-    </label>
-    <button id="confirmDeadline">Record independent confirmation</button>
-  </div>
-  <h3>Open conflicts</h3>
-  <ul id="conflictList"></ul>
-</div>
+  <div class="content">
+    <div id="error" class="error"></div>
 
-<div id="scheduling">
-  <h2>Scheduling</h2>
-  <p>Book, reschedule, or cancel consultations. Bookings outside business hours are rejected unless explicitly overridden — see <code>core/scheduling.ts</code>.</p>
-  <div class="actor-bar">
-    <label>Matter ID <input id="apptMatterId" value="m1" /></label>
-    <label>Start (local) <input id="apptStartTime" type="datetime-local" /></label>
-    <label>Practice area <input id="apptPracticeArea" value="criminal-law" /></label>
-    <label><input id="apptOverrideHours" type="checkbox" /> allow outside business hours</label>
-    <button id="bookAppt">Book consultation</button>
+    <!-- ===== Review Queue ===== -->
+    <section class="panel active" id="panel-queue">
+      <p class="subtitle">Work product pending attorney review. Nothing here can be approved, released, or leave the system without a real attorney session.</p>
+      <div class="card">
+        <div class="field-row">
+          <button class="btn" id="refresh">Refresh queue</button>
+        </div>
+        <ul id="queue" class="list"></ul>
+      </div>
+      <div id="detail"></div>
+    </section>
+
+    <!-- ===== Deadlines ===== -->
+    <section class="panel" id="panel-deadlines">
+      <p class="subtitle">A deadline confirms only once a second, independent source (an attorney's own confirmation, or the calendar integration's own credential) agrees with the agent's calculated date. Disagreement is a conflict, surfaced here — never silently resolved.</p>
+      <div class="card">
+        <h3>Check status</h3>
+        <div class="field-row">
+          <label class="field">Matter ID <input id="deadlineMatterId" value="m1" /></label>
+          <label class="field">Type
+            <select id="deadlineType">
+              <option value="speedy_trial">speedy_trial</option>
+              <option value="arraignment">arraignment</option>
+              <option value="bail_hearing">bail_hearing</option>
+              <option value="discovery_response">discovery_response</option>
+              <option value="other">other</option>
+            </select>
+          </label>
+          <button class="btn" id="checkDeadline">Check status</button>
+        </div>
+        <div id="deadlineStatus"></div>
+      </div>
+      <div class="card">
+        <h3>Record an independent confirmation</h3>
+        <div class="field-row">
+          <label class="field">Confirm date <input id="deadlineDate" type="date" /></label>
+          <label class="field">Source
+            <select id="deadlineSource">
+              <option value="human">human (this attorney session)</option>
+              <option value="calendar_system">calendar_system (requires the integration's own key)</option>
+            </select>
+          </label>
+          <button class="btn primary" id="confirmDeadline">Record confirmation</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Open conflicts</h3>
+        <ul id="conflictList" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- ===== Scheduling ===== -->
+    <section class="panel" id="panel-scheduling">
+      <p class="subtitle">Book, reschedule, or cancel consultations. Bookings outside business hours are rejected unless explicitly overridden.</p>
+      <div class="card">
+        <h3>Book a consultation</h3>
+        <div class="field-row">
+          <label class="field">Matter ID <input id="apptMatterId" value="m1" /></label>
+          <label class="field">Start (local) <input id="apptStartTime" type="datetime-local" /></label>
+          <label class="field">Practice area <input id="apptPracticeArea" value="criminal-law" /></label>
+          <label class="field checkbox"><input id="apptOverrideHours" type="checkbox" /> Allow outside business hours</label>
+          <button class="btn primary" id="bookAppt">Book</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="field-row">
+          <h3 style="margin:0;flex:1 0 100%;">Appointments</h3>
+          <label class="field">Matter ID <input id="scheduleListMatterId" value="m1" /></label>
+          <button class="btn" id="refreshAppointments">Refresh</button>
+        </div>
+        <ul id="appointmentList" class="list"></ul>
+      </div>
+      <div class="card">
+        <h3>Reminders due now</h3>
+        <ul id="dueReminderList" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- ===== Live Intake Demo ===== -->
+    <section class="panel" id="panel-intake">
+      <p class="subtitle">Talk to the receptionist AI exactly as a caller would — same routing, escalation, and access-control code paths, running under your own logged-in session. Conversations here are throwaway previews, not real intake, and nothing here ever becomes a client record.</p>
+      <div class="card">
+        <div class="field-row">
+          <button class="btn primary" id="startIntake">Start new demo conversation</button>
+        </div>
+        <div class="chat-window">
+          <div class="chat-log" id="chatLog"></div>
+          <div class="chat-input">
+            <input id="chatText" type="text" placeholder="Type a caller's message…" disabled />
+            <button class="btn primary" id="chatSend" disabled>Send</button>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
-  <div class="actor-bar">
-    <label>List appointments for matter <input id="scheduleListMatterId" value="m1" /></label>
-    <button id="refreshAppointments">Refresh</button>
-  </div>
-  <ul id="appointmentList" class="queue"></ul>
-  <h3>Reminders due now</h3>
-  <ul id="dueReminderList"></ul>
 </div>
 
 <script>
+const PANEL_TITLES = {
+  queue: "Review Queue",
+  deadlines: "Deadlines",
+  scheduling: "Scheduling",
+  intake: "Live Intake Demo",
+};
+
+for (const btn of document.querySelectorAll("nav.nav button")) {
+  btn.addEventListener("click", () => {
+    const panel = btn.dataset.panel;
+    for (const b of document.querySelectorAll("nav.nav button")) b.classList.toggle("active", b === btn);
+    for (const s of document.querySelectorAll("section.panel")) s.classList.toggle("active", s.id === `panel-${panel}`);
+    document.getElementById("panelTitle").textContent = PANEL_TITLES[panel] || "";
+  });
+}
+
 async function api(path, options) {
   const res = await fetch(path, {
     ...options,
@@ -119,6 +406,7 @@ document.getElementById("logout").addEventListener("click", async () => {
 
 loadWhoami();
 
+/* ===== Review Queue ===== */
 async function loadQueue() {
   showError("");
   try {
@@ -128,12 +416,12 @@ async function loadQueue() {
     for (const item of items) {
       const li = document.createElement("li");
       li.innerHTML = `<strong>${item.kind}</strong> — matter ${item.matterId}
-        <span class="status">${item.status}</span>
+        <span class="badge ${item.status}">${item.status}</span>
         ${item.flags.length ? `<div class="flags">Unresolved flags: ${item.flags.join(", ")}</div>` : ""}`;
       li.addEventListener("click", () => loadDetail(item.id));
       list.appendChild(li);
     }
-    if (items.length === 0) list.innerHTML = "<li>No work product pending review.</li>";
+    if (items.length === 0) list.innerHTML = '<li class="static empty">No work product pending review.</li>';
   } catch (err) {
     showError(err.message);
   }
@@ -145,18 +433,18 @@ async function loadDetail(id) {
     const wp = await api(`/api/work-products/${id}`);
     const detail = document.getElementById("detail");
     detail.innerHTML = `
-      <h2>${wp.kind} <span class="status">${wp.status}</span></h2>
-      <p>Matter: ${wp.matterId}</p>
-      ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${f}</code>`).join(", ")}</div>` : ""}
-      <pre>${wp.content}</pre>
-      <div id="actions"></div>
+      <div class="card">
+        <h3>${wp.kind} <span class="badge ${wp.status}">${wp.status}</span></h3>
+        <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 0.6rem;">Matter: ${wp.matterId}</p>
+        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${f}</code>`).join(", ")}</div>` : ""}
+        <pre>${wp.content}</pre>
+        <div class="actions" id="actions"></div>
+      </div>
     `;
     const actions = document.getElementById("actions");
 
     for (const flag of wp.flags) {
-      const btn = document.createElement("button");
-      btn.textContent = `Clear flag: ${flag}`;
-      btn.onclick = () => {
+      const btn = mkButton(`Clear flag: ${flag}`, () => {
         if (flag === "deadline_requires_redundant_verification") {
           const deadlineType = prompt(
             "Which deadline type does this confirm? (speedy_trial, arraignment, bail_hearing, discovery_response, other)",
@@ -165,16 +453,18 @@ async function loadDetail(id) {
           return act(`/api/work-products/${id}/clear-flag`, { flag, deadlineType }, id);
         }
         return act(`/api/work-products/${id}/clear-flag`, { flag }, id);
-      };
+      });
       actions.appendChild(btn);
     }
 
     if (wp.status === "pending_review") {
       const approveBtn = mkButton("Approve", () => act(`/api/work-products/${id}/approve`, {}, id));
+      approveBtn.classList.add("primary");
       const rejectBtn = mkButton("Reject", () => {
         const reason = prompt("Reason for rejection?") || "";
         return act(`/api/work-products/${id}/reject`, { reason }, id);
       });
+      rejectBtn.classList.add("danger");
       const reviseBtn = mkButton("Request revision", () => {
         const note = prompt("Revision note?") || "";
         return act(`/api/work-products/${id}/request-revision`, { note }, id);
@@ -182,7 +472,9 @@ async function loadDetail(id) {
       actions.append(approveBtn, rejectBtn, reviseBtn);
     }
     if (wp.status === "approved") {
-      actions.appendChild(mkButton("Release", () => act(`/api/work-products/${id}/release`, {}, id)));
+      const releaseBtn = mkButton("Release", () => act(`/api/work-products/${id}/release`, {}, id));
+      releaseBtn.classList.add("primary");
+      actions.appendChild(releaseBtn);
     }
   } catch (err) {
     showError(err.message);
@@ -191,6 +483,7 @@ async function loadDetail(id) {
 
 function mkButton(label, onClick) {
   const btn = document.createElement("button");
+  btn.className = "btn";
   btn.textContent = label;
   btn.onclick = onClick;
   return btn;
@@ -207,6 +500,10 @@ async function act(path, body, id) {
   }
 }
 
+document.getElementById("refresh").addEventListener("click", loadQueue);
+loadQueue();
+
+/* ===== Deadlines ===== */
 async function checkDeadline() {
   showError("");
   try {
@@ -215,11 +512,11 @@ async function checkDeadline() {
     const status = await api(`/api/deadlines?matterId=${encodeURIComponent(matterId)}&type=${encodeURIComponent(type)}`);
     const el = document.getElementById("deadlineStatus");
     if (status.state === "confirmed") {
-      el.innerHTML = `<p><strong>Confirmed:</strong> ${status.date}</p>`;
+      el.innerHTML = `<p><span class="badge confirmed">confirmed</span> ${status.date}</p>`;
     } else if (status.state === "conflict") {
-      el.innerHTML = `<p class="error"><strong>Conflict</strong> — sources disagree: ${status.calculations.map((c) => `${c.source}: ${c.date}`).join(", ")}</p>`;
+      el.innerHTML = `<p><span class="badge conflict">conflict</span> sources disagree: ${status.calculations.map((c) => `${c.source}: ${c.date}`).join(", ")}</p>`;
     } else {
-      el.innerHTML = `<p>Unconfirmed (${status.calculations.length} calculation(s) so far).</p>`;
+      el.innerHTML = `<p class="empty">Unconfirmed (${status.calculations.length} calculation(s) so far).</p>`;
     }
     await loadConflicts();
   } catch (err) {
@@ -250,17 +547,16 @@ async function loadConflicts() {
   const list = document.getElementById("conflictList");
   list.innerHTML = conflicts.length
     ? conflicts
-        .map((c) => `<li>${c.matterId} / ${c.type}: ${c.calculations.map((x) => `${x.source}=${x.date}`).join(", ")}</li>`)
+        .map((c) => `<li class="static">${c.matterId} / ${c.type}: ${c.calculations.map((x) => `${x.source}=${x.date}`).join(", ")}</li>`)
         .join("")
-    : "<li>None.</li>";
+    : '<li class="static empty">None.</li>';
 }
 
 document.getElementById("checkDeadline").addEventListener("click", checkDeadline);
 document.getElementById("confirmDeadline").addEventListener("click", confirmDeadline);
-document.getElementById("refresh").addEventListener("click", loadQueue);
-loadQueue();
 loadConflicts();
 
+/* ===== Scheduling ===== */
 async function bookAppointment() {
   showError("");
   try {
@@ -292,15 +588,17 @@ async function loadAppointments() {
     list.innerHTML = "";
     for (const appt of items) {
       const li = document.createElement("li");
+      li.classList.add("static");
       const when = new Date(appt.startTime).toLocaleString();
       li.innerHTML = `<strong>${appt.type}</strong> with ${appt.attorneyId} at ${when}
-        <span class="status">${appt.status}</span>`;
+        <span class="badge ${appt.status}">${appt.status}</span>`;
       if (appt.status === "scheduled" || appt.status === "rescheduled") {
         const cancelBtn = mkButton("Cancel", async () => {
           const reason = prompt("Cancellation reason (optional)?") || undefined;
           await api(`/api/appointments/${appt.id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
           await loadAppointments();
         });
+        cancelBtn.classList.add("danger");
         const completeBtn = mkButton("Complete", async () => {
           await api(`/api/appointments/${appt.id}/complete`, { method: "POST", body: "{}" });
           await loadAppointments();
@@ -310,7 +608,7 @@ async function loadAppointments() {
       }
       list.appendChild(li);
     }
-    if (items.length === 0) list.innerHTML = "<li>No appointments for this matter.</li>";
+    if (items.length === 0) list.innerHTML = '<li class="static empty">No appointments for this matter.</li>';
   } catch (err) {
     showError(err.message);
   }
@@ -323,16 +621,73 @@ async function loadDueReminders() {
     ? due
         .map(
           (d) =>
-            `<li>Matter ${d.appointment.matterId} — ${d.reminder.offsetMinutesBefore} min before ${new Date(d.appointment.startTime).toLocaleString()}</li>`,
+            `<li class="static">Matter ${d.appointment.matterId} — ${d.reminder.offsetMinutesBefore} min before ${new Date(d.appointment.startTime).toLocaleString()}</li>`,
         )
         .join("")
-    : "<li>None due right now.</li>";
+    : '<li class="static empty">None due right now.</li>';
 }
 
 document.getElementById("bookAppt").addEventListener("click", bookAppointment);
 document.getElementById("refreshAppointments").addEventListener("click", loadAppointments);
 loadAppointments();
 loadDueReminders();
+
+/* ===== Live Intake Demo ===== */
+let intakeSessionId = null;
+
+function appendBubble(kind, text) {
+  const log = document.getElementById("chatLog");
+  const bubble = document.createElement("div");
+  bubble.className = `bubble ${kind}`;
+  bubble.textContent = text;
+  log.appendChild(bubble);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function startIntake() {
+  showError("");
+  try {
+    document.getElementById("chatLog").innerHTML = "";
+    const { sessionId, reply } = await api("/api/intake/start", { method: "POST", body: "{}" });
+    intakeSessionId = sessionId;
+    appendBubble("agent", reply);
+    document.getElementById("chatText").disabled = false;
+    document.getElementById("chatSend").disabled = false;
+    document.getElementById("chatText").focus();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function sendChat() {
+  const input = document.getElementById("chatText");
+  const text = input.value.trim();
+  if (!text || !intakeSessionId) return;
+  appendBubble("caller", text);
+  input.value = "";
+  showError("");
+  try {
+    const { reply, done } = await api(`/api/intake/${intakeSessionId}/message`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    appendBubble("agent", reply);
+    if (done) {
+      appendBubble("system", "Conversation ended. Start a new one to try another scenario.");
+      input.disabled = true;
+      document.getElementById("chatSend").disabled = true;
+      intakeSessionId = null;
+    }
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("startIntake").addEventListener("click", startIntake);
+document.getElementById("chatSend").addEventListener("click", sendChat);
+document.getElementById("chatText").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendChat();
+});
 </script>
 </body>
 </html>

@@ -2,32 +2,85 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Sign in — Attorney Review Queue</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Docket — Sign in</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 360px; margin: 4rem auto; padding: 0 1rem; color: #1a1a1a; }
-  h1 { font-size: 1.3rem; }
-  label { display: block; margin-top: 1rem; font-size: 0.9rem; }
-  input[type="text"], input[type="password"] { width: 100%; padding: 0.5rem; margin-top: 0.25rem; box-sizing: border-box; }
-  .remember { display: flex; align-items: center; gap: 0.4rem; margin-top: 1rem; }
+  :root {
+    --bg: #14171f;
+    --surface: #ffffff;
+    --border: #e3e5ea;
+    --text: #1a1d24;
+    --text-muted: #6b7280;
+    --accent: #3454d1;
+    --accent-hover: #2a44ac;
+    --danger: #c02b3a;
+    --danger-soft: #fbe9eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    background-image: radial-gradient(circle at 20% 20%, #1c2030 0%, #14171f 55%);
+    color: var(--text);
+  }
+  .card {
+    width: 100%;
+    max-width: 360px;
+    background: var(--surface);
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    padding: 2rem 2rem 1.75rem;
+  }
+  .brand { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; }
+  .brand .mark {
+    width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 0.95rem;
+  }
+  .brand .name { font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; }
+  p.tagline { color: var(--text-muted); font-size: 0.85rem; margin: -1rem 0 1.5rem; line-height: 1.5; }
+  label { display: block; margin-top: 1rem; font-size: 0.82rem; color: var(--text-muted); }
+  input[type="text"], input[type="password"] {
+    width: 100%; padding: 0.55rem 0.65rem; margin-top: 0.3rem; box-sizing: border-box;
+    border: 1px solid var(--border); border-radius: 8px; font-size: 0.92rem;
+  }
+  input[type="text"]:focus, input[type="password"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .remember { display: flex; align-items: center; gap: 0.45rem; margin-top: 1.1rem; }
   .remember input { width: auto; }
-  button { margin-top: 1.5rem; padding: 0.5rem 1rem; width: 100%; }
-  .error { color: #b00020; margin-top: 1rem; font-size: 0.9rem; }
+  .remember label { display: inline; margin: 0; font-size: 0.85rem; color: var(--text); }
+  button.submit {
+    all: unset; box-sizing: border-box; display: block;
+    margin-top: 1.5rem; padding: 0.6rem 1rem; width: 100%;
+    background: var(--accent); color: #fff; text-align: center;
+    border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  button.submit:hover { background: var(--accent-hover); }
+  .error { color: var(--danger); background: var(--danger-soft); border-radius: 8px; padding: 0.5rem 0.7rem; margin-top: 1rem; font-size: 0.85rem; display: none; }
+  .error:not(:empty) { display: block; }
 </style>
 </head>
 <body>
-<h1>Attorney Review Queue</h1>
-<p>Sign in to continue. Real, credentialed accounts only — no header shortcuts.</p>
+<div class="card">
+  <div class="brand"><span class="mark">D</span><span class="name">Docket</span></div>
+  <p class="tagline">AI receptionist &amp; paralegal, always chaperoned by a human attorney. Sign in to continue.</p>
 
-<form id="loginForm">
-  <label>Username <input id="username" type="text" autocomplete="username" required /></label>
-  <label>Password <input id="password" type="password" autocomplete="current-password" required /></label>
-  <div class="remember">
-    <input id="remember" type="checkbox" />
-    <label for="remember" style="display: inline; margin: 0;">Remember me on this device</label>
-  </div>
-  <button type="submit">Sign in</button>
-  <div id="error" class="error"></div>
-</form>
+  <form id="loginForm">
+    <label>Username <input id="username" type="text" autocomplete="username" required /></label>
+    <label>Password <input id="password" type="password" autocomplete="current-password" required /></label>
+    <div class="remember">
+      <input id="remember" type="checkbox" />
+      <label for="remember">Remember me on this device</label>
+    </div>
+    <button type="submit" class="submit">Sign in</button>
+    <div id="error" class="error"></div>
+  </form>
+</div>
 
 <script>
 document.getElementById("loginForm").addEventListener("submit", async (e) => {

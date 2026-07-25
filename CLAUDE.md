@@ -1,4 +1,9 @@
-# AI Receptionist & Paralegal System
+# Docket — AI Receptionist & Paralegal System
+
+**Docket** is the product name for the attorney-facing app in
+`src/review-ui/` (dashboard, login, live intake demo) — see "Attorney
+review-gate UI" below. The rest of this doc still refers to the overall
+system/spec by its generic name; "Docket" specifically means that app.
 
 Project brief: `docs/spec.md` (seed spec — pilot practice area is criminal law,
 design goal is a scalable core usable by any practice area/firm).
@@ -201,12 +206,15 @@ gap (headers anyone could set) with a *real* one (credentialed sessions),
 which is the prerequisite §5/§6 called for, not the last word on
 production auth.
 
-## Attorney review-gate UI
+## Attorney review-gate UI — "Docket"
 
-`src/review-ui/` — the attorney-facing surface over `review-gate.ts`
+`src/review-ui/` — the attorney-facing app over `review-gate.ts`
 (§8 build order step 5), plus `src/core/work-product-store.ts`, the
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
+Branded **Docket**: one app shell (sidebar nav, no full-page reloads
+between sections) over four panels — Review Queue, Deadlines, Scheduling,
+and Live Intake Demo.
 
 - `review-service.ts` — `ReviewGateService`. `review-gate.ts` already
   guards the status-transition methods against non-attorney actors, but
@@ -214,6 +222,16 @@ in-memory registry that makes drafted `WorkProduct`s discoverable (a
   This service requires an attorney actor on *every* method, including
   plain reads — a receptionist/paralegal credential shouldn't reach this
   surface at all, not just get blocked on the mutating calls.
+- `intake-demo.ts` — `IntakeDemoSessions`, backing the dashboard's "Live
+  Intake Demo" panel: an in-memory, ephemeral map of `ReceptionistChatSession`s
+  keyed by a random session id, driven by the *actual* logged-in actor
+  through the *actual* `Router`/`AccessControl`. It's a real conversation
+  through the real code path (same escalation/access-control/scripting as
+  a real caller), not a mock — the only thing "demo" about it is that
+  sessions live only in memory and are pruned the moment a conversation
+  ends, never touching `system-state.ts` or a real matter. A logged-in
+  actor whose role wouldn't be allowed to run intake (e.g. `paralegal`)
+  gets the same `AccessDeniedError` a misconfigured real session would.
 - `server.ts` — a small dependency-free JSON API (Node's built-in `http`,
   no framework) over the service, plus static-file serving for the
   dashboard. Actor identity comes from an `httpOnly` session cookie set by
@@ -221,15 +239,21 @@ in-memory registry that makes drafted `WorkProduct`s discoverable (a
   (see "Real authentication" above) — or from an `x-system-api-key` header
   for the calendar integration's machine credential. `GET /` redirects to
   `/login.html` when there's no valid session; `POST /api/logout` clears
-  it. `npm run build` copies `public/` into `dist/` since `tsc` only
-  compiles `.ts` files.
-- `public/login.html` — username/password + a "remember me" checkbox,
-  posting to `/api/login`.
-- `public/index.html` — a minimal vanilla-JS dashboard: shows who's signed
-  in, lists work product pending review, shows content/flags/history, lets
-  an attorney approve/reject/request-revision/clear-flag/release, and
-  includes "Deadlines" and "Scheduling" panels over their respective APIs.
-  Any `401` from the API redirects the browser back to `/login.html`.
+  it. `/api/intake/start` and `/api/intake/:sessionId/message` are 404 if
+  no `IntakeDemoSessions` was passed to `createReviewServer`. `npm run
+  build` copies `public/` into `dist/` since `tsc` only compiles `.ts`
+  files.
+- `public/login.html` — Docket-branded sign-in: username/password + a
+  "remember me" checkbox, posting to `/api/login`.
+- `public/index.html` — the Docket app shell: a dark sidebar (brand +
+  four-panel nav), a top bar showing who's signed in, and one panel each
+  for the Review Queue (list/detail/approve/reject/request-revision/
+  clear-flag/release), Deadlines (status check/independent confirmation/
+  conflict list), Scheduling (book/list/reschedule/cancel/complete/
+  reminders), and Live Intake Demo (a chat window driving
+  `intake-demo.ts` — "Start new demo conversation" then type caller
+  turns). Any `401` from the API redirects the browser back to
+  `/login.html`.
 - `start.ts`'s boot-time bootstrap: if no accounts exist yet in the
   persisted state, it creates them from `ATTORNEY_USERNAME`/
   `ATTORNEY_PASSWORD` (and optionally `PARALEGAL_USERNAME`/
@@ -238,7 +262,10 @@ in-memory registry that makes drafted `WorkProduct`s discoverable (a
   forever, by design (re-seeding/resetting credentials belongs to a real
   account-management flow, not a boot-time env var). It also sets the
   calendar-integration system key from `CALENDAR_SYSTEM_API_KEY`, or
-  generates and logs a random one on first boot if that's unset.
+  generates and logs a random one on first boot if that's unset, and
+  constructs the `IntakeDemoSessions` wired into the server (sharing the
+  real audit log, its own dedicated `AccessControl` instance, and the
+  criminal-law pilot module).
 
 `/api/appointments*` (see `scheduling.ts` above) is wired into the same
 server, gated by `SchedulingService`'s own optional `AccessControl`

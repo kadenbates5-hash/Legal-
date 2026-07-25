@@ -7,6 +7,7 @@ import { AuthError, type AuthService } from "../core/auth.js";
 import type { DeadlineType } from "../core/deadline.js";
 import { SchedulingError, type AppointmentType, type SchedulingService } from "../core/scheduling.js";
 import { ReviewGateService } from "./review-service.js";
+import type { IntakeDemoSessions } from "./intake-demo.js";
 
 /**
  * Attorney review-gate UI backend (§8 build order step 5): a small JSON API
@@ -101,6 +102,7 @@ function errorStatus(err: unknown): number {
   if (err instanceof AccessDeniedError) return 403;
   if (err instanceof ReviewGateError) return 409;
   if (err instanceof Error && err.message.startsWith("no work product")) return 404;
+  if (err instanceof Error && err.message.startsWith("no intake demo session")) return 404;
   if (err instanceof SchedulingError) {
     return err.message.startsWith("no appointment") ? 404 : 409;
   }
@@ -145,9 +147,10 @@ export function createReviewServer(
   auth: AuthService,
   onMutated?: () => void,
   scheduling?: SchedulingService,
+  intake?: IntakeDemoSessions,
 ): Server {
   return createServer((req, res) => {
-    void handleRequest(service, auth, req, res, onMutated, scheduling);
+    void handleRequest(service, auth, req, res, onMutated, scheduling, intake);
   });
 }
 
@@ -158,6 +161,7 @@ async function handleRequest(
   res: ServerResponse,
   onMutated?: () => void,
   scheduling?: SchedulingService,
+  intake?: IntakeDemoSessions,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
 
@@ -216,6 +220,15 @@ async function handleRequest(
         return;
       }
       await handleAppointmentsRequest(scheduling, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/intake")) {
+      if (!intake) {
+        sendJson(res, 404, { error: "the intake demo is not configured on this server" });
+        return;
+      }
+      await handleIntakeRequest(intake, req, res, actor, url);
       return;
     }
 
@@ -344,6 +357,31 @@ async function handleDeadlineRequest(
     );
     sendJson(res, 200, result);
     onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleIntakeRequest(
+  intake: IntakeDemoSessions,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+): Promise<void> {
+  if (url.pathname === "/api/intake/start" && req.method === "POST") {
+    const { sessionId, turn } = intake.start(actor);
+    sendJson(res, 200, { sessionId, ...turn });
+    return;
+  }
+
+  const segments = url.pathname.replace(/^\/api\/intake\/?/, "").split("/").filter(Boolean);
+  if (segments.length === 2 && segments[1] === "message" && req.method === "POST") {
+    const sessionId = segments[0]!;
+    const body = await readJsonBody(req);
+    const turn = intake.handleMessage(sessionId, String(body["text"] ?? ""));
+    sendJson(res, 200, turn);
     return;
   }
 

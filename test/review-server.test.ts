@@ -97,7 +97,7 @@ describe("auth HTTP API", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toMatch(/text\/html/);
     const body = await res.text();
-    expect(body).toContain("Attorney Review Queue");
+    expect(body).toContain("Docket");
   });
 
   it("serves the login page without authentication", async () => {

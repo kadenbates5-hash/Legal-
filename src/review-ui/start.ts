@@ -1,8 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { createReviewServer } from "./server.js";
 import { ReviewGateService } from "./review-service.js";
+import { IntakeDemoSessions } from "./intake-demo.js";
 import { loadSystemState, saveSystemState } from "../persistence/system-state.js";
 import { readJsonFile } from "../persistence/json-file-store.js";
+import { AccessControl } from "../core/access-control.js";
+import { criminalLawModule } from "../modules/criminal-law/index.js";
 import type { UserRole } from "../core/auth.js";
 import type { FirmConfig } from "../config/firm-config.js";
 
@@ -72,6 +75,21 @@ if (seeded) {
 }
 
 const service = new ReviewGateService(state.workProductStore, state.deadlineTracker);
+
+/**
+ * Backs the dashboard's "Live Intake Demo" panel — see intake-demo.ts.
+ * Shares the real audit log (so demo conversations show up in the same
+ * audit trail as everything else) but gets its own AccessControl, since
+ * paralegal-matter assignment has nothing to do with receptionist intake.
+ */
+const intake = new IntakeDemoSessions({
+  accessControl: new AccessControl(state.auditLog),
+  auditLog: state.auditLog,
+  module: criminalLawModule,
+  utilization: state.utilization,
+  ...(firmConfig ? { firmConfig } : {}),
+});
+
 const server = createReviewServer(
   service,
   state.auth,
@@ -79,11 +97,12 @@ const server = createReviewServer(
     void saveSystemState(STATE_FILE, state);
   },
   state.scheduling,
+  intake,
 );
 
 const port = Number(process.env["PORT"] ?? 3000);
 server.listen(port, () => {
-  console.log(`Attorney review-gate UI listening on http://localhost:${port}`);
+  console.log(`Docket listening on http://localhost:${port}`);
   console.log(`State persisted to ${STATE_FILE}`);
   if (firmConfig) console.log(`Firm config loaded from ${FIRM_CONFIG_FILE}`);
 });
