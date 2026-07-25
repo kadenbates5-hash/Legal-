@@ -258,6 +258,7 @@
     <button data-panel="scheduling"><span class="dot"></span>Scheduling</button>
     <button data-panel="intake"><span class="dot"></span>Live Intake Demo</button>
     <button data-panel="drafting" id="navDrafting" hidden><span class="dot"></span>Drafting</button>
+    <button data-panel="cases" id="navCases" hidden><span class="dot"></span>Cases</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
   </nav>
   <div class="sidebar-footer">Nothing here reaches a client, filing, or invoice without an attorney's sign-off.</div>
@@ -437,6 +438,19 @@
       <div id="draftingDetail"></div>
     </section>
 
+    <!-- ===== Cases (paralegal/attorney) ===== -->
+    <section class="panel" id="panel-cases">
+      <p class="subtitle">Every matter this system knows about, from either a drafted work product or an uploaded document. Click a case to see everything on file for it — uploaded documents and drafted work product side by side.</p>
+      <div class="card" id="casesListCard">
+        <div class="field-row">
+          <h3 style="margin:0;flex:1 0 100%;">All cases</h3>
+          <button class="btn" id="refreshCases">Refresh</button>
+        </div>
+        <ul id="casesList" class="list"></ul>
+      </div>
+      <div id="caseDetail"></div>
+    </section>
+
     <!-- ===== Accounts (attorney-only) ===== -->
     <section class="panel" id="panel-accounts">
       <p class="subtitle">Attorney-only. Add a login for a colleague, or disable one — access is revoked immediately, including "remember me" sessions. At least one enabled attorney account must always remain.</p>
@@ -474,6 +488,7 @@ const PANEL_TITLES = {
   scheduling: "Scheduling",
   intake: "Live Intake Demo",
   drafting: "Drafting",
+  cases: "Cases",
   accounts: "Accounts",
 };
 
@@ -514,6 +529,7 @@ async function loadWhoami() {
     }
     if (me.role === "attorney" || me.role === "paralegal") {
       document.getElementById("navDrafting").hidden = false;
+      document.getElementById("navCases").hidden = false;
     }
   } catch (err) {
     // api() already redirects to /login.html on 401.
@@ -967,6 +983,129 @@ document.getElementById("navDrafting").addEventListener("click", () => {
   loadTemplates();
   loadMatterDrafts();
 });
+
+/* ===== Cases ===== */
+async function loadCases() {
+  showError("");
+  document.getElementById("caseDetail").innerHTML = "";
+  try {
+    const items = await api("/api/cases");
+    const list = document.getElementById("casesList");
+    list.innerHTML = "";
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.innerHTML = `<strong>Matter ${item.matterId}</strong>
+        <span class="badge">${item.workProductCount} work product</span>
+        <span class="badge">${item.documentCount} document${item.documentCount === 1 ? "" : "s"}</span>`;
+      li.addEventListener("click", () => loadCaseDetail(item.matterId));
+      list.appendChild(li);
+    }
+    if (items.length === 0) list.innerHTML = '<li class="static empty">No cases yet — draft something or upload a document to a matter.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+function formatBytes(size) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function downloadDocument(matterId, doc) {
+  showError("");
+  try {
+    const full = await api(`/api/documents/matters/${encodeURIComponent(matterId)}/${doc.id}`);
+    const link = document.createElement("a");
+    link.href = `data:${full.contentType};base64,${full.content}`;
+    link.download = full.fileName;
+    link.click();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadCaseDetail(matterId) {
+  showError("");
+  try {
+    const detail = await api(`/api/cases/${encodeURIComponent(matterId)}`);
+    const el = document.getElementById("caseDetail");
+    el.innerHTML = `
+      <div class="card">
+        <h3>Matter ${matterId}</h3>
+        <div class="field-row">
+          <label class="field grow">Upload a document
+            <input id="caseUploadFile" type="file" />
+          </label>
+          <button class="btn primary" id="caseUploadBtn">Upload</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Documents</h3>
+        <ul id="caseDocuments" class="list"></ul>
+      </div>
+      <div class="card">
+        <h3>Work product</h3>
+        <ul id="caseWorkProducts" class="list"></ul>
+      </div>
+    `;
+
+    const docList = document.getElementById("caseDocuments");
+    docList.innerHTML = "";
+    for (const doc of detail.documents) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>${doc.fileName}</strong>
+        <span class="badge">${formatBytes(doc.size)}</span>
+        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">Uploaded by ${doc.uploadedBy} on ${new Date(doc.uploadedAt).toLocaleString()}</div>`;
+      const downloadBtn = mkButton("Download", () => downloadDocument(matterId, doc));
+      li.appendChild(document.createElement("br"));
+      li.appendChild(downloadBtn);
+      docList.appendChild(li);
+    }
+    if (detail.documents.length === 0) docList.innerHTML = '<li class="static empty">No documents uploaded yet.</li>';
+
+    const wpList = document.getElementById("caseWorkProducts");
+    wpList.innerHTML = "";
+    for (const wp of detail.workProducts) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>${wp.kind}</strong>
+        <span class="badge ${wp.status}">${wp.status}</span>
+        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.join(", ")}</div>` : ""}`;
+      wpList.appendChild(li);
+    }
+    if (detail.workProducts.length === 0) wpList.innerHTML = '<li class="static empty">No drafted work product on this matter yet.</li>';
+
+    document.getElementById("caseUploadBtn").addEventListener("click", async () => {
+      showError("");
+      try {
+        const fileInput = document.getElementById("caseUploadFile");
+        const file = fileInput.files[0];
+        if (!file) throw new Error("choose a file first");
+        const content = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(",")[1] || "");
+          reader.onerror = () => reject(new Error("could not read file"));
+          reader.readAsDataURL(file);
+        });
+        await api(`/api/documents/matters/${encodeURIComponent(matterId)}`, {
+          method: "POST",
+          body: JSON.stringify({ fileName: file.name, contentType: file.type, content }),
+        });
+        await loadCases();
+        await loadCaseDetail(matterId);
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("refreshCases").addEventListener("click", loadCases);
+document.getElementById("navCases").addEventListener("click", loadCases);
 
 /* ===== Accounts ===== */
 async function loadAccounts() {

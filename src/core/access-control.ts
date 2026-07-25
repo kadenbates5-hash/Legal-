@@ -107,9 +107,14 @@ export class AccessControl {
     return "role not authorized by default policy";
   }
 
+  /** All current paralegal-matter assignments — e.g. so the Cases panel can discover which matters exist. */
+  listAssignments(): ParalegalAssignment[] {
+    return [...this.#paralegalAssignments.values()].map((a) => ({ ...a }));
+  }
+
   /** Plain-data snapshot for persistence — paralegal-matter assignments otherwise vanish on every restart. */
   toSnapshot(): ParalegalAssignment[] {
-    return [...this.#paralegalAssignments.values()].map((a) => ({ ...a }));
+    return this.listAssignments();
   }
 
   static fromSnapshot(auditLog: AuditLog, snapshot: readonly ParalegalAssignment[]): AccessControl {

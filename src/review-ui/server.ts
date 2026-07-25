@@ -10,6 +10,8 @@ import { ReviewGateService } from "./review-service.js";
 import type { IntakeDemoSessions } from "./intake-demo.js";
 import type { AccountsService } from "./accounts-service.js";
 import type { DraftingService } from "./drafting-service.js";
+import type { DocumentsService } from "./documents-service.js";
+import type { CasesService } from "./cases-service.js";
 import type { UserRole } from "../core/auth.js";
 
 /**
@@ -135,6 +137,7 @@ function errorStatus(err: unknown): number {
   if (err instanceof Error && err.message.startsWith("no work product")) return 404;
   if (err instanceof Error && err.message.startsWith("no intake demo session")) return 404;
   if (err instanceof Error && err.message.startsWith("no user")) return 404;
+  if (err instanceof Error && err.message.startsWith("no document")) return 404;
   if (err instanceof Error && err.message.startsWith("cannot disable")) return 409;
   if (err instanceof Error && err.message.startsWith("matter assignment only applies")) return 400;
   if (err instanceof SchedulingError) {
@@ -184,11 +187,13 @@ export function createReviewServer(
   intake?: IntakeDemoSessions,
   accounts?: AccountsService,
   drafting?: DraftingService,
+  documents?: DocumentsService,
+  cases?: CasesService,
   /** See the module doc comment above — off by default, only enable behind a real TLS-terminating proxy. */
   trustProxy = false,
 ): Server {
   return createServer((req, res) => {
-    void handleRequest(service, auth, req, res, onMutated, scheduling, intake, accounts, drafting, trustProxy);
+    void handleRequest(service, auth, req, res, onMutated, scheduling, intake, accounts, drafting, documents, cases, trustProxy);
   });
 }
 
@@ -202,6 +207,8 @@ async function handleRequest(
   intake?: IntakeDemoSessions,
   accounts?: AccountsService,
   drafting?: DraftingService,
+  documents?: DocumentsService,
+  cases?: CasesService,
   trustProxy = false,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -288,6 +295,24 @@ async function handleRequest(
         return;
       }
       await handleDraftingRequest(drafting, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/documents")) {
+      if (!documents) {
+        sendJson(res, 404, { error: "case documents are not configured on this server" });
+        return;
+      }
+      await handleDocumentsRequest(documents, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/cases")) {
+      if (!cases) {
+        sendJson(res, 404, { error: "cases are not configured on this server" });
+        return;
+      }
+      await handleCasesRequest(cases, req, res, actor, url);
       return;
     }
 
@@ -591,6 +616,82 @@ async function handleDraftingRequest(
     }
     sendJson(res, 200, result);
     onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleDocumentsRequest(
+  documents: DocumentsService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  const segments = url.pathname.replace(/^\/api\/documents\/?/, "").split("/").filter(Boolean);
+
+  if (segments[0] !== "matters" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const matterId = segments[1]!;
+
+  if (segments.length === 2 && req.method === "GET") {
+    sendJson(res, 200, documents.listMatterDocuments(actor, matterId));
+    return;
+  }
+
+  if (segments.length === 2 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = documents.upload(actor, matterId, {
+      fileName: String(body["fileName"] ?? ""),
+      contentType: String(body["contentType"] ?? ""),
+      content: String(body["content"] ?? ""),
+    });
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  const id = segments[2];
+  if (!id) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+
+  if (segments.length === 3 && req.method === "GET") {
+    sendJson(res, 200, documents.getWithContent(actor, matterId, id));
+    return;
+  }
+
+  if (segments.length === 3 && req.method === "DELETE") {
+    documents.delete(actor, matterId, id);
+    sendJson(res, 200, { ok: true });
+    onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleCasesRequest(
+  cases: CasesService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+): Promise<void> {
+  const segments = url.pathname.replace(/^\/api\/cases\/?/, "").split("/").filter(Boolean);
+
+  if (segments.length === 0 && req.method === "GET") {
+    sendJson(res, 200, cases.listCases(actor));
+    return;
+  }
+
+  if (segments.length === 1 && req.method === "GET") {
+    sendJson(res, 200, cases.getCase(actor, segments[0]!));
     return;
   }
 

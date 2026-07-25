@@ -207,4 +207,21 @@ describe("system-state persistence integration", () => {
       reloaded.accessControl.authorize({ actor: paralegal, matterId: "m2", category: "case_file" }),
     ).toThrow(/different matter/);
   });
+
+  it("persists and reloads uploaded case documents across a process restart", async () => {
+    const state = await loadSystemState(filePath);
+    const uploaded = state.documentStore.upload({
+      matterId: "m1",
+      fileName: "contract.pdf",
+      contentType: "application/pdf",
+      content: "aGVsbG8=",
+      uploadedBy: "p1",
+    });
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.documentStore.get(uploaded.id)).toEqual(uploaded);
+    expect(reloaded.documentStore.listByMatter("m1")).toHaveLength(1);
+  });
 });

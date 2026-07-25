@@ -4,6 +4,8 @@ import { ReviewGateService } from "./review-service.js";
 import { IntakeDemoSessions } from "./intake-demo.js";
 import { AccountsService } from "./accounts-service.js";
 import { DraftingService } from "./drafting-service.js";
+import { DocumentsService } from "./documents-service.js";
+import { CasesService } from "./cases-service.js";
 import { loadSystemState, saveSystemState } from "../persistence/system-state.js";
 import { readJsonFile } from "../persistence/json-file-store.js";
 import { createPostgresStateStore } from "../persistence/postgres-store.js";
@@ -122,6 +124,14 @@ const drafting = new DraftingService({
   deadlineTracker: state.deadlineTracker,
 });
 
+/** Backs the "Cases" panel: uploaded documents (documents) plus the clickable per-matter view combining them with drafted work product (cases). */
+const documents = new DocumentsService({ accessControl: state.accessControl, store: state.documentStore });
+const cases = new CasesService({
+  accessControl: state.accessControl,
+  workProductStore: state.workProductStore,
+  documentStore: state.documentStore,
+});
+
 /**
  * TLS is terminated upstream by a reverse proxy/load balancer, not by this
  * Node process — set TRUST_PROXY=true only when actually deployed behind
@@ -142,6 +152,8 @@ const server = createReviewServer(
   intake,
   accounts,
   drafting,
+  documents,
+  cases,
   trustProxy,
 );
 

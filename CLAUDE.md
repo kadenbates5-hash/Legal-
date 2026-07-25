@@ -117,6 +117,37 @@ of every practice area:
 - practice-area-specific hard triggers (Padilla, protective-order) are
   applied via `PracticeAreaModule.deriveWorkProductFlags()`
 
+`src/core/document-store.ts` — `DocumentStore`, a registry of uploaded
+case documents (a contract, exhibit, or scanned form a paralegal names and
+stores against a matter) — separate from `WorkProductStore`'s
+agent-drafted text. Content is stored as a base64 string directly on the
+record, matching this project's single-JSON-blob persistence model, so
+`toSnapshot()`/`fromSnapshot()` round-trip a document like every other
+stateful core object. No access control lives here, same split as
+`WorkProductStore`.
+
+`src/review-ui/documents-service.ts` — `DocumentsService`, the paralegal/
+attorney-facing surface backing the Cases panel's upload/download. Same
+shape as `DraftingService`: every method (`listMatterDocuments`, `upload`,
+`getWithContent`, `delete`) authorizes the matter via `AccessControl`
+before touching the store, since a document is exposed over HTTP by
+matter id/document id that any authenticated caller could otherwise name
+arbitrarily.
+
+`src/review-ui/cases-service.ts` — `CasesService`, a read-only
+aggregation backing the "Cases" panel: a clickable list of matters (there
+is no separate `Matter` entity anywhere in this system — a matter is just
+the `matterId` string that `WorkProductStore`, `DocumentStore`, and
+`AccessControl`'s paralegal assignments all key on) with `listCases()`,
+each expanding via `getCase()` into everything on file for it — drafted
+work product plus uploaded documents, side by side. It derives the
+visible matter-id set from the union of `WorkProductStore`/`DocumentStore`
+entries and `AccessControl.listAssignments()`, then filters to what the
+calling actor can see (all of them for an attorney; only their own
+assigned matter for a paralegal, via the same `authorize()` check
+`DraftingService`/`DocumentsService` use). It adds no new write paths of
+its own.
+
 `src/review-ui/drafting-service.ts` — `DraftingService`, the HTTP-facing
 wrapper backing Docket's "Drafting" panel (where a paralegal actually
 writes up contracts, motions, discovery requests, research summaries, and
@@ -245,9 +276,9 @@ panel enforces below.
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over six panels — Review Queue, Deadlines, Scheduling,
-Live Intake Demo, Drafting, and Accounts (the last two hidden from the nav
-for roles that can't use them).
+between sections) over seven panels — Review Queue, Deadlines, Scheduling,
+Live Intake Demo, Drafting, Cases, and Accounts (the last three hidden
+from the nav for roles that can't use them).
 
 - `review-service.ts` — `ReviewGateService`. `review-gate.ts` already
   guards the status-transition methods against non-attorney actors, but
@@ -270,6 +301,9 @@ for roles that can't use them).
 - `drafting-service.ts` — `DraftingService`, backing the "Drafting" panel
   — see "Paralegal drafting agent" above for what it does and why it adds
   its own `AccessControl` check on top of `ParalegalDraftingSession`.
+- `documents-service.ts` / `cases-service.ts` — `DocumentsService` and
+  `CasesService`, backing the "Cases" panel — see `document-store.ts`'s
+  entry above for what they do.
 - `server.ts` — a small dependency-free JSON API (Node's built-in `http`,
   no framework) over the service, plus static-file serving for the
   dashboard. Actor identity comes from an `httpOnly` session cookie set by
@@ -277,10 +311,12 @@ for roles that can't use them).
   (see "Real authentication" above) — or from an `x-system-api-key` header
   for the calendar integration's machine credential. `GET /` redirects to
   `/login.html` when there's no valid session; `POST /api/logout` clears
-  it. `/api/intake/*`, `/api/accounts*`, and `/api/drafting/*` are 404 if
-  no `IntakeDemoSessions`/`AccountsService`/`DraftingService` was passed
-  to `createReviewServer`, respectively. `npm run build` copies `public/`
-  into `dist/` since `tsc` only compiles `.ts` files.
+  it. `/api/intake/*`, `/api/accounts*`, `/api/drafting/*`,
+  `/api/documents/*`, and `/api/cases*` are 404 if no
+  `IntakeDemoSessions`/`AccountsService`/`DraftingService`/
+  `DocumentsService`/`CasesService` was passed to `createReviewServer`,
+  respectively. `npm run build` copies `public/` into `dist/` since `tsc`
+  only compiles `.ts` files.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
 - `public/index.html` — the Docket app shell: a dark sidebar (brand +
@@ -292,12 +328,15 @@ for roles that can't use them).
   "Start new demo conversation" then type caller turns), Drafting (pick a
   matter, draft from a template/research summary/billing narrative, then
   revise/submit — nav item hidden unless `GET /api/me` reports role
-  `attorney` or `paralegal`), and Accounts (add a login, disable/re-enable
-  one, and for paralegal accounts specifically, assign/unassign a matter —
-  nav item hidden unless role is `attorney`). Both hides are client-side
-  convenience only; the real gate is server-side in `AccountsService`/
-  `DraftingService`. Any `401` from the API redirects the browser back to
-  `/login.html`.
+  `attorney` or `paralegal`), Cases (a clickable list of every matter,
+  expanding into that matter's uploaded documents — upload a file and
+  download it back out as a data URI — alongside its drafted work product;
+  same role gate as Drafting), and Accounts (add a login, disable/
+  re-enable one, and for paralegal accounts specifically, assign/unassign
+  a matter — nav item hidden unless role is `attorney`). All three hides
+  are client-side convenience only; the real gate is server-side in
+  `AccountsService`/`DraftingService`/`DocumentsService`/`CasesService`.
+  Any `401` from the API redirects the browser back to `/login.html`.
 - `start.ts`'s boot-time bootstrap: if no accounts exist yet in the
   persisted state, it creates them from `ATTORNEY_USERNAME`/
   `ATTORNEY_PASSWORD` (and optionally `PARALEGAL_USERNAME`/
@@ -347,12 +386,12 @@ two ways now: file-backed by default, or a real Postgres database when
   practice), via the `pg` driver. `CREATE TABLE IF NOT EXISTS` runs on
   every connect, so there's no separate migration step to run first.
 - `system-state.ts` — bundles the audit log, utilization tracker,
-  work-product store, deadline tracker, scheduling service, auth, and
-  access control into one document via `loadSystemState`/
-  `saveSystemState`, which accept either a `StateStore` or (for
-  convenience/backward compatibility) a plain file-path string.
+  work-product store, document store, deadline tracker, scheduling
+  service, auth, and access control into one document via
+  `loadSystemState`/`saveSystemState`, which accept either a `StateStore`
+  or (for convenience/backward compatibility) a plain file-path string.
 - Every stateful core object (`AuditLog`, `UtilizationTracker`,
-  `WorkProduct`, `WorkProductStore`, `DeadlineTracker`,
+  `WorkProduct`, `WorkProductStore`, `DocumentStore`, `DeadlineTracker`,
   `SchedulingService`, `AuthService`, `AccessControl`) has
   `toSnapshot()`/`fromSnapshot()` round-tripping its exact state to plain
   data — including `WorkProduct` states like `approved`/`released` that

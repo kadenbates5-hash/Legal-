@@ -2,6 +2,7 @@ import { AuditLog, type AuditEntry } from "../core/audit.js";
 import { UtilizationTracker, type UtilizationSnapshot } from "../core/utilization.js";
 import { WorkProductStore } from "../core/work-product-store.js";
 import type { WorkProductSnapshot } from "../core/review-gate.js";
+import { DocumentStore, type CaseDocument } from "../core/document-store.js";
 import { DeadlineTracker, type DeadlineCalculation } from "../core/deadline.js";
 import { SchedulingService, type Appointment } from "../core/scheduling.js";
 import { AuthService, type AuthSnapshot } from "../core/auth.js";
@@ -31,6 +32,8 @@ export interface SystemStateSnapshot {
   auth?: AuthSnapshot;
   /** Paralegal-to-matter assignments (see core/access-control.ts) — without this they'd vanish on every restart. */
   paralegalAssignments?: ParalegalAssignment[];
+  /** Uploaded case documents (see core/document-store.ts), backing the Cases panel. */
+  documents?: CaseDocument[];
 }
 
 export interface SystemState {
@@ -42,6 +45,7 @@ export interface SystemState {
   auth: AuthService;
   /** The canonical, persisted AccessControl instance — shared by DraftingService and AccountsService's matter-assignment feature. Distinct from `LoadSystemStateOptions.accessControl`, which is only an optional external gate for SchedulingService. */
   accessControl: AccessControl;
+  documentStore: DocumentStore;
 }
 
 export interface LoadSystemStateOptions {
@@ -59,6 +63,7 @@ function emptySnapshot(): SystemStateSnapshot {
     appointments: [],
     auth: { users: [], sessions: [] },
     paralegalAssignments: [],
+    documents: [],
   };
 }
 
@@ -75,7 +80,8 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const scheduling = SchedulingService.fromSnapshot(snapshot.appointments ?? [], options);
   const auth = AuthService.fromSnapshot(snapshot.auth ?? { users: [], sessions: [] });
   const accessControl = AccessControl.fromSnapshot(auditLog, snapshot.paralegalAssignments ?? []);
-  return { auditLog, utilization, workProductStore, deadlineTracker, scheduling, auth, accessControl };
+  const documentStore = DocumentStore.fromSnapshot(snapshot.documents ?? []);
+  return { auditLog, utilization, workProductStore, deadlineTracker, scheduling, auth, accessControl, documentStore };
 }
 
 export async function saveSystemState(source: string | StateStore, state: SystemState): Promise<void> {
@@ -88,6 +94,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     appointments: state.scheduling.toSnapshot(),
     auth: state.auth.toSnapshot(),
     paralegalAssignments: state.accessControl.toSnapshot(),
+    documents: state.documentStore.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }
