@@ -73,7 +73,7 @@ describe("auth HTTP API", () => {
     const meRes = await fetch(`${baseUrl}/api/me`, withCookie(cookie));
     expect(meRes.status).toBe(200);
     const me = await meRes.json();
-    expect(me).toEqual({ id: "a1", role: "attorney", username: "attorney1" });
+    expect(me).toEqual({ id: "a1", role: "attorney", username: "attorney1", mustChangePassword: false });
 
     const okRes = await fetch(`${baseUrl}/api/work-products?status=pending_review`, withCookie(cookie));
     expect(okRes.status).toBe(200);

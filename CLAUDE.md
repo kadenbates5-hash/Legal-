@@ -527,10 +527,12 @@ accounts:
   restarts.
 
 This is still a real-vendor-shaped seed, not a finished identity system:
-there's no password reset and no MFA. Adding/disabling accounts after the
-one-time boot-time seed *is* built now — see `AccountsService` below — but
-it's attorney-gated, in-app account management, not a self-service flow
-(no email verification, no invite links). It replaces the *trust* gap
+there's still no MFA. Password reset *is* now built (see below) —
+attorney-initiated, not the self-service email-link flow production auth
+usually means. Adding/disabling accounts after the one-time boot-time
+seed *is* built now — see `AccountsService` below — but it's
+attorney-gated, in-app account management, not a self-service flow (no
+email verification, no invite links). It replaces the *trust* gap
 (headers anyone could set) with a *real* one (credentialed sessions),
 which is the prerequisite §5/§6 called for, not the last word on
 production auth.
@@ -551,6 +553,36 @@ log into it. It also owns matter assignment for paralegal accounts
 paralegal account has no case-file access at all until an attorney
 assigns it to a matter here, which is exactly the scoping the Drafting
 panel enforces below.
+
+**Password reset/change (resolved).** Two distinct paths, matching two
+distinct trust levels:
+
+- `AuthService.resetPassword(userId, newPassword)` — an attorney sets a
+  new password for someone who's lost theirs (in person, over the phone,
+  whatever secure-enough channel the firm uses — there's still no
+  email/token-based self-service reset, consistent with this project's
+  existing "no email verification, no invite links" scope line).
+  Requires no knowledge of the old password, marks `mustChangePassword`
+  on the account, and revokes every live session immediately — the same
+  "access changes take effect now" behavior as `setDisabled`. Exposed as
+  `AccountsService.resetPassword()` (attorney-gated, like every other
+  method there) and `POST /api/accounts/:id/reset-password`.
+- `AuthService.changePassword(userId, currentPassword, newPassword)` —
+  self-service, any logged-in role. Requires proving the *current*
+  password first (unlike a reset), clears `mustChangePassword`, and also
+  revokes every live session — including the one making the request — so
+  the caller has to log back in with the new password. Wired directly
+  into `server.ts` as `POST /api/change-password` with no attorney gate
+  and no dependency on `AccountsService`, since it only ever acts on the
+  caller's own account; a wrong current password is a `403`, deliberately
+  not the `401` a real auth failure would be, so the dashboard's global
+  "401 means redirect to login" handling doesn't fire for what's actually
+  a simple retry-able mistake.
+- `mustChangePassword` is surfaced on `GET /api/me` and in the Accounts
+  panel's account list (`password reset pending` badge) — there's no
+  forced-change flow yet (the account can keep using Docket normally
+  until they act on it), just a flag the login banner and Accounts panel
+  nudge on.
 
 ## Attorney review-gate UI — "Docket"
 
@@ -811,9 +843,10 @@ above). Still open:
   risk) — a firm decision, not a technical one
 - Syncing the other direction: `Appointment`s aren't pushed to Google
   Calendar as events, only deadline confirmations flow in from it
-- The rest of account management: password reset, MFA, and self-service
-  invites (adding/disabling users after the one-time boot-time seed *is*
-  built — see `AccountsService` above)
+- The rest of account management: MFA, self-service (email-link) password
+  reset, and self-service invites — attorney-initiated password reset,
+  self-service password change, and adding/disabling users after the
+  one-time boot-time seed are all built (see "Real authentication" above)
 - A normalized relational schema for the Postgres adapter, if this ever
   needs to scale past what one JSON blob per deployment comfortably
   handles (see "Persistence" above) — a bigger redesign, deliberately not

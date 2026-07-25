@@ -3,10 +3,14 @@ import type { AccessControl, ParalegalAssignment } from "../core/access-control.
 import type { AuthService, User, UserRole } from "../core/auth.js";
 
 /**
- * Attorney-facing account management (the "Not yet built" gap CLAUDE.md
- * used to flag: password reset/MFA are still out of scope, but adding and
- * disabling users after the one-time boot-time seed is not). Same pattern
- * as `ReviewGateService` — every method requires an attorney actor,
+ * Attorney-facing account management. Adding/disabling users after the
+ * one-time boot-time seed, and attorney-initiated password reset, are
+ * covered here (self-service password change is `AuthService.
+ * changePassword()`, wired directly into `server.ts` since it needs no
+ * attorney gate — any logged-in user can change their own password).
+ * MFA and self-service invites remain out of scope — see CLAUDE.md's
+ * "Not yet built". Same pattern as `ReviewGateService` — every method
+ * requires an attorney actor,
  * including plain reads, since a receptionist/paralegal credential has no
  * business seeing the account list at all.
  *
@@ -25,6 +29,8 @@ export interface AccountSummary {
   role: UserRole;
   actorId: string;
   disabled: boolean;
+  /** Set after an attorney resets this account's password; cleared once the holder changes it themselves. */
+  mustChangePassword: boolean;
   /** Only ever set for role "paralegal" — the matter (if any) this account is currently scoped to. */
   matterAssignment?: ParalegalAssignment;
 }
@@ -53,6 +59,7 @@ export class AccountsService {
       role: user.role,
       actorId: user.actorId,
       disabled: user.disabled,
+      mustChangePassword: user.mustChangePassword,
       ...(matterAssignment ? { matterAssignment } : {}),
     };
   }
@@ -75,6 +82,12 @@ export class AccountsService {
   enable(actor: Actor, userId: string): AccountSummary {
     requireAttorney(actor);
     return this.#summarize(this.#auth.setDisabled(userId, false));
+  }
+
+  /** Attorney sets a new password for a user who's lost theirs — see `AuthService.resetPassword` for what this actually does (marks mustChangePassword, revokes every live session). */
+  resetPassword(actor: Actor, userId: string, newPassword: string): AccountSummary {
+    requireAttorney(actor);
+    return this.#summarize(this.#auth.resetPassword(userId, newPassword));
   }
 
   /** Assigns (or re-assigns) a paralegal account to exactly one matter — see access-control.ts's "one matter at a time." */

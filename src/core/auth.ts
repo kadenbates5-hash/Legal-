@@ -27,6 +27,8 @@ export interface User {
   readonly actorId: string;
   /** Disabled accounts can never log in again and have every live session revoked immediately — see `setDisabled`. */
   readonly disabled: boolean;
+  /** Set by `resetPassword()` (an attorney set a temporary password on this user's behalf); cleared by `changePassword()`. Surfaced via `/api/me` and the Accounts panel — there's no forced-change flow yet, just a flag the UI can nudge on. */
+  readonly mustChangePassword: boolean;
 }
 
 export interface Session {
@@ -105,6 +107,7 @@ export class AuthService {
       role: params.role,
       actorId: params.actorId ?? params.username,
       disabled: false,
+      mustChangePassword: false,
     };
     this.#usersById.set(user.id, user);
     this.#usersByUsername.set(key, user);
@@ -169,11 +172,69 @@ export class AuthService {
     this.#usersById.set(user.id, updated);
     this.#usersByUsername.set(user.username.trim().toLowerCase(), updated);
     if (disabled) {
-      for (const [token, session] of this.#sessions) {
-        if (session.userId === userId) this.#sessions.delete(token);
-      }
+      this.#revokeAllSessions(userId);
     }
     return updated;
+  }
+
+  /**
+   * Attorney-initiated password reset (see `AccountsService.resetPassword`
+   * for the actual attorney gate — this method just does the mechanical
+   * work). Sets a new password chosen by the attorney, marks
+   * `mustChangePassword` so the account holder is nudged to pick their own
+   * on next login, and revokes every live session immediately — the same
+   * "access changes take effect now, not next check" behavior as
+   * `setDisabled`. There's still no email/token-based self-service reset
+   * flow; this is attorney-to-user, in person or over some other secure
+   * channel, matching this project's existing "no email verification, no
+   * invite links" scope line for account management.
+   */
+  resetPassword(userId: string, newPassword: string): User {
+    const user = this.#usersById.get(userId);
+    if (!user) {
+      throw new Error(`no user '${userId}'`);
+    }
+    if (newPassword.length < 8) throw new AuthError("password must be at least 8 characters");
+    const updated = this.#applyNewPassword(user, newPassword, true);
+    this.#revokeAllSessions(userId);
+    return updated;
+  }
+
+  /**
+   * Self-service password change — any logged-in user, any role. Requires
+   * proving the *current* password first (unlike `resetPassword`, which is
+   * an attorney overriding it without knowing it). Clears
+   * `mustChangePassword` and, like every other credential change here,
+   * revokes every live session — including the one making this request —
+   * so the caller has to log back in with the new password rather than
+   * silently keeping the old session alive.
+   */
+  changePassword(userId: string, currentPassword: string, newPassword: string): User {
+    const user = this.#usersById.get(userId);
+    if (!user) {
+      throw new Error(`no user '${userId}'`);
+    }
+    if (!timingSafeStringEqual(hashSecret(currentPassword, user.salt), user.passwordHash)) {
+      throw new AuthError("current password is incorrect");
+    }
+    if (newPassword.length < 8) throw new AuthError("password must be at least 8 characters");
+    const updated = this.#applyNewPassword(user, newPassword, false);
+    this.#revokeAllSessions(userId);
+    return updated;
+  }
+
+  #applyNewPassword(user: User, newPassword: string, mustChangePassword: boolean): User {
+    const salt = randomBytes(16).toString("hex");
+    const updated: User = { ...user, passwordHash: hashSecret(newPassword, salt), salt, mustChangePassword };
+    this.#usersById.set(user.id, updated);
+    this.#usersByUsername.set(user.username.trim().toLowerCase(), updated);
+    return updated;
+  }
+
+  #revokeAllSessions(userId: string): void {
+    for (const [token, session] of this.#sessions) {
+      if (session.userId === userId) this.#sessions.delete(token);
+    }
   }
 
   /** Resolves a session token to the {id, role} actor shape the rest of the system already speaks. Expired sessions are pruned on access. */
@@ -237,8 +298,8 @@ export class AuthService {
   static fromSnapshot(snapshot: AuthSnapshot): AuthService {
     const service = new AuthService();
     for (const user of snapshot.users) {
-      // `disabled` defaults to false for state files saved before this field existed.
-      const restored: User = { ...user, disabled: user.disabled ?? false };
+      // `disabled`/`mustChangePassword` default to false for state files saved before these fields existed.
+      const restored: User = { ...user, disabled: user.disabled ?? false, mustChangePassword: user.mustChangePassword ?? false };
       service.#usersById.set(user.id, restored);
       service.#usersByUsername.set(user.username.trim().toLowerCase(), restored);
     }

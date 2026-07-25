@@ -149,6 +149,11 @@ function errorStatus(err: unknown): number {
     // 400 from an already-authenticated caller, not an auth failure —
     // only login/system-key mismatches are genuinely 401.
     if (err.message.includes("already exists") || err.message.includes("must be at least")) return 400;
+    // A wrong *current* password on self-service change is a 403, not a 401 —
+    // the caller has a perfectly valid session; a 401 here would trip the
+    // dashboard's global "401 means log in again" redirect instead of just
+    // showing an inline error and letting them retry.
+    if (err.message.includes("current password is incorrect")) return 403;
     return 401;
   }
   if (err instanceof AccessDeniedError) return 403;
@@ -289,7 +294,29 @@ async function handleRequest(
     try {
       const actor = resolveActor(req, auth);
       const user = auth.userForToken(parseCookies(req)[SESSION_COOKIE_NAME]);
-      sendJson(res, 200, { id: actor.id, role: actor.role, username: user?.username });
+      sendJson(res, 200, { id: actor.id, role: actor.role, username: user?.username, mustChangePassword: user?.mustChangePassword ?? false });
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+    }
+    return;
+  }
+
+  /**
+   * Self-service password change — available to any logged-in user, any
+   * role, no separate service/gate needed since it only ever acts on the
+   * caller's own account. Changing a password revokes every live session
+   * (see `AuthService.changePassword`), including the one making this
+   * very request, so the response clears the cookie too and the client
+   * has to log back in with the new password.
+   */
+  if (url.pathname === "/api/change-password" && req.method === "POST") {
+    try {
+      const user = auth.userForToken(parseCookies(req)[SESSION_COOKIE_NAME]);
+      if (!user) throw new AuthError("authentication required");
+      const body = await readJsonBody(req);
+      auth.changePassword(user.id, String(body["currentPassword"] ?? ""), String(body["newPassword"] ?? ""));
+      sendJson(res, 200, { ok: true }, { "Set-Cookie": clearSessionCookieHeader() });
+      onMutated?.();
     } catch (err) {
       sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
     }
@@ -608,6 +635,9 @@ async function handleAccountsRequest(
         break;
       case "unassign-matter":
         result = accounts.unassignMatter(actor, id);
+        break;
+      case "reset-password":
+        result = accounts.resetPassword(actor, id, String(body["newPassword"] ?? ""));
         break;
       default:
         sendJson(res, 404, { error: "not found" });

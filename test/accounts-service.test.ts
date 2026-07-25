@@ -55,6 +55,24 @@ describe("AccountsService (attorney-only surface)", () => {
     expect(() => accounts.disable(attorney, onlyAttorney.id)).toThrow(/at least one enabled attorney/);
   });
 
+  describe("password reset", () => {
+    it("resets a user's password and marks mustChangePassword", () => {
+      const { accounts } = makeAccounts();
+      const created = accounts.create(attorney, { username: "reception1", password: "correct-horse", role: "receptionist" });
+      const updated = accounts.resetPassword(attorney, created.id, "new-temp-password");
+      expect(updated.mustChangePassword).toBe(true);
+
+      const relisted = accounts.list(attorney).find((a) => a.id === created.id);
+      expect(relisted?.mustChangePassword).toBe(true);
+    });
+
+    it("denies password reset to a non-attorney actor", () => {
+      const { accounts } = makeAccounts();
+      const created = accounts.create(attorney, { username: "reception1", password: "correct-horse", role: "receptionist" });
+      expect(() => accounts.resetPassword(paralegal, created.id, "new-temp-password")).toThrow(AccessDeniedError);
+    });
+  });
+
   describe("matter assignment", () => {
     it("a fresh paralegal account has no matter assignment", () => {
       const { accounts } = makeAccounts();

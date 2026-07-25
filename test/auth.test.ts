@@ -223,4 +223,65 @@ describe("AuthService", () => {
       expect(() => restored.login("alice", "correct-horse", false)).not.toThrow();
     });
   });
+
+  describe("password reset/change", () => {
+    it("resetPassword sets a new password, marks mustChangePassword, and revokes every live session", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      const session = auth.login("alice", "old-password", false);
+
+      const updated = auth.resetPassword(alice.id, "new-password");
+      expect(updated.mustChangePassword).toBe(true);
+      expect(auth.actorForToken(session.token)).toBeUndefined();
+
+      expect(() => auth.login("alice", "old-password", false)).toThrow(AuthError);
+      expect(() => auth.login("alice", "new-password", false)).not.toThrow();
+    });
+
+    it("resetPassword rejects a short password", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      expect(() => auth.resetPassword(alice.id, "short")).toThrow(/must be at least 8 characters/);
+    });
+
+    it("resetPassword throws for an unknown user id", () => {
+      const auth = new AuthService();
+      expect(() => auth.resetPassword("nope", "new-password")).toThrow(/no user/);
+    });
+
+    it("changePassword requires the correct current password", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      expect(() => auth.changePassword(alice.id, "wrong-password", "new-password")).toThrow(/current password is incorrect/);
+    });
+
+    it("changePassword succeeds, clears mustChangePassword, and revokes every live session including the current one", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      auth.resetPassword(alice.id, "temp-password");
+      const session = auth.login("alice", "temp-password", false);
+
+      const updated = auth.changePassword(alice.id, "temp-password", "final-password");
+      expect(updated.mustChangePassword).toBe(false);
+      expect(auth.actorForToken(session.token)).toBeUndefined();
+
+      expect(() => auth.login("alice", "temp-password", false)).toThrow(AuthError);
+      expect(() => auth.login("alice", "final-password", false)).not.toThrow();
+    });
+
+    it("changePassword rejects a short new password", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      expect(() => auth.changePassword(alice.id, "old-password", "short")).toThrow(/must be at least 8 characters/);
+    });
+
+    it("round-trips mustChangePassword through a snapshot", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      auth.resetPassword(alice.id, "new-password");
+
+      const restored = AuthService.fromSnapshot(auth.toSnapshot());
+      expect(restored.listUsers().find((u) => u.id === alice.id)?.mustChangePassword).toBe(true);
+    });
+  });
 });

@@ -18,7 +18,8 @@ deadline tracking, consultation scheduling/reminders, and AI utilization
 tracking); the **receptionist agent** (chat and voice channels); the
 **paralegal drafting agent**; **Docket**, the app, with real, credentialed
 login (scrypt-hashed passwords, session cookies, an optional "remember
-me", and TLS-aware cookies behind a real reverse proxy), a live in-app
+me", TLS-aware cookies behind a real reverse proxy, attorney-initiated
+password reset, and self-service password change), a live in-app
 demo of the receptionist agent, a Drafting panel where a paralegal writes
 up contracts/motions/discovery requests/research summaries/billing
 narratives and submits them for review, a Cases panel where a paralegal
@@ -47,8 +48,8 @@ permanently barred from the review-gate/deadline-confirmation/account-
 management surfaces no matter who's using it — plus the interfaces a
 practice-area module and firm config plug into. See CLAUDE.md's "Not yet
 built" section for what's still ahead (the one-time Twilio console step
-of pointing a real phone number at this, password reset/MFA, Google
-Calendar key rotation/vendor due-diligence).
+of pointing a real phone number at this, MFA, Google Calendar key
+rotation/vendor due-diligence).
 
 ## Setup
 

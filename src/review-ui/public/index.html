@@ -272,6 +272,7 @@
     <h1 id="panelTitle">Review Queue</h1>
     <div class="who">
       <span id="whoami"></span>
+      <button class="btn" id="changePasswordBtn">Change password</button>
       <button class="btn" id="logout">Log out</button>
     </div>
   </div>
@@ -583,6 +584,9 @@ async function loadWhoami() {
     const me = await api("/api/me");
     currentRole = me.role;
     document.getElementById("whoami").textContent = `Signed in as ${me.username || me.id} (${me.role})`;
+    if (me.mustChangePassword) {
+      showError("An attorney reset your password — please change it (top right) to one only you know.");
+    }
     if (me.role === "attorney") {
       document.getElementById("navAccounts").hidden = false;
       document.getElementById("navAudit").hidden = false;
@@ -615,6 +619,21 @@ function renderAttorneyOnly(listId, message) {
 document.getElementById("logout").addEventListener("click", async () => {
   await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
   window.location.href = "/login.html";
+});
+
+document.getElementById("changePasswordBtn").addEventListener("click", async () => {
+  showError("");
+  const currentPassword = prompt("Current password?");
+  if (!currentPassword) return;
+  const newPassword = prompt("New password (8+ characters)?");
+  if (!newPassword) return;
+  try {
+    await api("/api/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) });
+    alert("Password changed — please log in again.");
+    window.location.href = "/login.html";
+  } catch (err) {
+    showError(err.message);
+  }
 });
 
 loadWhoami();
@@ -1360,7 +1379,8 @@ async function loadAccounts() {
       li.innerHTML = `<span class="status-dot ${acct.disabled ? "disabled" : ""}"></span><strong>${acct.username}</strong>
         <span class="badge">${acct.role}</span>
         <span class="badge ${acct.disabled ? "rejected" : "approved"}">${acct.disabled ? "disabled" : "enabled"}</span>
-        ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${acct.matterAssignment.matterId}</span>` : ""}`;
+        ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${acct.matterAssignment.matterId}</span>` : ""}
+        ${acct.mustChangePassword ? `<span class="badge pending_review">password reset pending</span>` : ""}`;
       const toggleBtn = mkButton(acct.disabled ? "Enable" : "Disable", async () => {
         showError("");
         try {
@@ -1371,8 +1391,19 @@ async function loadAccounts() {
         }
       });
       if (!acct.disabled) toggleBtn.classList.add("danger");
+      const resetBtn = mkButton("Reset password", async () => {
+        showError("");
+        const newPassword = prompt(`New temporary password for ${acct.username} (8+ characters)?`);
+        if (!newPassword) return;
+        try {
+          await api(`/api/accounts/${acct.id}/reset-password`, { method: "POST", body: JSON.stringify({ newPassword }) });
+          await loadAccounts();
+        } catch (err) {
+          showError(err.message);
+        }
+      });
       li.appendChild(document.createElement("br"));
-      li.appendChild(toggleBtn);
+      li.append(toggleBtn, resetBtn);
 
       if (acct.role === "paralegal") {
         const matterInput = document.createElement("input");

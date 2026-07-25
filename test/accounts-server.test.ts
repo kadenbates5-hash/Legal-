@@ -190,4 +190,51 @@ describe("accounts HTTP API", () => {
     const afterDisable = await fetch(`${baseUrl}/api/me`, withCookie(receptionistCookie));
     expect(afterDisable.status).toBe(401);
   });
+
+  it("resets a user's password, revoking their session and letting them log in with the new one", async () => {
+    const attorneyCookie = await loginCookie("attorney1", "correct-horse");
+    const created = await (
+      await fetch(
+        `${baseUrl}/api/accounts`,
+        withCookie(attorneyCookie, {
+          method: "POST",
+          body: JSON.stringify({ username: "reception1", password: "correct-horse", role: "receptionist" }),
+        }),
+      )
+    ).json();
+    const receptionistCookie = await loginCookie("reception1", "correct-horse");
+
+    const resetRes = await fetch(
+      `${baseUrl}/api/accounts/${created.id}/reset-password`,
+      withCookie(attorneyCookie, { method: "POST", body: JSON.stringify({ newPassword: "brand-new-password" }) }),
+    );
+    expect(resetRes.status).toBe(200);
+    expect((await resetRes.json()).mustChangePassword).toBe(true);
+
+    const revoked = await fetch(`${baseUrl}/api/me`, withCookie(receptionistCookie));
+    expect(revoked.status).toBe(401);
+
+    const oldPasswordLogin = await fetch(`${baseUrl}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "reception1", password: "correct-horse" }),
+    });
+    expect(oldPasswordLogin.status).toBe(401);
+
+    const newPasswordLogin = await fetch(`${baseUrl}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "reception1", password: "brand-new-password" }),
+    });
+    expect(newPasswordLogin.status).toBe(200);
+  });
+
+  it("denies password reset to a non-attorney actor", async () => {
+    const paralegalCookie = await loginCookie("paralegal1", "correct-horse");
+    const res = await fetch(
+      `${baseUrl}/api/accounts/whatever/reset-password`,
+      withCookie(paralegalCookie, { method: "POST", body: JSON.stringify({ newPassword: "brand-new-password" }) }),
+    );
+    expect(res.status).toBe(403);
+  });
 });
