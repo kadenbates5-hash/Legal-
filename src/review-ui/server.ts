@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { AccessDeniedError, ReviewGateError, type Actor } from "../core/types.js";
 import { AuthError, type AuthService } from "../core/auth.js";
+import { LoginThrottle } from "../core/login-throttle.js";
+import type { AuditLog } from "../core/audit.js";
 import type { DeadlineType } from "../core/deadline.js";
 import { SchedulingError, type AppointmentType, type SchedulingService } from "../core/scheduling.js";
 import { ReviewGateService } from "./review-service.js";
@@ -85,6 +87,24 @@ function isSecureRequest(req: IncomingMessage, trustProxy: boolean): boolean {
   const proto = firstHeader(req.headers["x-forwarded-proto"]);
   if (!proto) return false;
   return proto.split(",")[0]!.trim().toLowerCase() === "https";
+}
+
+/**
+ * The client's address for throttling purposes. `X-Forwarded-For` is
+ * client-controllable and only meaningful when something we trust
+ * rewrote it, so it's honoured under exactly the same `trustProxy` flag
+ * that gates `X-Forwarded-Proto` — otherwise an attacker would defeat
+ * per-IP throttling by varying a header. Falls back to the socket
+ * address, and to a fixed bucket if even that is unavailable (better to
+ * over-group than to silently stop counting).
+ */
+function clientIpFor(req: IncomingMessage, trustProxy: boolean): string {
+  if (trustProxy) {
+    const forwarded = firstHeader(req.headers["x-forwarded-for"]);
+    const first = forwarded?.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return req.socket.remoteAddress ?? "unknown";
 }
 
 function sessionCookieHeader(token: string, expiresAt: string, secure: boolean): string {
@@ -205,13 +225,13 @@ async function readFormBody(req: IncomingMessage): Promise<Record<string, string
 }
 
 function sendXml(res: ServerResponse, status: number, xml: string): void {
-  res.writeHead(status, { "Content-Type": "text/xml; charset=utf-8" });
+  res.writeHead(status, { "Content-Type": "text/xml; charset=utf-8", ...SECURITY_HEADERS });
   res.end(xml);
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown, extraHeaders?: Record<string, string>): void {
   const payload = JSON.stringify(body);
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", ...extraHeaders });
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", ...SECURITY_HEADERS, ...extraHeaders });
   res.end(payload);
 }
 
@@ -251,18 +271,54 @@ const MIME_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
 };
 
+/**
+ * Sent on every response. The dashboard's CSS and JS live in real files
+ * rather than inline blocks specifically so `script-src 'self'` can be
+ * strict here — an inline-script allowance would make the policy little
+ * more than decoration, and this is the layer that would contain an XSS
+ * bug that slipped past output escaping.
+ *
+ * `frame-ancestors 'none'` (plus the legacy `X-Frame-Options`) is the
+ * clickjacking defense that matters most for this app: the Review Queue
+ * has one-click approve/release buttons that release privileged work
+ * product, which is exactly what a framed overlay attack would target.
+ * `data:` is allowed for images only, since documents download as data
+ * URIs.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; "),
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "no-referrer",
+  "Cross-Origin-Opener-Policy": "same-origin",
+};
+
 /** Static assets other than the dashboard itself are always servable (the login page has to be reachable while logged out). */
 async function serveStatic(res: ServerResponse, requestPath: string): Promise<void> {
   const relative = requestPath === "/" ? "index.html" : requestPath.slice(1);
   const resolved = path.normalize(path.join(PUBLIC_DIR, relative));
-  if (!resolved.startsWith(PUBLIC_DIR)) {
+  // The separator matters: a bare `startsWith(PUBLIC_DIR)` would also accept
+  // a sibling directory whose name merely begins with it (`.../public-x`),
+  // which `../public-x/secret` would reach.
+  if (resolved !== PUBLIC_DIR && !resolved.startsWith(PUBLIC_DIR + path.sep)) {
     sendJson(res, 403, { error: "forbidden" });
     return;
   }
   try {
     const content = await readFile(resolved);
     const ext = path.extname(resolved);
-    res.writeHead(200, { "Content-Type": MIME_TYPES[ext] ?? "application/octet-stream" });
+    res.writeHead(200, { "Content-Type": MIME_TYPES[ext] ?? "application/octet-stream", ...SECURITY_HEADERS });
     res.end(content);
   } catch {
     sendJson(res, 404, { error: "not found" });
@@ -313,6 +369,10 @@ export interface ReviewServerOptions {
   pdfReports?: PdfReportService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
+  /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
+  loginThrottle?: LoginThrottle;
+  /** Records login success/failure/lockout. The same log the Audit Log panel reads. */
+  auditLog?: AuditLog;
   /** Real-call telephony voice channel (see `receptionist/voice-call-sessions.ts`) — `voiceCalls`/`audioClips`/`twilio` must all be set together for `/api/voice/*` to be configured. */
   voiceCalls?: VoiceCallSessions;
   audioClips?: AudioClipStore;
@@ -366,6 +426,8 @@ async function handleRequest(
     twilio,
     trustProxy = false,
     maxRequestBodyBytes = DEFAULT_MAX_REQUEST_BODY_BYTES,
+    loginThrottle,
+    auditLog,
   } = options;
   // Bound every buffered body for this request before any route runs — see
   // `readBodyBuffer`. Applies to the unauthenticated routes (login, Twilio
@@ -379,7 +441,7 @@ async function handleRequest(
   }
 
   if (url.pathname === "/api/login" && req.method === "POST") {
-    await handleLogin(auth, req, res, onMutated, trustProxy);
+    await handleLogin(auth, req, res, { throttle: loginThrottle, auditLog }, onMutated, trustProxy);
     return;
   }
 
@@ -432,7 +494,7 @@ async function handleRequest(
     if (url.pathname === "/" || url.pathname === "/index.html") {
       const token = parseCookies(req)[SESSION_COOKIE_NAME];
       if (!auth.actorForToken(token)) {
-        res.writeHead(302, { Location: "/login.html" });
+        res.writeHead(302, { Location: "/login.html", ...SECURITY_HEADERS });
         res.end();
         return;
       }
@@ -639,23 +701,73 @@ async function handleLogin(
   auth: AuthService,
   req: IncomingMessage,
   res: ServerResponse,
+  deps: { throttle: LoginThrottle | undefined; auditLog: AuditLog | undefined },
   onMutated?: () => void,
   trustProxy = false,
 ): Promise<void> {
+  const { throttle, auditLog } = deps;
+  const ip = clientIpFor(req, trustProxy);
+  let username = "";
   try {
     const body = await readJsonBody(req);
-    const username = String(body["username"] ?? "");
+    username = String(body["username"] ?? "");
     const password = String(body["password"] ?? "");
     const remember = body["remember"] === true;
-    const session = auth.login(username, password, remember);
-    const user = auth.userForToken(session.token);
-    sendJson(
-      res,
-      200,
-      { id: user?.actorId, role: user?.role, username: user?.username },
-      { "Set-Cookie": sessionCookieHeader(session.token, session.expiresAt, isSecureRequest(req, trustProxy)) },
-    );
-    onMutated?.();
+    const keys = [LoginThrottle.usernameKey(username), LoginThrottle.ipKey(ip)];
+
+    // Checked before `auth.login`, so a locked-out attempt never pays the
+    // scrypt cost — that's what makes this a DoS defense and not just an
+    // anti-guessing one.
+    const decision = throttle?.check(keys) ?? { allowed: true, retryAfterSeconds: 0 };
+    if (!decision.allowed) {
+      auditLog?.append({
+        actor: { id: username || "unknown", role: "anonymous" },
+        matterId: undefined,
+        action: "login_blocked",
+        detail: `too many failed attempts; ip=${ip} retryAfter=${decision.retryAfterSeconds}s`,
+      });
+      sendJson(
+        res,
+        429,
+        { error: `too many failed login attempts — try again in ${decision.retryAfterSeconds} seconds` },
+        { "Retry-After": String(decision.retryAfterSeconds) },
+      );
+      onMutated?.();
+      return;
+    }
+
+    try {
+      const session = auth.login(username, password, remember);
+      const user = auth.userForToken(session.token);
+      throttle?.recordSuccess(keys);
+      auditLog?.append({
+        actor: { id: user?.actorId ?? username, role: user?.role ?? "anonymous" },
+        matterId: undefined,
+        action: "login_succeeded",
+        detail: `ip=${ip}`,
+      });
+      sendJson(
+        res,
+        200,
+        { id: user?.actorId, role: user?.role, username: user?.username },
+        { "Set-Cookie": sessionCookieHeader(session.token, session.expiresAt, isSecureRequest(req, trustProxy)) },
+      );
+      onMutated?.();
+    } catch (loginErr) {
+      if (loginErr instanceof AuthError) {
+        throttle?.recordFailure(keys);
+        // Deliberately logs the *attempted* username, not whether it exists —
+        // the response itself stays the same generic message either way.
+        auditLog?.append({
+          actor: { id: username || "unknown", role: "anonymous" },
+          matterId: undefined,
+          action: "login_failed",
+          detail: `ip=${ip}`,
+        });
+        onMutated?.();
+      }
+      throw loginErr;
+    }
   } catch (err) {
     // errorStatus keeps a bad login a 401 while still mapping an oversized body to 413.
     sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "invalid request" });
@@ -783,6 +895,9 @@ async function handleAccountsRequest(
         break;
       case "unassign-matter":
         result = accounts.unassignMatter(actor, id);
+        break;
+      case "clear-login-lockout":
+        result = accounts.clearLoginLockout(actor, String(body["username"] ?? ""));
         break;
       case "reset-password":
         result = accounts.resetPassword(actor, id, String(body["newPassword"] ?? ""));
@@ -1289,7 +1404,7 @@ async function handleVoiceRequest(
       sendJson(res, 404, { error: "not found" });
       return;
     }
-    res.writeHead(200, { "Content-Type": clip.contentType });
+    res.writeHead(200, { "Content-Type": clip.contentType, ...SECURITY_HEADERS });
     res.end(clip.data);
     return;
   }

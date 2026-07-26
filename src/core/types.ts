@@ -34,9 +34,18 @@ export type StandardTrigger =
 
 export type EscalationTrigger = EmergencyTrigger | StandardTrigger;
 
+/**
+ * `"anonymous"` is an unauthenticated party — the only thing that
+ * produces one today is a login attempt, where the audit trail needs to
+ * record *who claimed to be whom* before any credential was verified.
+ * Recording those as `"system"` would be a lie: that role is the calendar
+ * integration's machine credential. `AccessControl` default-denies every
+ * role it doesn't explicitly model, so an anonymous actor can never reach
+ * matter data by construction.
+ */
 export interface Actor {
   id: string;
-  role: AgentRole | "attorney" | "staff" | "system";
+  role: AgentRole | "attorney" | "staff" | "system" | "anonymous";
 }
 
 export interface MatterRef {

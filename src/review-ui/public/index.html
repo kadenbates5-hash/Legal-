@@ -4,256 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Docket</title>
-<style>
-  :root {
-    --bg: #f4f5f7;
-    --surface: #ffffff;
-    --border: #e3e5ea;
-    --text: #1a1d24;
-    --text-muted: #6b7280;
-    --accent: #3454d1;
-    --accent-hover: #2a44ac;
-    --accent-soft: #ebeffc;
-    --danger: #c02b3a;
-    --danger-soft: #fbe9eb;
-    --warn: #a06600;
-    --warn-soft: #fdf3dc;
-    --ok: #1a7d4a;
-    --ok-soft: #e7f6ee;
-    --sidebar-bg: #14171f;
-    --sidebar-text: #c7cad3;
-    --sidebar-text-active: #ffffff;
-    --radius: 10px;
-    --shadow: 0 1px 2px rgba(20, 23, 31, 0.06), 0 1px 8px rgba(20, 23, 31, 0.04);
-  }
-
-  * { box-sizing: border-box; }
-
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
-    color: var(--text);
-    background: var(--bg);
-    display: flex;
-    min-height: 100vh;
-  }
-
-  /* ---------- Sidebar ---------- */
-  .sidebar {
-    width: 216px;
-    flex-shrink: 0;
-    background: var(--sidebar-bg);
-    color: var(--sidebar-text);
-    display: flex;
-    flex-direction: column;
-    padding: 1.25rem 0.75rem;
-  }
-  .brand {
-    display: flex;
-    align-items: baseline;
-    gap: 0.4rem;
-    padding: 0 0.5rem 1.5rem;
-  }
-  .brand .mark {
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
-    background: var(--accent);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-weight: 700;
-    font-size: 0.85rem;
-  }
-  .brand .name { font-weight: 700; font-size: 1.05rem; color: #fff; letter-spacing: -0.01em; }
-
-  nav.nav { display: flex; flex-direction: column; gap: 0.15rem; }
-  nav.nav button {
-    all: unset;
-    cursor: pointer;
-    padding: 0.55rem 0.65rem;
-    border-radius: 8px;
-    font-size: 0.88rem;
-    color: var(--sidebar-text);
-    transition: background 0.15s ease, color 0.15s ease;
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-  }
-  nav.nav button:hover { background: rgba(255, 255, 255, 0.06); color: var(--sidebar-text-active); }
-  nav.nav button.active { background: var(--accent); color: #fff; }
-  nav.nav .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.55; flex-shrink: 0; }
-  nav.nav button.active .dot { opacity: 1; }
-  nav.nav button[hidden] { display: none; }
-
-  .sidebar-footer { margin-top: auto; padding: 0.5rem; font-size: 0.72rem; color: #6b7280; line-height: 1.5; }
-
-  /* ---------- Main ---------- */
-  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.9rem 1.75rem;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-  }
-  .topbar h1 { font-size: 1.05rem; margin: 0; font-weight: 600; }
-  .topbar .who { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; color: var(--text-muted); }
-  .btn {
-    all: unset;
-    cursor: pointer;
-    padding: 0.45rem 0.9rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    font-weight: 500;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--text);
-    transition: background 0.15s ease, border-color 0.15s ease;
-  }
-  .btn:hover { background: var(--bg); }
-  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .btn.primary:hover { background: var(--accent-hover); }
-  .btn.danger { color: var(--danger); border-color: var(--danger-soft); }
-  .btn.danger:hover { background: var(--danger-soft); }
-  .btn:disabled { opacity: 0.5; cursor: default; }
-
-  .content { flex: 1; padding: 1.75rem; overflow-y: auto; }
-  section.panel { display: none; animation: fade-in 0.15s ease; }
-  section.panel.active { display: block; }
-  @keyframes fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
-
-  .panel h2 { font-size: 1.15rem; margin: 0 0 0.25rem; }
-  .panel .subtitle { color: var(--text-muted); font-size: 0.88rem; margin: 0 0 1.25rem; max-width: 62ch; line-height: 1.5; }
-
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    padding: 1.1rem 1.25rem;
-    margin-bottom: 1rem;
-  }
-  .card h3 { margin: 0 0 0.75rem; font-size: 0.95rem; }
-
-  .field-row { display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: flex-end; margin-bottom: 0.5rem; }
-  .field { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; color: var(--text-muted); }
-  .field input, .field select {
-    font-size: 0.88rem;
-    padding: 0.4rem 0.55rem;
-    border-radius: 7px;
-    border: 1px solid var(--border);
-    color: var(--text);
-    background: var(--surface);
-    min-width: 160px;
-  }
-  .field.checkbox { flex-direction: row; align-items: center; gap: 0.4rem; }
-  .field.checkbox input { min-width: auto; }
-  .field textarea {
-    font-size: 0.88rem;
-    padding: 0.5rem 0.6rem;
-    border-radius: 7px;
-    border: 1px solid var(--border);
-    color: var(--text);
-    background: var(--surface);
-    font-family: inherit;
-    resize: vertical;
-  }
-  .field.grow { flex: 1 1 100%; }
-
-  ul.list { list-style: none; padding: 0; margin: 0; }
-  ul.list li {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.7rem 0.9rem;
-    margin-bottom: 0.55rem;
-    cursor: pointer;
-    background: var(--surface);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  }
-  ul.list li:hover { border-color: var(--accent); box-shadow: var(--shadow); }
-  ul.list li.static { cursor: default; }
-  ul.list li.static:hover { border-color: var(--border); box-shadow: none; }
-
-  .badge {
-    display: inline-block;
-    padding: 0.12rem 0.55rem;
-    border-radius: 999px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    background: var(--bg);
-    color: var(--text-muted);
-  }
-  .badge.pending_review { background: var(--warn-soft); color: var(--warn); }
-  .badge.approved, .badge.confirmed, .badge.scheduled { background: var(--ok-soft); color: var(--ok); }
-  .badge.rejected, .badge.conflict { background: var(--danger-soft); color: var(--danger); }
-  .badge.released, .badge.completed { background: var(--accent-soft); color: var(--accent); }
-
-  .flags { color: var(--danger); font-size: 0.82rem; margin-top: 0.35rem; }
-  .flags code { background: var(--danger-soft); padding: 0.05rem 0.35rem; border-radius: 4px; }
-
-  #detail pre {
-    white-space: pre-wrap;
-    background: var(--bg);
-    padding: 0.85rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    line-height: 1.5;
-    border: 1px solid var(--border);
-  }
-  #detail .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.85rem; }
-
-  .error {
-    color: var(--danger);
-    background: var(--danger-soft);
-    border-radius: 8px;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.85rem;
-    margin-bottom: 1rem;
-    display: none;
-  }
-  .error:not(:empty) { display: block; }
-
-  .empty { color: var(--text-muted); font-size: 0.85rem; padding: 0.5rem 0; }
-
-  /* ---------- Intake demo chat ---------- */
-  .chat-window {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    height: 420px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .chat-log { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
-  .bubble { max-width: 75%; padding: 0.55rem 0.8rem; border-radius: 12px; font-size: 0.88rem; line-height: 1.45; }
-  .bubble.agent { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); border-bottom-left-radius: 3px; }
-  .bubble.caller { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
-  .bubble.system { align-self: center; background: var(--warn-soft); color: var(--warn); font-size: 0.78rem; border-radius: 8px; }
-  .chat-input { display: flex; gap: 0.5rem; padding: 0.7rem; border-top: 1px solid var(--border); }
-  .chat-input input {
-    flex: 1;
-    padding: 0.5rem 0.7rem;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    font-size: 0.88rem;
-  }
-  .chat-input input:disabled, .chat-input button:disabled { opacity: 0.5; }
-
-  /* ---------- Accounts ---------- */
-  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 0.4rem; background: var(--ok); }
-  .status-dot.disabled { background: var(--danger); }
-</style>
+<link rel="stylesheet" href="/app.css" />
 </head>
 <body>
 
 <aside class="sidebar">
   <div class="brand"><span class="mark">D</span><span class="name">Docket</span></div>
   <nav class="nav">
-    <button data-panel="queue" class="active"><span class="dot"></span>Review Queue</button>
+    <button data-panel="home" class="active"><span class="dot"></span>Home</button>
+    <button data-panel="queue"><span class="dot"></span>Review Queue</button>
     <button data-panel="deadlines"><span class="dot"></span>Deadlines</button>
     <button data-panel="scheduling"><span class="dot"></span>Scheduling</button>
     <button data-panel="intake"><span class="dot"></span>Live Intake Demo</button>
@@ -273,7 +32,7 @@
 
 <div class="main">
   <div class="topbar">
-    <h1 id="panelTitle">Review Queue</h1>
+    <h1 id="panelTitle">Home</h1>
     <div class="who">
       <span id="whoami"></span>
       <button class="btn" id="changePasswordBtn">Change password</button>
@@ -284,8 +43,22 @@
   <div class="content">
     <div id="error" class="error"></div>
 
+    <!-- ===== Home ===== -->
+    <section class="panel active" id="panel-home">
+      <p class="subtitle" id="homeGreeting">Everything that needs you, in one place.</p>
+      <div class="stat-grid" id="homeStats"></div>
+      <div class="card">
+        <div class="field-row"><h3 class="row-title">Needs your attention</h3></div>
+        <ul id="homeAttention" class="list"></ul>
+      </div>
+      <div class="card">
+        <div class="field-row"><h3 class="row-title">Today</h3></div>
+        <ul id="homeToday" class="list"></ul>
+      </div>
+    </section>
+
     <!-- ===== Review Queue ===== -->
-    <section class="panel active" id="panel-queue">
+    <section class="panel" id="panel-queue">
       <p class="subtitle">Work product pending attorney review. Nothing here can be approved, released, or leave the system without a real attorney session.</p>
       <div class="card">
         <div class="field-row">
@@ -302,7 +75,7 @@
       <div class="card">
         <h3>Check status</h3>
         <div class="field-row">
-          <label class="field">Matter ID <input id="deadlineMatterId" value="m1" /></label>
+          <label class="field">Matter ID <input id="deadlineMatterId" list="matterOptions" autocomplete="off" value="m1" /></label>
           <label class="field">Type
             <select id="deadlineType">
               <option value="speedy_trial">speedy_trial</option>
@@ -341,7 +114,7 @@
       <div class="card">
         <h3>Book a consultation</h3>
         <div class="field-row">
-          <label class="field">Matter ID <input id="apptMatterId" value="m1" /></label>
+          <label class="field">Matter ID <input id="apptMatterId" list="matterOptions" autocomplete="off" value="m1" /></label>
           <label class="field">Start (local) <input id="apptStartTime" type="datetime-local" /></label>
           <label class="field">Practice area <input id="apptPracticeArea" value="criminal-law" /></label>
           <label class="field checkbox"><input id="apptOverrideHours" type="checkbox" /> Allow outside business hours</label>
@@ -350,8 +123,8 @@
       </div>
       <div class="card">
         <div class="field-row">
-          <h3 style="margin:0;flex:1 0 100%;">Appointments</h3>
-          <label class="field">Matter ID <input id="scheduleListMatterId" value="m1" /></label>
+          <h3 class="row-title">Appointments</h3>
+          <label class="field">Matter ID <input id="scheduleListMatterId" list="matterOptions" autocomplete="off" value="m1" /></label>
           <button class="btn" id="refreshAppointments">Refresh</button>
         </div>
         <ul id="appointmentList" class="list"></ul>
@@ -384,7 +157,7 @@
       <p class="subtitle">Draft engagement letters, motions, discovery requests, research summaries, and billing narratives. Every draft is scoped to one matter and submits into the attorney's Review Queue — nothing here reaches a client on its own.</p>
       <div class="card">
         <div class="field-row">
-          <label class="field">Matter ID <input id="draftingMatterId" value="m1" /></label>
+          <label class="field">Matter ID <input id="draftingMatterId" list="matterOptions" autocomplete="off" value="m1" /></label>
           <button class="btn" id="loadMatterDrafts">Load matter</button>
         </div>
       </div>
@@ -451,7 +224,7 @@
       <p class="subtitle">Every matter this system knows about, from either a drafted work product or an uploaded document. Click a case to see everything on file for it — uploaded documents and drafted work product side by side.</p>
       <div class="card" id="casesListCard">
         <div class="field-row">
-          <h3 style="margin:0;flex:1 0 100%;">All cases</h3>
+          <h3 class="row-title">All cases</h3>
           <button class="btn" id="refreshCases">Refresh</button>
         </div>
         <ul id="casesList" class="list"></ul>
@@ -473,7 +246,7 @@
       <div class="card">
         <h3>Quick access — saved to a matter</h3>
         <div class="field-row">
-          <label class="field">Matter ID <input id="researchMatterId" value="m1" /></label>
+          <label class="field">Matter ID <input id="researchMatterId" list="matterOptions" autocomplete="off" value="m1" /></label>
           <button class="btn" id="loadResearchMatter">Load matter</button>
         </div>
         <ul id="researchSavedList" class="list"></ul>
@@ -502,7 +275,7 @@
       <p class="subtitle">Everyone on the team — initials shown here are also used as avatars in Messages.</p>
       <div class="card">
         <div class="field-row">
-          <h3 style="margin:0;flex:1 0 100%;">Directory</h3>
+          <h3 class="row-title">Directory</h3>
           <button class="btn" id="refreshStaff">Refresh</button>
         </div>
         <ul id="staffList" class="list"></ul>
@@ -525,22 +298,22 @@
       <div class="card">
         <h3>New conversation</h3>
         <div class="field-row">
-          <label class="field">Start direct message with <input id="dmActorId" placeholder="actor id, e.g. p1" /></label>
+          <label class="field">Start direct message with <select id="dmActorId"></select></label>
           <button class="btn" id="startDm">Start DM</button>
         </div>
         <div class="field-row">
           <label class="field">New group name <input id="groupName" /></label>
-          <label class="field grow">Members (comma-separated actor ids) <input id="groupMembers" placeholder="p1, r1" /></label>
+          <label class="field grow">Members (ctrl/cmd-click for several) <select id="groupMembers" multiple size="4"></select></label>
           <button class="btn" id="startGroup">Create group</button>
         </div>
       </div>
       <div class="card">
         <div class="field-row">
-          <h3 style="margin:0;flex:1 0 100%;">Your conversations</h3>
+          <h3 class="row-title">Your conversations</h3>
           <button class="btn" id="refreshConversations">Refresh</button>
         </div>
         <ul id="conversationList" class="list"></ul>
-        <div class="chat-window" id="conversationWindow" style="display:none;">
+        <div class="chat-window" id="conversationWindow" class="hidden">
           <div class="chat-log" id="conversationLog"></div>
           <div class="chat-input">
             <input id="conversationText" type="text" placeholder="Message…" />
@@ -556,7 +329,7 @@
       <div class="card">
         <h3>Set an entry</h3>
         <div class="field-row">
-          <label class="field">Actor ID <input id="scheduleActorId" placeholder="your actor id, or anyone's if you're an attorney" /></label>
+          <label class="field">Whose day <select id="scheduleActorId"></select></label>
           <label class="field">Date <input id="scheduleDate" type="date" /></label>
           <label class="field">Status
             <select id="scheduleStatus">
@@ -578,7 +351,7 @@
       </div>
       <div class="card">
         <div class="field-row">
-          <label class="field">View an actor's upcoming entries <input id="scheduleViewActorId" placeholder="actor id" /></label>
+          <label class="field">View someone's upcoming entries <select id="scheduleViewActorId"></select></label>
           <button class="btn" id="loadScheduleForActor">Load</button>
         </div>
         <ul id="scheduleForActorList" class="list"></ul>
@@ -591,7 +364,7 @@
       <div class="card">
         <h3>Log hours</h3>
         <div class="field-row">
-          <label class="field">Matter ID <input id="billingMatterId" value="m1" /></label>
+          <label class="field">Matter ID <input id="billingMatterId" list="matterOptions" autocomplete="off" value="m1" /></label>
           <label class="field">Date <input id="billingDate" type="date" /></label>
           <label class="field">Hours <input id="billingHoursValue" type="number" step="0.1" min="0.1" /></label>
           <label class="field grow">Description <input id="billingDescription" /></label>
@@ -600,14 +373,14 @@
       </div>
       <div class="card">
         <div class="field-row">
-          <h3 style="margin:0;flex:1 0 100%;">Hours on this matter</h3>
+          <h3 class="row-title">Hours on this matter</h3>
           <button class="btn" id="loadBillingMatter">Load matter</button>
         </div>
         <ul id="billingMatterList" class="list"></ul>
       </div>
       <div class="card">
         <div class="field-row">
-          <h3 style="margin:0;flex:1 0 100%;">My hours (all matters)</h3>
+          <h3 class="row-title">My hours (all matters)</h3>
           <button class="btn" id="loadMyBillingHours">Refresh</button>
         </div>
         <ul id="billingMineList" class="list"></ul>
@@ -636,7 +409,7 @@
       </div>
       <div class="card">
         <div class="field-row">
-          <h3 style="margin:0;flex:1 0 100%;">All accounts</h3>
+          <h3 class="row-title">All accounts</h3>
           <button class="btn" id="refreshAccounts">Refresh</button>
         </div>
         <ul id="accountList" class="list"></ul>
@@ -648,7 +421,7 @@
       <p class="subtitle">Attorney-only. Every access grant/denial, escalation, and work-product transition, append-only and privilege-sensitive — nothing here is ever edited or deleted.</p>
       <div class="card">
         <div class="field-row">
-          <label class="field">Matter ID (optional) <input id="auditMatterId" placeholder="leave blank for all" /></label>
+          <label class="field">Matter ID (optional) <input id="auditMatterId" list="matterOptions" autocomplete="off" placeholder="leave blank for all" /></label>
           <button class="btn" id="refreshAudit">Refresh</button>
         </div>
         <ul id="auditList" class="list"></ul>
@@ -657,1333 +430,7 @@
   </div>
 </div>
 
-<script>
-const PANEL_TITLES = {
-  queue: "Review Queue",
-  deadlines: "Deadlines",
-  scheduling: "Scheduling",
-  intake: "Live Intake Demo",
-  drafting: "Drafting",
-  cases: "Cases",
-  research: "Research",
-  assistant: "Assistant",
-  accounts: "Accounts",
-  audit: "Audit Log",
-};
-
-for (const btn of document.querySelectorAll("nav.nav button")) {
-  btn.addEventListener("click", () => {
-    const panel = btn.dataset.panel;
-    for (const b of document.querySelectorAll("nav.nav button")) b.classList.toggle("active", b === btn);
-    for (const s of document.querySelectorAll("section.panel")) s.classList.toggle("active", s.id === `panel-${panel}`);
-    document.getElementById("panelTitle").textContent = PANEL_TITLES[panel] || "";
-  });
-}
-
-async function api(path, options) {
-  const res = await fetch(path, {
-    ...options,
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json", ...(options && options.headers) },
-  });
-  if (res.status === 401) {
-    window.location.href = "/login.html";
-    throw new Error("authentication required");
-  }
-  const body = await res.json();
-  if (!res.ok) throw new Error(body.error || res.statusText);
-  return body;
-}
-
-function showError(message) {
-  document.getElementById("error").textContent = message || "";
-}
-
-let currentRole = null;
-
-async function loadWhoami() {
-  try {
-    const me = await api("/api/me");
-    currentRole = me.role;
-    document.getElementById("whoami").textContent = `Signed in as ${me.username || me.id} (${me.role})`;
-    if (me.mustChangePassword) {
-      showError("An attorney reset your password — please change it (top right) to one only you know.");
-    }
-    if (me.role === "attorney") {
-      document.getElementById("navAccounts").hidden = false;
-      document.getElementById("navAudit").hidden = false;
-    }
-    if (me.role === "attorney" || me.role === "paralegal") {
-      document.getElementById("navDrafting").hidden = false;
-      document.getElementById("navCases").hidden = false;
-      document.getElementById("navResearch").hidden = false;
-      document.getElementById("navAssistant").hidden = false;
-      document.getElementById("navBilling").hidden = false;
-    }
-    // Review Queue and Deadlines are attorney-only server-side (ReviewGateService gates
-    // every method, including reads) — only fetch them once we know the role, and only
-    // for an attorney, so a paralegal/receptionist session doesn't 403 on page load.
-    if (me.role === "attorney") {
-      loadQueue();
-      loadConflicts();
-    } else {
-      renderAttorneyOnly("queue", "Review Queue is attorney-only.");
-      renderAttorneyOnly("conflictList", "Deadlines are attorney-only.");
-    }
-  } catch (err) {
-    // api() already redirects to /login.html on 401.
-  }
-}
-
-function renderAttorneyOnly(listId, message) {
-  document.getElementById(listId).innerHTML = `<li class="static empty">${message}</li>`;
-}
-
-document.getElementById("logout").addEventListener("click", async () => {
-  await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
-  window.location.href = "/login.html";
-});
-
-document.getElementById("changePasswordBtn").addEventListener("click", async () => {
-  showError("");
-  const currentPassword = prompt("Current password?");
-  if (!currentPassword) return;
-  const newPassword = prompt("New password (8+ characters)?");
-  if (!newPassword) return;
-  try {
-    await api("/api/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) });
-    alert("Password changed — please log in again.");
-    window.location.href = "/login.html";
-  } catch (err) {
-    showError(err.message);
-  }
-});
-
-loadWhoami();
-
-/* ===== Review Queue ===== */
-async function loadQueue() {
-  showError("");
-  if (currentRole && currentRole !== "attorney") {
-    renderAttorneyOnly("queue", "Review Queue is attorney-only.");
-    return;
-  }
-  try {
-    const items = await api("/api/work-products?status=pending_review");
-    const list = document.getElementById("queue");
-    list.innerHTML = "";
-    for (const item of items) {
-      const li = document.createElement("li");
-      li.innerHTML = `<strong>${escapeHtml(item.kind)}</strong> — matter ${escapeHtml(item.matterId)}
-        <span class="badge ${item.status}">${item.status}</span>
-        ${item.flags.length ? `<div class="flags">Unresolved flags: ${escapeHtml(item.flags.join(", "))}</div>` : ""}`;
-      li.addEventListener("click", () => loadDetail(item.id));
-      list.appendChild(li);
-    }
-    if (items.length === 0) list.innerHTML = '<li class="static empty">No work product pending review.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function loadDetail(id) {
-  showError("");
-  try {
-    const wp = await api(`/api/work-products/${id}`);
-    const detail = document.getElementById("detail");
-    detail.innerHTML = `
-      <div class="card">
-        <h3>${escapeHtml(wp.kind)} <span class="badge ${wp.status}">${wp.status}</span></h3>
-        <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 0.6rem;">Matter: ${escapeHtml(wp.matterId)}</p>
-        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${f}</code>`).join(", ")}</div>` : ""}
-        <pre>${wp.content}</pre>
-        <div class="actions" id="actions"></div>
-      </div>
-    `;
-    const actions = document.getElementById("actions");
-
-    for (const flag of wp.flags) {
-      const btn = mkButton(`Clear flag: ${flag}`, () => {
-        if (flag === "deadline_requires_redundant_verification") {
-          const deadlineType = prompt(
-            "Which deadline type does this confirm? (speedy_trial, arraignment, bail_hearing, discovery_response, other)",
-          );
-          if (!deadlineType) return;
-          return act(`/api/work-products/${id}/clear-flag`, { flag, deadlineType }, id);
-        }
-        return act(`/api/work-products/${id}/clear-flag`, { flag }, id);
-      });
-      actions.appendChild(btn);
-    }
-
-    if (wp.status === "pending_review") {
-      const approveBtn = mkButton("Approve", () => act(`/api/work-products/${id}/approve`, {}, id));
-      approveBtn.classList.add("primary");
-      const rejectBtn = mkButton("Reject", () => {
-        const reason = prompt("Reason for rejection?") || "";
-        return act(`/api/work-products/${id}/reject`, { reason }, id);
-      });
-      rejectBtn.classList.add("danger");
-      const reviseBtn = mkButton("Request revision", () => {
-        const note = prompt("Revision note?") || "";
-        return act(`/api/work-products/${id}/request-revision`, { note }, id);
-      });
-      actions.append(approveBtn, rejectBtn, reviseBtn);
-    }
-    if (wp.status === "approved") {
-      const releaseBtn = mkButton("Release", () => act(`/api/work-products/${id}/release`, {}, id));
-      releaseBtn.classList.add("primary");
-      actions.appendChild(releaseBtn);
-    }
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-/**
- * Escapes quotes as well as angle brackets, so the same helper is correct
- * whether the value lands in element text or inside an attribute value.
- * The textContent/innerHTML trick alone leaves `"` intact, which is enough
- * to break out of an attribute.
- */
-function escapeHtml(value) {
-  return value == null
-    ? ""
-    : String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}
-
-/**
- * A URL is only safe behind a clickable link if it's actually http(s) —
- * these come from CourtListener results and from whatever a user typed
- * when saving a reference, so a stored `javascript:` URL would otherwise
- * be one click away from running inside a logged-in attorney's session.
- * Returns "" for anything else, and callers drop the link entirely.
- */
-function safeUrl(value) {
-  try {
-    const parsed = new URL(String(value), window.location.origin);
-    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "";
-  } catch {
-    return "";
-  }
-}
-
-function mkButton(label, onClick) {
-  const btn = document.createElement("button");
-  btn.className = "btn";
-  btn.textContent = label;
-  btn.onclick = onClick;
-  return btn;
-}
-
-async function act(path, body, id) {
-  showError("");
-  try {
-    await api(path, { method: "POST", body: JSON.stringify(body) });
-    await loadQueue();
-    await loadDetail(id);
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("refresh").addEventListener("click", loadQueue);
-
-/* ===== Deadlines ===== */
-async function checkDeadline() {
-  showError("");
-  if (currentRole && currentRole !== "attorney") {
-    document.getElementById("deadlineStatus").innerHTML = '<p class="empty">Deadlines are attorney-only.</p>';
-    return;
-  }
-  try {
-    const matterId = document.getElementById("deadlineMatterId").value;
-    const type = document.getElementById("deadlineType").value;
-    const status = await api(`/api/deadlines?matterId=${encodeURIComponent(matterId)}&type=${encodeURIComponent(type)}`);
-    const el = document.getElementById("deadlineStatus");
-    if (status.state === "confirmed") {
-      el.innerHTML = `<p><span class="badge confirmed">confirmed</span> ${status.date}</p>`;
-    } else if (status.state === "conflict") {
-      el.innerHTML = `<p><span class="badge conflict">conflict</span> sources disagree: ${status.calculations.map((c) => `${c.source}: ${c.date}`).join(", ")}</p>`;
-    } else {
-      el.innerHTML = `<p class="empty">Unconfirmed (${status.calculations.length} calculation(s) so far).</p>`;
-    }
-    await loadConflicts();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function confirmDeadline() {
-  showError("");
-  if (currentRole && currentRole !== "attorney") {
-    return;
-  }
-  try {
-    await api("/api/deadlines/confirm", {
-      method: "POST",
-      body: JSON.stringify({
-        matterId: document.getElementById("deadlineMatterId").value,
-        type: document.getElementById("deadlineType").value,
-        date: document.getElementById("deadlineDate").value,
-        source: document.getElementById("deadlineSource").value,
-      }),
-    });
-    await checkDeadline();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function loadConflicts() {
-  if (currentRole && currentRole !== "attorney") {
-    renderAttorneyOnly("conflictList", "Deadlines are attorney-only.");
-    return;
-  }
-  try {
-    const conflicts = await api("/api/deadlines/conflicts");
-    const list = document.getElementById("conflictList");
-    list.innerHTML = conflicts.length
-      ? conflicts
-          .map((c) => `<li class="static">${escapeHtml(c.matterId)} / ${escapeHtml(c.type)}: ${escapeHtml(c.calculations.map((x) => `${x.source}=${x.date}`).join(", "))}</li>`)
-          .join("")
-      : '<li class="static empty">None.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("checkDeadline").addEventListener("click", checkDeadline);
-document.getElementById("confirmDeadline").addEventListener("click", confirmDeadline);
-
-/* ===== Scheduling ===== */
-async function bookAppointment() {
-  showError("");
-  try {
-    const startTimeLocal = document.getElementById("apptStartTime").value;
-    if (!startTimeLocal) throw new Error("pick a start time");
-    await api("/api/appointments", {
-      method: "POST",
-      body: JSON.stringify({
-        matterId: document.getElementById("apptMatterId").value,
-        startTime: new Date(startTimeLocal).toISOString(),
-        practiceAreaId: document.getElementById("apptPracticeArea").value,
-        allowOutsideBusinessHours: document.getElementById("apptOverrideHours").checked,
-      }),
-    });
-    document.getElementById("scheduleListMatterId").value = document.getElementById("apptMatterId").value;
-    await loadAppointments();
-    await loadDueReminders();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function loadAppointments() {
-  showError("");
-  try {
-    const matterId = document.getElementById("scheduleListMatterId").value;
-    const items = await api(`/api/appointments?matterId=${encodeURIComponent(matterId)}`);
-    const list = document.getElementById("appointmentList");
-    list.innerHTML = "";
-    for (const appt of items) {
-      const li = document.createElement("li");
-      li.classList.add("static");
-      const when = new Date(appt.startTime).toLocaleString();
-      li.innerHTML = `<strong>${appt.type}</strong> with ${appt.attorneyId} at ${when}
-        <span class="badge ${appt.status}">${appt.status}</span>`;
-      if (appt.status === "scheduled" || appt.status === "rescheduled") {
-        const cancelBtn = mkButton("Cancel", async () => {
-          const reason = prompt("Cancellation reason (optional)?") || undefined;
-          await api(`/api/appointments/${appt.id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
-          await loadAppointments();
-        });
-        cancelBtn.classList.add("danger");
-        const completeBtn = mkButton("Complete", async () => {
-          await api(`/api/appointments/${appt.id}/complete`, { method: "POST", body: "{}" });
-          await loadAppointments();
-        });
-        li.appendChild(document.createElement("br"));
-        li.append(cancelBtn, completeBtn);
-      }
-      list.appendChild(li);
-    }
-    if (items.length === 0) list.innerHTML = '<li class="static empty">No appointments for this matter.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function loadDueReminders() {
-  const due = await api("/api/appointments/reminders/due");
-  const list = document.getElementById("dueReminderList");
-  list.innerHTML = due.length
-    ? due
-        .map(
-          (d) =>
-            `<li class="static">Matter ${escapeHtml(d.appointment.matterId)} — ${d.reminder.offsetMinutesBefore} min before ${new Date(d.appointment.startTime).toLocaleString()}</li>`,
-        )
-        .join("")
-    : '<li class="static empty">None due right now.</li>';
-}
-
-document.getElementById("bookAppt").addEventListener("click", bookAppointment);
-document.getElementById("refreshAppointments").addEventListener("click", loadAppointments);
-loadAppointments();
-loadDueReminders();
-
-/* ===== Live Intake Demo ===== */
-let intakeSessionId = null;
-
-function appendBubble(kind, text) {
-  const log = document.getElementById("chatLog");
-  const bubble = document.createElement("div");
-  bubble.className = `bubble ${kind}`;
-  bubble.textContent = text;
-  log.appendChild(bubble);
-  log.scrollTop = log.scrollHeight;
-}
-
-async function startIntake() {
-  showError("");
-  try {
-    document.getElementById("chatLog").innerHTML = "";
-    const { sessionId, reply } = await api("/api/intake/start", { method: "POST", body: "{}" });
-    intakeSessionId = sessionId;
-    appendBubble("agent", reply);
-    document.getElementById("chatText").disabled = false;
-    document.getElementById("chatSend").disabled = false;
-    document.getElementById("chatText").focus();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function sendChat() {
-  const input = document.getElementById("chatText");
-  const text = input.value.trim();
-  if (!text || !intakeSessionId) return;
-  appendBubble("caller", text);
-  input.value = "";
-  showError("");
-  try {
-    const { reply, done } = await api(`/api/intake/${intakeSessionId}/message`, {
-      method: "POST",
-      body: JSON.stringify({ text }),
-    });
-    appendBubble("agent", reply);
-    if (done) {
-      appendBubble("system", "Conversation ended. Start a new one to try another scenario.");
-      input.disabled = true;
-      document.getElementById("chatSend").disabled = true;
-      intakeSessionId = null;
-    }
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("startIntake").addEventListener("click", startIntake);
-document.getElementById("chatSend").addEventListener("click", sendChat);
-document.getElementById("chatText").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") sendChat();
-});
-
-/* ===== Drafting ===== */
-function draftingMatterId() {
-  return document.getElementById("draftingMatterId").value;
-}
-
-async function loadTemplates() {
-  try {
-    const templates = await api("/api/drafting/templates");
-    const select = document.getElementById("draftTemplateId");
-    select.innerHTML = templates.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join("");
-  } catch (err) {
-    // Non-fatal if this account can't draft (e.g. not yet assigned) — the matter list will surface that instead.
-  }
-}
-
-async function loadMatterDrafts() {
-  showError("");
-  document.getElementById("draftingDetail").innerHTML = "";
-  try {
-    const items = await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}`);
-    const list = document.getElementById("draftingList");
-    list.innerHTML = "";
-    for (const item of items) {
-      const li = document.createElement("li");
-      li.innerHTML = `<strong>${escapeHtml(item.kind)}</strong>
-        <span class="badge ${item.status}">${item.status}</span>
-        ${item.flags.length ? `<div class="flags">Unresolved flags: ${escapeHtml(item.flags.join(", "))}</div>` : ""}`;
-      li.addEventListener("click", () => loadDraftDetail(item.id));
-      list.appendChild(li);
-    }
-    if (items.length === 0) list.innerHTML = '<li class="static empty">No work product on this matter yet.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function loadDraftDetail(id) {
-  showError("");
-  try {
-    const wp = await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/work-products/${id}`);
-    const detail = document.getElementById("draftingDetail");
-    const editable = wp.status === "draft" || wp.status === "revision_requested";
-    detail.innerHTML = `
-      <div class="card">
-        <h3>${escapeHtml(wp.kind)} <span class="badge ${wp.status}">${wp.status}</span></h3>
-        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${f}</code>`).join(", ")}</div>` : ""}
-        <div class="field-row">
-          <label class="field grow">Content
-            <textarea id="draftDetailContent" rows="8" ${editable ? "" : "disabled"}>${wp.content}</textarea>
-          </label>
-        </div>
-        <div class="actions" id="draftDetailActions"></div>
-      </div>
-    `;
-    if (editable) {
-      const actions = document.getElementById("draftDetailActions");
-      const saveBtn = mkButton("Save revision", async () => {
-        showError("");
-        try {
-          const content = document.getElementById("draftDetailContent").value;
-          await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/work-products/${id}/revise`, {
-            method: "POST",
-            body: JSON.stringify({ content }),
-          });
-          await loadMatterDrafts();
-          await loadDraftDetail(id);
-        } catch (err) {
-          showError(err.message);
-        }
-      });
-      const submitBtn = mkButton("Submit for review", async () => {
-        showError("");
-        try {
-          await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/work-products/${id}/submit`, {
-            method: "POST",
-            body: "{}",
-          });
-          await loadMatterDrafts();
-          await loadDraftDetail(id);
-        } catch (err) {
-          showError(err.message);
-        }
-      });
-      submitBtn.classList.add("primary");
-      actions.append(saveBtn, submitBtn);
-    }
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function createTemplateDraft() {
-  showError("");
-  try {
-    const body = {
-      templateId: document.getElementById("draftTemplateId").value,
-      content: document.getElementById("draftTemplateContent").value,
-    };
-    const deadlineDate = document.getElementById("draftDeadlineDate").value;
-    if (deadlineDate) {
-      body.deadlineDate = deadlineDate;
-      body.deadlineType = document.getElementById("draftDeadlineType").value;
-    }
-    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-template`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    document.getElementById("draftTemplateContent").value = "";
-    document.getElementById("draftDeadlineDate").value = "";
-    await loadMatterDrafts();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function createResearchDraft() {
-  showError("");
-  try {
-    const citations = document
-      .getElementById("researchCitations")
-      .value.split("\n")
-      .map((c) => c.trim())
-      .filter(Boolean);
-    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-research`, {
-      method: "POST",
-      body: JSON.stringify({ content: document.getElementById("researchContent").value, citations }),
-    });
-    document.getElementById("researchContent").value = "";
-    document.getElementById("researchCitations").value = "";
-    await loadMatterDrafts();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function createBillingDraft() {
-  showError("");
-  try {
-    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-billing`, {
-      method: "POST",
-      body: JSON.stringify({ content: document.getElementById("billingContent").value }),
-    });
-    document.getElementById("billingContent").value = "";
-    await loadMatterDrafts();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("loadMatterDrafts").addEventListener("click", loadMatterDrafts);
-document.getElementById("createTemplateDraft").addEventListener("click", createTemplateDraft);
-document.getElementById("createResearchDraft").addEventListener("click", createResearchDraft);
-document.getElementById("createBillingDraft").addEventListener("click", createBillingDraft);
-document.getElementById("navDrafting").addEventListener("click", () => {
-  loadTemplates();
-  loadMatterDrafts();
-});
-
-/* ===== Cases ===== */
-async function loadCases() {
-  showError("");
-  document.getElementById("caseDetail").innerHTML = "";
-  try {
-    const items = await api("/api/cases");
-    const list = document.getElementById("casesList");
-    list.innerHTML = "";
-    for (const item of items) {
-      const li = document.createElement("li");
-      li.innerHTML = `<strong>Matter ${escapeHtml(item.matterId)}</strong>
-        <span class="badge">${item.workProductCount} work product</span>
-        <span class="badge">${item.documentCount} document${item.documentCount === 1 ? "" : "s"}</span>`;
-      li.addEventListener("click", () => loadCaseDetail(item.matterId));
-      list.appendChild(li);
-    }
-    if (items.length === 0) list.innerHTML = '<li class="static empty">No cases yet — draft something or upload a document to a matter.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-function formatBytes(size) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-async function downloadDocument(matterId, doc) {
-  showError("");
-  try {
-    const full = await api(`/api/documents/matters/${encodeURIComponent(matterId)}/${doc.id}`);
-    const link = document.createElement("a");
-    link.href = `data:${full.contentType};base64,${full.content}`;
-    link.download = full.fileName;
-    link.click();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function loadCaseDetail(matterId) {
-  showError("");
-  try {
-    const detail = await api(`/api/cases/${encodeURIComponent(matterId)}`);
-    const el = document.getElementById("caseDetail");
-    el.innerHTML = `
-      <div class="card">
-        <h3>Matter ${escapeHtml(matterId)}</h3>
-        <div class="field-row">
-          <label class="field grow">Upload a document
-            <input id="caseUploadFile" type="file" />
-          </label>
-          <button class="btn primary" id="caseUploadBtn">Upload</button>
-        </div>
-        <div id="uploadLimitNote" style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;"></div>
-      </div>
-      <div class="card">
-        <h3>Documents</h3>
-        <ul id="caseDocuments" class="list"></ul>
-      </div>
-      <div class="card">
-        <h3>Work product</h3>
-        <ul id="caseWorkProducts" class="list"></ul>
-      </div>
-    `;
-
-    api("/api/documents/limits")
-      .then((limits) => {
-        document.getElementById("uploadLimitNote").textContent = `Max upload size: ${formatBytes(limits.maxUploadBytes)} per file.`;
-      })
-      .catch(() => {});
-
-    const docList = document.getElementById("caseDocuments");
-    docList.innerHTML = "";
-    for (const doc of detail.documents) {
-      const isPdf = doc.contentType === "application/pdf" || doc.fileName.toLowerCase().endsWith(".pdf");
-      const li = document.createElement("li");
-      li.classList.add("static");
-      li.innerHTML = `<strong>${escapeHtml(doc.fileName)}</strong>
-        <span class="badge">${formatBytes(doc.size)}</span>
-        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">Uploaded by ${escapeHtml(doc.uploadedBy)} on ${new Date(doc.uploadedAt).toLocaleString()}</div>`;
-      const downloadBtn = mkButton("Download", () => downloadDocument(matterId, doc));
-      li.appendChild(document.createElement("br"));
-      li.appendChild(downloadBtn);
-      if (isPdf) {
-        const draftReportBtn = mkButton("Draft report from this PDF", async () => {
-          showError("");
-          try {
-            draftReportBtn.disabled = true;
-            await api(`/api/pdf-reports/matters/${encodeURIComponent(matterId)}/${doc.id}/draft-report`, { method: "POST" });
-            await loadCaseDetail(matterId);
-          } catch (err) {
-            showError(err.message);
-          } finally {
-            draftReportBtn.disabled = false;
-          }
-        });
-        draftReportBtn.classList.add("primary");
-        const condenseBtn = mkButton("Condense", async () => {
-          showError("");
-          try {
-            condenseBtn.disabled = true;
-            const result = await api(`/api/pdf-reports/matters/${encodeURIComponent(matterId)}/${doc.id}/condense`, { method: "POST" });
-            await loadCaseDetail(matterId);
-            showError(
-              `Condensed '${result.originalDocument.fileName}': ${formatBytes(result.originalBytes)} -> ${formatBytes(result.condensedBytes)}, ` +
-                `saved as a new document '${result.condensedDocument.fileName}'.`,
-            );
-          } catch (err) {
-            showError(err.message);
-          } finally {
-            condenseBtn.disabled = false;
-          }
-        });
-        li.append(draftReportBtn, condenseBtn);
-      }
-      docList.appendChild(li);
-    }
-    if (detail.documents.length === 0) docList.innerHTML = '<li class="static empty">No documents uploaded yet.</li>';
-
-    const wpList = document.getElementById("caseWorkProducts");
-    wpList.innerHTML = "";
-    for (const wp of detail.workProducts) {
-      const li = document.createElement("li");
-      li.classList.add("static");
-      li.innerHTML = `<strong>${escapeHtml(wp.kind)}</strong>
-        <span class="badge ${wp.status}">${wp.status}</span>
-        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${escapeHtml(wp.flags.join(", "))}</div>` : ""}`;
-      wpList.appendChild(li);
-    }
-    if (detail.workProducts.length === 0) wpList.innerHTML = '<li class="static empty">No drafted work product on this matter yet.</li>';
-
-    document.getElementById("caseUploadBtn").addEventListener("click", async () => {
-      showError("");
-      try {
-        const fileInput = document.getElementById("caseUploadFile");
-        const file = fileInput.files[0];
-        if (!file) throw new Error("choose a file first");
-        const content = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result.split(",")[1] || "");
-          reader.onerror = () => reject(new Error("could not read file"));
-          reader.readAsDataURL(file);
-        });
-        await api(`/api/documents/matters/${encodeURIComponent(matterId)}`, {
-          method: "POST",
-          body: JSON.stringify({ fileName: file.name, contentType: file.type, content }),
-        });
-        await loadCases();
-        await loadCaseDetail(matterId);
-      } catch (err) {
-        showError(err.message);
-      }
-    });
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("refreshCases").addEventListener("click", loadCases);
-document.getElementById("navCases").addEventListener("click", loadCases);
-
-/* ===== Research ===== */
-async function searchResearch() {
-  showError("");
-  try {
-    const query = document.getElementById("researchQuery").value.trim();
-    if (!query) return;
-    const results = await api(`/api/research/search?q=${encodeURIComponent(query)}`);
-    const list = document.getElementById("researchResults");
-    list.innerHTML = "";
-    for (const result of results) {
-      const li = document.createElement("li");
-      li.classList.add("static");
-      li.innerHTML = `<strong>${escapeHtml(result.caseName)}</strong>
-        ${result.citations.length ? `<span class="badge">${escapeHtml(result.citations.join(", "))}</span>` : ""}
-        ${result.court ? `<div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">${escapeHtml(result.court)}${result.dateFiled ? ` — ${escapeHtml(result.dateFiled)}` : ""}</div>` : ""}
-        ${result.snippet ? `<div style="font-size:0.85rem;margin-top:0.3rem;">${escapeHtml(result.snippet)}</div>` : ""}
-        ${safeUrl(result.url) ? `<div style="margin-top:0.4rem;"><a href="${escapeHtml(safeUrl(result.url))}" target="_blank" rel="noopener">View on CourtListener</a></div>` : ""}`;
-      const saveBtn = mkButton("Save to matter", async () => {
-        showError("");
-        try {
-          const matterId = document.getElementById("researchMatterId").value;
-          await api(`/api/research/matters/${encodeURIComponent(matterId)}`, {
-            method: "POST",
-            body: JSON.stringify({
-              citation: result.citations.join(", ") || result.caseName,
-              title: result.caseName,
-              url: result.url,
-            }),
-          });
-          await loadResearchMatter();
-        } catch (err) {
-          showError(err.message);
-        }
-      });
-      saveBtn.classList.add("primary");
-      li.appendChild(saveBtn);
-      list.appendChild(li);
-    }
-    if (results.length === 0) list.innerHTML = '<li class="static empty">No results.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function loadResearchMatter() {
-  showError("");
-  try {
-    const matterId = document.getElementById("researchMatterId").value;
-    const refs = await api(`/api/research/matters/${encodeURIComponent(matterId)}`);
-    const list = document.getElementById("researchSavedList");
-    list.innerHTML = "";
-    for (const ref of refs) {
-      const li = document.createElement("li");
-      li.classList.add("static");
-      li.innerHTML = `<strong>${escapeHtml(ref.title)}</strong>
-        <span class="badge">${escapeHtml(ref.citation)}</span>
-        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">Saved by ${escapeHtml(ref.savedBy)} on ${new Date(ref.savedAt).toLocaleString()}</div>
-        ${safeUrl(ref.url) ? `<div style="margin-top:0.3rem;"><a href="${escapeHtml(safeUrl(ref.url))}" target="_blank" rel="noopener">View source</a></div>` : ""}`;
-      const removeBtn = mkButton("Remove", async () => {
-        showError("");
-        try {
-          await api(`/api/research/matters/${encodeURIComponent(matterId)}/${ref.id}`, { method: "DELETE" });
-          await loadResearchMatter();
-        } catch (err) {
-          showError(err.message);
-        }
-      });
-      removeBtn.classList.add("danger");
-      li.appendChild(document.createElement("br"));
-      li.appendChild(removeBtn);
-      list.appendChild(li);
-    }
-    if (refs.length === 0) list.innerHTML = '<li class="static empty">No saved references for this matter yet.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("researchSearchBtn").addEventListener("click", searchResearch);
-document.getElementById("researchQuery").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") searchResearch();
-});
-document.getElementById("loadResearchMatter").addEventListener("click", loadResearchMatter);
-document.getElementById("navResearch").addEventListener("click", loadResearchMatter);
-
-/* ===== Staff ===== */
-async function loadStaff() {
-  showError("");
-  try {
-    const members = await api("/api/staff");
-    const list = document.getElementById("staffList");
-    list.innerHTML = "";
-    for (const member of members) {
-      const li = document.createElement("li");
-      li.classList.add("static");
-      li.innerHTML = `<span class="badge">${escapeHtml(member.initials)}</span>
-        <strong>${escapeHtml(member.displayName)}</strong>
-        <span class="badge">${escapeHtml(member.role)}</span>
-        ${member.disabled ? `<span class="badge rejected">disabled</span>` : ""}
-        ${member.matterAssignment ? `<span class="badge confirmed">matter: ${escapeHtml(member.matterAssignment.matterId)}</span>` : ""}
-        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.2rem;">actor id: ${escapeHtml(member.actorId)} (username: ${escapeHtml(member.username)})</div>`;
-      list.appendChild(li);
-    }
-    if (members.length === 0) list.innerHTML = '<li class="static empty">No staff yet.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("refreshStaff").addEventListener("click", loadStaff);
-document.getElementById("navStaff").addEventListener("click", loadStaff);
-
-/* ===== Messages ===== */
-let currentConversationId = null;
-
-function appendMessageBubble(logId, message) {
-  const log = document.getElementById(logId);
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-  const time = new Date(message.sentAt).toLocaleString();
-  bubble.innerHTML = `<strong>${escapeHtml(message.senderName)}</strong> <span style="color:var(--text-muted);font-size:0.75rem;">${time}</span><div>${escapeHtml(message.body)}</div>`;
-  log.appendChild(bubble);
-  log.scrollTop = log.scrollHeight;
-}
-
-async function loadAnnouncements() {
-  showError("");
-  try {
-    const messages = await api("/api/messages/announcements");
-    const log = document.getElementById("announcementsLog");
-    log.innerHTML = "";
-    for (const message of messages) appendMessageBubble("announcementsLog", message);
-    if (messages.length === 0) log.innerHTML = '<div class="bubble" style="opacity:0.6;">No announcements yet.</div>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function postAnnouncement() {
-  showError("");
-  try {
-    const input = document.getElementById("announcementText");
-    const body = input.value.trim();
-    if (!body) return;
-    await api("/api/messages/announcements", { method: "POST", body: JSON.stringify({ body }) });
-    input.value = "";
-    await loadAnnouncements();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function loadConversations() {
-  showError("");
-  try {
-    const conversations = await api("/api/messages/conversations");
-    const list = document.getElementById("conversationList");
-    list.innerHTML = "";
-    for (const conversation of conversations) {
-      if (conversation.kind === "announcement") continue;
-      const li = document.createElement("li");
-      li.classList.add("static");
-      const label =
-        conversation.kind === "group"
-          ? conversation.name
-          : conversation.participants.map((p) => p.displayName).join(", ");
-      li.innerHTML = `<strong>${escapeHtml(label || "(conversation)")}</strong> <span class="badge">${escapeHtml(conversation.kind)}</span>`;
-      const openBtn = mkButton("Open", () => openConversation(conversation.id));
-      li.appendChild(document.createElement("br"));
-      li.appendChild(openBtn);
-      list.appendChild(li);
-    }
-    if (list.innerHTML === "") list.innerHTML = '<li class="static empty">No conversations yet — start a DM or group above.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function openConversation(conversationId) {
-  showError("");
-  try {
-    currentConversationId = conversationId;
-    document.getElementById("conversationWindow").style.display = "";
-    const messages = await api(`/api/messages/conversations/${conversationId}/messages`);
-    const log = document.getElementById("conversationLog");
-    log.innerHTML = "";
-    for (const message of messages) appendMessageBubble("conversationLog", message);
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function sendConversationMessage() {
-  showError("");
-  try {
-    if (!currentConversationId) return;
-    const input = document.getElementById("conversationText");
-    const body = input.value.trim();
-    if (!body) return;
-    await api(`/api/messages/conversations/${currentConversationId}/messages`, { method: "POST", body: JSON.stringify({ body }) });
-    input.value = "";
-    await openConversation(currentConversationId);
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("announcementSend").addEventListener("click", postAnnouncement);
-document.getElementById("announcementText").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") postAnnouncement();
-});
-document.getElementById("conversationSend").addEventListener("click", sendConversationMessage);
-document.getElementById("conversationText").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") sendConversationMessage();
-});
-document.getElementById("startDm").addEventListener("click", async () => {
-  showError("");
-  try {
-    const otherActorId = document.getElementById("dmActorId").value.trim();
-    if (!otherActorId) return;
-    const conversation = await api("/api/messages/conversations/direct", { method: "POST", body: JSON.stringify({ otherActorId }) });
-    document.getElementById("dmActorId").value = "";
-    await loadConversations();
-    await openConversation(conversation.id);
-  } catch (err) {
-    showError(err.message);
-  }
-});
-document.getElementById("startGroup").addEventListener("click", async () => {
-  showError("");
-  try {
-    const name = document.getElementById("groupName").value.trim();
-    const memberActorIds = document
-      .getElementById("groupMembers")
-      .value.split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!name) return;
-    const conversation = await api("/api/messages/conversations/group", { method: "POST", body: JSON.stringify({ name, memberActorIds }) });
-    document.getElementById("groupName").value = "";
-    document.getElementById("groupMembers").value = "";
-    await loadConversations();
-    await openConversation(conversation.id);
-  } catch (err) {
-    showError(err.message);
-  }
-});
-document.getElementById("refreshConversations").addEventListener("click", loadConversations);
-document.getElementById("navMessages").addEventListener("click", () => {
-  loadAnnouncements();
-  loadConversations();
-});
-
-/* ===== Staff Schedule ===== */
-function renderScheduleEntries(listId, entries, { showActorId }) {
-  const list = document.getElementById(listId);
-  list.innerHTML = "";
-  for (const entry of entries) {
-    const li = document.createElement("li");
-    li.classList.add("static");
-    li.innerHTML = `${showActorId ? `<strong>${escapeHtml(entry.actorId)}</strong> ` : ""}<span class="badge">${escapeHtml(entry.date)}</span>
-      <span class="badge ${entry.status === "in_office" ? "approved" : entry.status === "remote" ? "pending_review" : "rejected"}">${escapeHtml(entry.status.replace("_", " "))}</span>
-      ${entry.note ? `<div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.2rem;">${escapeHtml(entry.note)}</div>` : ""}`;
-    list.appendChild(li);
-  }
-  if (entries.length === 0) list.innerHTML = '<li class="static empty">No entries.</li>';
-}
-
-document.getElementById("setScheduleEntry").addEventListener("click", async () => {
-  showError("");
-  try {
-    const actorId = document.getElementById("scheduleActorId").value.trim();
-    const date = document.getElementById("scheduleDate").value;
-    const status = document.getElementById("scheduleStatus").value;
-    const note = document.getElementById("scheduleNote").value.trim();
-    if (!actorId || !date) return;
-    await api(`/api/staff-schedule/actor/${encodeURIComponent(actorId)}`, {
-      method: "POST",
-      body: JSON.stringify({ date, status, ...(note ? { note } : {}) }),
-    });
-    document.getElementById("scheduleNote").value = "";
-  } catch (err) {
-    showError(err.message);
-  }
-});
-
-document.getElementById("loadScheduleForDate").addEventListener("click", async () => {
-  showError("");
-  try {
-    const date = document.getElementById("scheduleViewDate").value;
-    if (!date) return;
-    const entries = await api(`/api/staff-schedule/date/${encodeURIComponent(date)}`);
-    renderScheduleEntries("scheduleForDateList", entries, { showActorId: true });
-  } catch (err) {
-    showError(err.message);
-  }
-});
-
-document.getElementById("loadScheduleForActor").addEventListener("click", async () => {
-  showError("");
-  try {
-    const actorId = document.getElementById("scheduleViewActorId").value.trim();
-    if (!actorId) return;
-    const entries = await api(`/api/staff-schedule/actor/${encodeURIComponent(actorId)}`);
-    renderScheduleEntries("scheduleForActorList", entries, { showActorId: false });
-  } catch (err) {
-    showError(err.message);
-  }
-});
-
-/* ===== Billing ===== */
-function renderBillingEntries(listId, entries, { showActorId }) {
-  const list = document.getElementById(listId);
-  list.innerHTML = "";
-  let total = 0;
-  for (const entry of entries) {
-    total += entry.hours;
-    const li = document.createElement("li");
-    li.classList.add("static");
-    li.innerHTML = `${showActorId ? `<strong>${escapeHtml(entry.actorId)}</strong> ` : ""}<span class="badge">${escapeHtml(entry.date)}</span>
-      <span class="badge confirmed">${entry.hours}h</span>
-      <div style="margin-top:0.2rem;">${escapeHtml(entry.description)}</div>`;
-    list.appendChild(li);
-  }
-  if (entries.length === 0) {
-    list.innerHTML = '<li class="static empty">No hours logged yet.</li>';
-  } else {
-    const totalLi = document.createElement("li");
-    totalLi.classList.add("static");
-    totalLi.innerHTML = `<strong>Total: ${total.toFixed(1)}h</strong>`;
-    list.appendChild(totalLi);
-  }
-}
-
-document.getElementById("logBillingHours").addEventListener("click", async () => {
-  showError("");
-  try {
-    const matterId = document.getElementById("billingMatterId").value.trim();
-    const date = document.getElementById("billingDate").value;
-    const hours = Number(document.getElementById("billingHoursValue").value);
-    const description = document.getElementById("billingDescription").value.trim();
-    if (!matterId || !date || !hours || !description) return;
-    await api(`/api/billing-hours/matters/${encodeURIComponent(matterId)}`, {
-      method: "POST",
-      body: JSON.stringify({ date, hours, description }),
-    });
-    document.getElementById("billingHoursValue").value = "";
-    document.getElementById("billingDescription").value = "";
-    await loadBillingMatter();
-    await loadMyBillingHours();
-  } catch (err) {
-    showError(err.message);
-  }
-});
-
-async function loadBillingMatter() {
-  showError("");
-  try {
-    const matterId = document.getElementById("billingMatterId").value.trim();
-    if (!matterId) return;
-    const entries = await api(`/api/billing-hours/matters/${encodeURIComponent(matterId)}`);
-    renderBillingEntries("billingMatterList", entries, { showActorId: true });
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function loadMyBillingHours() {
-  showError("");
-  try {
-    const entries = await api("/api/billing-hours/mine");
-    renderBillingEntries("billingMineList", entries, { showActorId: false });
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("loadBillingMatter").addEventListener("click", loadBillingMatter);
-document.getElementById("loadMyBillingHours").addEventListener("click", loadMyBillingHours);
-document.getElementById("navBilling").addEventListener("click", () => {
-  loadBillingMatter();
-  loadMyBillingHours();
-});
-
-/* ===== Assistant ===== */
-let assistantSessionId = null;
-
-function appendAssistantBubble(kind, text) {
-  const log = document.getElementById("assistantLog");
-  const bubble = document.createElement("div");
-  bubble.className = `bubble ${kind}`;
-  bubble.textContent = text;
-  log.appendChild(bubble);
-  log.scrollTop = log.scrollHeight;
-}
-
-async function startAssistant() {
-  showError("");
-  try {
-    document.getElementById("assistantLog").innerHTML = "";
-    const { sessionId } = await api("/api/assistant/start", { method: "POST", body: "{}" });
-    assistantSessionId = sessionId;
-    appendAssistantBubble("system", "New conversation started.");
-    document.getElementById("assistantText").disabled = false;
-    document.getElementById("assistantSend").disabled = false;
-    document.getElementById("assistantText").focus();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function sendAssistantMessage() {
-  const input = document.getElementById("assistantText");
-  const text = input.value.trim();
-  if (!text || !assistantSessionId) return;
-  appendAssistantBubble("caller", text);
-  input.value = "";
-  showError("");
-  const sendBtn = document.getElementById("assistantSend");
-  sendBtn.disabled = true;
-  try {
-    const { reply } = await api(`/api/assistant/${assistantSessionId}/message`, {
-      method: "POST",
-      body: JSON.stringify({ text }),
-    });
-    appendAssistantBubble("agent", reply);
-  } catch (err) {
-    showError(err.message);
-  } finally {
-    sendBtn.disabled = false;
-    input.focus();
-  }
-}
-
-document.getElementById("startAssistant").addEventListener("click", startAssistant);
-document.getElementById("assistantSend").addEventListener("click", sendAssistantMessage);
-document.getElementById("assistantText").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") sendAssistantMessage();
-});
-
-/* ===== Accounts ===== */
-async function loadAccounts() {
-  showError("");
-  try {
-    const accountsList = await api("/api/accounts");
-    const list = document.getElementById("accountList");
-    list.innerHTML = "";
-    for (const acct of accountsList) {
-      const li = document.createElement("li");
-      li.classList.add("static");
-      li.innerHTML = `<span class="status-dot ${acct.disabled ? "disabled" : ""}"></span><strong>${escapeHtml(acct.username)}</strong>
-        <span class="muted">${escapeHtml(acct.displayName)}</span>
-        <span class="badge">${acct.role}</span>
-        <span class="badge ${acct.disabled ? "rejected" : "approved"}">${acct.disabled ? "disabled" : "enabled"}</span>
-        ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${escapeHtml(acct.matterAssignment.matterId)}</span>` : ""}
-        ${acct.mustChangePassword ? `<span class="badge pending_review">password reset pending</span>` : ""}`;
-      const toggleBtn = mkButton(acct.disabled ? "Enable" : "Disable", async () => {
-        showError("");
-        try {
-          await api(`/api/accounts/${acct.id}/${acct.disabled ? "enable" : "disable"}`, { method: "POST", body: "{}" });
-          await loadAccounts();
-        } catch (err) {
-          showError(err.message);
-        }
-      });
-      if (!acct.disabled) toggleBtn.classList.add("danger");
-      const resetBtn = mkButton("Reset password", async () => {
-        showError("");
-        const newPassword = prompt(`New temporary password for ${acct.username} (8+ characters)?`);
-        if (!newPassword) return;
-        try {
-          await api(`/api/accounts/${acct.id}/reset-password`, { method: "POST", body: JSON.stringify({ newPassword }) });
-          await loadAccounts();
-        } catch (err) {
-          showError(err.message);
-        }
-      });
-      li.appendChild(document.createElement("br"));
-      li.append(toggleBtn, resetBtn);
-
-      if (acct.role === "paralegal") {
-        const matterInput = document.createElement("input");
-        matterInput.placeholder = "matter id";
-        matterInput.style.marginLeft = "0.5rem";
-        matterInput.style.width = "110px";
-        matterInput.value = acct.matterAssignment ? acct.matterAssignment.matterId : "";
-        const assignBtn = mkButton("Assign", async () => {
-          showError("");
-          try {
-            await api(`/api/accounts/${acct.id}/assign-matter`, {
-              method: "POST",
-              body: JSON.stringify({ matterId: matterInput.value }),
-            });
-            await loadAccounts();
-          } catch (err) {
-            showError(err.message);
-          }
-        });
-        li.append(matterInput, assignBtn);
-        if (acct.matterAssignment) {
-          const unassignBtn = mkButton("Unassign", async () => {
-            showError("");
-            try {
-              await api(`/api/accounts/${acct.id}/unassign-matter`, { method: "POST", body: "{}" });
-              await loadAccounts();
-            } catch (err) {
-              showError(err.message);
-            }
-          });
-          unassignBtn.classList.add("danger");
-          li.appendChild(unassignBtn);
-        }
-      }
-      list.appendChild(li);
-    }
-    if (accountsList.length === 0) list.innerHTML = '<li class="static empty">No accounts.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-async function createAccount() {
-  showError("");
-  try {
-    const username = document.getElementById("newAccountUsername").value;
-    const displayName = document.getElementById("newAccountDisplayName").value;
-    const password = document.getElementById("newAccountPassword").value;
-    const role = document.getElementById("newAccountRole").value;
-    await api("/api/accounts", { method: "POST", body: JSON.stringify({ username, displayName, password, role }) });
-    document.getElementById("newAccountUsername").value = "";
-    document.getElementById("newAccountDisplayName").value = "";
-    document.getElementById("newAccountPassword").value = "";
-    await loadAccounts();
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("createAccount").addEventListener("click", createAccount);
-document.getElementById("refreshAccounts").addEventListener("click", loadAccounts);
-document.getElementById("navAccounts").addEventListener("click", loadAccounts);
-
-/* ===== Audit Log ===== */
-async function loadAudit() {
-  showError("");
-  try {
-    const matterId = document.getElementById("auditMatterId").value.trim();
-    const path = matterId ? `/api/audit?matterId=${encodeURIComponent(matterId)}` : "/api/audit";
-    const entries = await api(path);
-    const list = document.getElementById("auditList");
-    list.innerHTML = "";
-    for (const entry of [...entries].reverse()) {
-      const li = document.createElement("li");
-      li.classList.add("static");
-      li.innerHTML = `<strong>${escapeHtml(entry.action)}</strong>
-        <span class="badge">${escapeHtml(entry.actor.role)} ${escapeHtml(entry.actor.id)}</span>
-        ${entry.matterId ? `<span class="badge">matter ${escapeHtml(entry.matterId)}</span>` : ""}
-        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">${new Date(entry.timestamp).toLocaleString()}</div>
-        ${entry.detail ? `<div style="font-size:0.85rem;margin-top:0.3rem;">${escapeHtml(entry.detail)}</div>` : ""}`;
-      list.appendChild(li);
-    }
-    if (entries.length === 0) list.innerHTML = '<li class="static empty">No audit entries.</li>';
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-document.getElementById("refreshAudit").addEventListener("click", loadAudit);
-document.getElementById("navAudit").addEventListener("click", loadAudit);
-</script>
+<datalist id="matterOptions"></datalist>
+<script src="/app.js"></script>
 </body>
 </html>

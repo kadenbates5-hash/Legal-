@@ -682,6 +682,62 @@ recompress embedded images when condensing (see `pdf-condenser.ts`'s doc
 comment above) — a scanned, image-heavy PDF condenses poorly by design,
 not by bug.
 
+## Transport & session security
+
+Hardening that applies to every route, independent of any one panel.
+
+- **Login throttling** (`core/login-throttle.ts` — `LoginThrottle`).
+  `POST /api/login` was unlimited, which is two problems: password
+  guessing, and a CPU-exhaustion vector, since every attempt runs
+  `scrypt` *by design* and the endpoint needs no credentials to reach.
+  Failures are counted against two independent keys — the **username**
+  (stops one account being hammered from many addresses) and the
+  **client IP** (stops one address spraying across many accounts) —
+  and either tripping locks the attempt out. The check runs *before*
+  `AuthService.login`, so a locked-out attempt never pays the scrypt
+  cost. Defaults: 5 failures per 15 min, 15 min lockout, cleared on a
+  successful login. Persisted (see "Persistence") so bouncing the
+  process can't clear a lockout.
+  - A lockout is deliberately **time-boxed, never an account disable** —
+    otherwise anyone able to send failed logins could permanently deny a
+    real attorney access to their own matters, the same failure mode
+    `AuthService.setDisabled` guards against by refusing to remove the
+    last enabled attorney. `AccountsService.clearLoginLockout()`
+    (attorney-gated, `POST /api/accounts/:id/clear-login-lockout`) is
+    the escape hatch for a colleague who just fatfingered their password.
+  - `X-Forwarded-For` is only honoured under the same `TRUST_PROXY` flag
+    that gates `X-Forwarded-Proto` — trusting it unconditionally would
+    let an attacker defeat per-IP throttling by varying a header.
+- **Auth auditing.** Login success/failure/lockout land in the same
+  `AuditLog` the Audit Log panel reads. Auth events carry
+  `matterId: undefined` (they aren't matter-scoped) and a new
+  `"anonymous"` actor role — recording a pre-credential attempt as
+  `"system"` would be a lie, since that role is the calendar
+  integration's machine credential. `AccessControl` default-denies every
+  role it doesn't explicitly model, so an anonymous actor can't reach
+  matter data by construction.
+- **Security headers** on every response (`SECURITY_HEADERS` in
+  `server.ts`): a real CSP (`default-src 'self'`, `script-src 'self'`
+  with **no** `unsafe-inline`), `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY` + `frame-ancestors 'none'`, `Referrer-Policy:
+  no-referrer`, `Cross-Origin-Opener-Policy: same-origin`.
+  Clickjacking is the one worth naming: the Review Queue has one-click
+  approve/release buttons that release privileged work product, which is
+  exactly what a framed-overlay attack would target.
+  - The dashboard's CSS and JS live in real files (`public/app.css`,
+    `public/app.js`, `public/login.css`, `public/login.js`) rather than
+    inline blocks **specifically so that policy can be strict** — an
+    inline-script allowance would make it decoration. For the same
+    reason there are no `style="..."` attributes anywhere; the handful
+    that existed became utility classes in `app.css`, since `style-src
+    'self'` blocks inline style attributes too (including any written
+    into `innerHTML`).
+- **Request-body ceiling** — see "PDF intake…" above for why the
+  per-file upload cap alone wasn't one.
+- `serveStatic` compares against `PUBLIC_DIR + path.sep`, not a bare
+  `startsWith`: the latter also accepts a sibling directory whose name
+  merely begins with it, which `../public-x/secret` would reach.
+
 ## Real authentication (§5/§6 — resolved)
 
 `src/core/auth.ts` — `AuthService`. Replaces the earlier
@@ -773,7 +829,7 @@ distinct trust levels:
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over fourteen panels — Review Queue, Deadlines,
+between sections) over fifteen panels — Home, Review Queue, Deadlines,
 Scheduling, Live Intake Demo, Drafting, Cases, Research, Assistant,
 Staff, Messages, Schedule, Billing, Accounts, and Audit Log (Drafting/
 Cases/Research/Assistant/Billing and Accounts/Audit Log hidden from the
@@ -842,9 +898,17 @@ session sees an inline "attorney-only" message instead of a background
   `public/` into `dist/` since `tsc` only compiles `.ts` files.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
-- `public/index.html` — the Docket app shell: a dark sidebar (brand +
-  panel nav), a top bar showing who's signed in, and one panel each for
-  the Review Queue (list/detail/approve/reject/request-revision/
+- `public/index.html` / `public/app.js` / `public/app.css` — the Docket
+  app shell: a dark sidebar (brand + panel nav), a top bar showing who's
+  signed in, and one panel each for **Home** (the landing panel: a
+  role-aware set of stat tiles, a "Needs your attention" list that
+  deep-links into the Review Queue, and a "Today" list showing your own
+  schedule entry and the latest announcements — it only requests data
+  the current role can read, so nothing 403s in the background, and each
+  tile is best-effort so one unavailable surface can't blank the page.
+  Before this, the app opened on the attorney-only Review Queue, so a
+  paralegal's first impression was the words "attorney-only"), the
+  Review Queue (list/detail/approve/reject/request-revision/
   clear-flag/release), Deadlines (status check/independent confirmation/
   conflict list), Scheduling (book/list/reschedule/cancel/complete/
   reminders), Live Intake Demo (a chat window driving `intake-demo.ts` —
@@ -883,6 +947,14 @@ session sees an inline "attorney-only" message instead of a background
   `AccountsService`/`DraftingService`/`DocumentsService`/`CasesService`/
   `ResearchService`/`AssistantService`/`BillingHoursService`/`AuditService`.
   Any `401` from the API redirects the browser back to `/login.html`.
+  Every field that names a person is a `<select>` populated from
+  `GET /api/staff` (showing display names, defaulting to you, and
+  excluding you from "message someone"), and every matter field offers
+  autocomplete from `GET /api/cases` via a shared `<datalist>` — matter
+  fields stay free-text on purpose, since a matter comes into existence
+  the first time someone uses its id, so the list is a convenience and
+  never a restriction. Previously all of these were raw ids typed from
+  memory, where a typo silently created a different matter.
 - `start.ts`'s boot-time bootstrap: if no accounts exist yet in the
   persisted state, it creates them from `ATTORNEY_USERNAME`/
   `ATTORNEY_PASSWORD` (and optionally `PARALEGAL_USERNAME`/

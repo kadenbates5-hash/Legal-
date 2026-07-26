@@ -57,7 +57,15 @@ telemetry; and, on the Cases panel, a PDF intake pipeline — draft a
 report from an uploaded PDF's extracted text (always flagged for
 attorney verification) or condense one into a smaller file — plus the
 interfaces a practice-area module and firm config
-plug into. See CLAUDE.md's "Not yet built" section for what's still ahead
+plug into. Docket opens on a role-aware **Home** panel showing what
+needs you, and every person/matter field is a picker rather than an id
+typed from memory. Security-wise it ships **login brute-force
+throttling** (per-username and per-IP, audited, time-boxed so it can't
+be used to lock a real attorney out permanently), a strict
+**Content-Security-Policy** with no inline script, clickjacking and
+MIME-sniffing defenses, and a hard request-body ceiling. See CLAUDE.md's
+"Transport & session security" for the details, and its "Not yet built"
+section for what's still ahead
 (the one-time Twilio console step of pointing a real phone number at
 this, MFA, Google Calendar key rotation/vendor due-diligence).
 

@@ -129,7 +129,7 @@ const intake = new IntakeDemoSessions({
  * panel (enforcing matter scoping on every draft/revise/submit) and the
  * Accounts panel (the only place assignments are made/changed).
  */
-const accounts = new AccountsService(state.auth, state.accessControl);
+const accounts = new AccountsService(state.auth, state.accessControl, state.loginThrottle);
 
 const drafting = new DraftingService({
   accessControl: state.accessControl,
@@ -304,6 +304,8 @@ const server = createReviewServer(service, state.auth, {
   billingHours,
   pdfReports,
   maxRequestBodyBytes,
+  loginThrottle: state.loginThrottle,
+  auditLog: state.auditLog,
   trustProxy,
   ...(assistant ? { assistant } : {}),
   ...voiceOptions,

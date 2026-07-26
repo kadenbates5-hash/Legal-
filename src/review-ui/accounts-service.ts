@@ -1,6 +1,7 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AccessControl, ParalegalAssignment } from "../core/access-control.js";
 import type { AuthService, User, UserRole } from "../core/auth.js";
+import { LoginThrottle } from "../core/login-throttle.js";
 
 /**
  * Attorney-facing account management. Adding/disabling users after the
@@ -45,10 +46,28 @@ function requireAttorney(actor: Actor): void {
 export class AccountsService {
   #auth: AuthService;
   #accessControl: AccessControl;
+  #loginThrottle: LoginThrottle | undefined;
 
-  constructor(auth: AuthService, accessControl: AccessControl) {
+  constructor(auth: AuthService, accessControl: AccessControl, loginThrottle?: LoginThrottle) {
     this.#auth = auth;
     this.#accessControl = accessControl;
+    this.#loginThrottle = loginThrottle;
+  }
+
+  /**
+   * Clears a brute-force lockout so a colleague who fatfingered their
+   * password five times doesn't have to sit out the full window. This is
+   * the escape hatch that makes username-keyed throttling safe to run:
+   * without it, anyone able to send failed logins could deny a real
+   * attorney access to their own matters for as long as they kept it up.
+   * Attorney-gated like everything else here, and it only clears counters
+   * — it never reveals whether the username exists or logs anyone in.
+   */
+  clearLoginLockout(actor: Actor, username: string): { cleared: boolean } {
+    requireAttorney(actor);
+    if (!this.#loginThrottle) return { cleared: false };
+    this.#loginThrottle.recordSuccess([LoginThrottle.usernameKey(username)]);
+    return { cleared: true };
   }
 
   #summarize(user: User): AccountSummary {

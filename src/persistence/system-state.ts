@@ -11,6 +11,7 @@ import { AccessControl, type ParalegalAssignment } from "../core/access-control.
 import { MessagingStore, type MessagingSnapshot } from "../core/messaging.js";
 import { StaffScheduleStore, type StaffScheduleEntry } from "../core/staff-schedule.js";
 import { BillingHoursStore, type BillingHoursEntry } from "../core/billing-hours.js";
+import { LoginThrottle, type LoginThrottleSnapshot } from "../core/login-throttle.js";
 import type { FirmConfig } from "../config/firm-config.js";
 import { fileStateStore, type StateStore } from "./state-store.js";
 
@@ -46,6 +47,8 @@ export interface SystemStateSnapshot {
   staffSchedule?: StaffScheduleEntry[];
   /** Billable-hours entries logged against a matter (see core/billing-hours.ts), backing the Billing panel. */
   billingHours?: BillingHoursEntry[];
+  /** Recent failed-login counters (see core/login-throttle.ts) — persisted so a restart can't be used to clear a lockout. */
+  loginThrottle?: LoginThrottleSnapshot;
 }
 
 export interface SystemState {
@@ -62,6 +65,7 @@ export interface SystemState {
   messaging: MessagingStore;
   staffSchedule: StaffScheduleStore;
   billingHours: BillingHoursStore;
+  loginThrottle: LoginThrottle;
 }
 
 export interface LoadSystemStateOptions {
@@ -84,6 +88,7 @@ function emptySnapshot(): SystemStateSnapshot {
     messaging: { conversations: [], messages: [] },
     staffSchedule: [],
     billingHours: [],
+    loginThrottle: { failures: [] },
   };
 }
 
@@ -105,6 +110,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const messaging = MessagingStore.fromSnapshot(snapshot.messaging ?? { conversations: [], messages: [] });
   const staffSchedule = StaffScheduleStore.fromSnapshot(snapshot.staffSchedule ?? []);
   const billingHours = BillingHoursStore.fromSnapshot(snapshot.billingHours ?? []);
+  const loginThrottle = LoginThrottle.fromSnapshot(snapshot.loginThrottle ?? { failures: [] });
   return {
     auditLog,
     utilization,
@@ -118,6 +124,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
     messaging,
     staffSchedule,
     billingHours,
+    loginThrottle,
   };
 }
 
@@ -136,6 +143,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     messaging: state.messaging.toSnapshot(),
     staffSchedule: state.staffSchedule.toSnapshot(),
     billingHours: state.billingHours.toSnapshot(),
+    loginThrottle: state.loginThrottle.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }
