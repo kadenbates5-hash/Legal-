@@ -29,6 +29,8 @@ import { BillingHoursService } from "./billing-hours-service.js";
 import { PdfReportService } from "./pdf-report-service.js";
 import { PdfParseTextExtractor } from "../integrations/pdf-text.js";
 import { PdfLibCondenser } from "../integrations/pdf-condenser.js";
+import { MattersService } from "./matters-service.js";
+import { ConflictChecker } from "../core/conflicts.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -114,12 +116,22 @@ const service = new ReviewGateService(state.workProductStore, state.deadlineTrac
  * audit trail as everything else) but gets its own AccessControl, since
  * paralegal-matter assignment has nothing to do with receptionist intake.
  */
+/**
+ * One checker shared by live intake and the Matters/Conflicts panels, so
+ * a receptionist screening a caller and an attorney running a formal
+ * check are looking at exactly the same firm records.
+ */
+const conflictChecker = new ConflictChecker(state.matters);
+
 const intake = new IntakeDemoSessions({
   accessControl: new AccessControl(state.auditLog),
   auditLog: state.auditLog,
   module: criminalLawModule,
   utilization: state.utilization,
   ...(firmConfig ? { firmConfig } : {}),
+  // Live intake screens against the firm's real matter records, not a
+  // hardcoded name list — see core/conflicts.ts.
+  conflictChecker,
 });
 
 /**
@@ -180,6 +192,20 @@ const pdfReports = new PdfReportService({
   drafting,
   extractor: new PdfParseTextExtractor(),
   condenser: new PdfLibCondenser(),
+});
+
+/**
+ * Backs the "Matters" and "Conflicts" panels. The conflicts checker gets
+ * the whole matter store on purpose — ABA Model Rule 1.10 imputes one
+ * lawyer's conflict to the firm, so a check scoped to the caller's own
+ * matters would return a dangerously clean answer. `MattersService` is
+ * what limits who may run a check and what comes back.
+ */
+const matters = new MattersService({
+  store: state.matters,
+  checker: conflictChecker,
+  accessControl: state.accessControl,
+  auditLog: state.auditLog,
 });
 
 /** Backs the attorney-only "Audit Log" panel — see audit-service.ts. */
@@ -303,6 +329,7 @@ const server = createReviewServer(service, state.auth, {
   staffSchedule,
   billingHours,
   pdfReports,
+  matters,
   maxRequestBodyBytes,
   loginThrottle: state.loginThrottle,
   auditLog: state.auditLog,

@@ -23,6 +23,8 @@ import type { StaffScheduleService } from "./staff-schedule-service.js";
 import type { StaffScheduleStatus } from "../core/staff-schedule.js";
 import type { BillingHoursService } from "./billing-hours-service.js";
 import type { PdfReportService } from "./pdf-report-service.js";
+import type { MattersService } from "./matters-service.js";
+import type { MatterStatus, PartyRole } from "../core/matters.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { verifyTwilioSignature, twimlPlayThenRecord, twimlPlayThenHangup, downloadTwilioRecording } from "../integrations/twilio-voice.js";
@@ -255,6 +257,7 @@ function errorStatus(err: unknown): number {
   if (err instanceof Error && err.message.startsWith("no intake demo session")) return 404;
   if (err instanceof Error && err.message.startsWith("no user")) return 404;
   if (err instanceof Error && err.message.startsWith("no document")) return 404;
+  if (err instanceof Error && err.message.startsWith("no matter")) return 404;
   if (err instanceof Error && err.message.startsWith("no saved reference")) return 404;
   if (err instanceof Error && err.message.startsWith("no assistant session")) return 404;
   if (err instanceof Error && err.message.startsWith("cannot disable")) return 409;
@@ -367,6 +370,7 @@ export interface ReviewServerOptions {
   staffSchedule?: StaffScheduleService;
   billingHours?: BillingHoursService;
   pdfReports?: PdfReportService;
+  matters?: MattersService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
   /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
@@ -421,6 +425,7 @@ async function handleRequest(
     staffSchedule,
     billingHours,
     pdfReports,
+    matters,
     voiceCalls,
     audioClips,
     twilio,
@@ -625,6 +630,15 @@ async function handleRequest(
         return;
       }
       await handleBillingHoursRequest(billingHours, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/matters") || url.pathname.startsWith("/api/conflicts")) {
+      if (!matters) {
+        sendJson(res, 404, { error: "matters are not configured on this server" });
+        return;
+      }
+      await handleMattersRequest(matters, req, res, actor, url, onMutated);
       return;
     }
 
@@ -1053,6 +1067,80 @@ async function handleDocumentsRequest(
   if (segments.length === 3 && req.method === "DELETE") {
     documents.delete(actor, matterId, id);
     sendJson(res, 200, { ok: true });
+    onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleMattersRequest(
+  matters: MattersService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  // Conflicts screening is firm-wide by design (Rule 1.10 imputation), so
+  // it deliberately isn't nested under a matter id.
+  if (url.pathname === "/api/conflicts/check" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const names = Array.isArray(body["names"]) ? body["names"].map(String) : [];
+    const result = matters.checkConflicts(actor, {
+      names,
+      ...(body["roleByName"] && typeof body["roleByName"] === "object"
+        ? { roleByName: body["roleByName"] as Record<string, PartyRole> }
+        : {}),
+      ...(typeof body["excludeMatterId"] === "string" && body["excludeMatterId"]
+        ? { excludeMatterId: body["excludeMatterId"] }
+        : {}),
+    });
+    sendJson(res, 200, result);
+    // A conflicts check writes an audit entry, so it counts as a mutation.
+    onMutated?.();
+    return;
+  }
+
+  const segments = url.pathname.replace(/^\/api\/matters\/?/, "").split("/").filter(Boolean);
+
+  if (segments.length === 0 && req.method === "GET") {
+    sendJson(res, 200, matters.list(actor));
+    return;
+  }
+
+  const matterId = segments[0];
+  if (!matterId) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+
+  if (segments.length === 1 && req.method === "GET") {
+    sendJson(res, 200, matters.get(actor, matterId));
+    return;
+  }
+
+  if (segments.length === 1 && req.method === "PUT") {
+    const body = await readJsonBody(req);
+    const parties = Array.isArray(body["parties"])
+      ? body["parties"].map((p) => {
+          const party = p as Record<string, unknown>;
+          return {
+            name: String(party["name"] ?? ""),
+            role: (party["role"] as PartyRole) ?? "related",
+            note: typeof party["note"] === "string" && party["note"] ? party["note"] : undefined,
+          };
+        })
+      : undefined;
+    const result = matters.upsert(actor, matterId, {
+      ...(typeof body["title"] === "string" ? { title: body["title"] } : {}),
+      ...(typeof body["status"] === "string" ? { status: body["status"] as MatterStatus } : {}),
+      ...(typeof body["practiceAreaId"] === "string" ? { practiceAreaId: body["practiceAreaId"] } : {}),
+      ...(typeof body["responsibleAttorneyId"] === "string" ? { responsibleAttorneyId: body["responsibleAttorneyId"] } : {}),
+      ...(typeof body["description"] === "string" ? { description: body["description"] } : {}),
+      ...(parties ? { parties } : {}),
+    });
+    sendJson(res, 200, result);
     onMutated?.();
     return;
   }

@@ -259,6 +259,22 @@ describe("system-state persistence integration", () => {
     expect(reloaded.staffSchedule.listForActor("a1")[0]!.status).toBe("in_office");
   });
 
+  it("persists and reloads matter records (the input to conflicts screening) across a restart", async () => {
+    const state = await loadSystemState(filePath);
+    state.matters.upsert("m-1", {
+      title: "State v. Ruiz",
+      status: "open",
+      parties: [{ name: "Carlos Ruiz", role: "client", note: undefined }],
+    });
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    const restored = reloaded.matters.get("m-1");
+    expect(restored?.title).toBe("State v. Ruiz");
+    expect(restored?.parties[0]?.name).toBe("Carlos Ruiz");
+  });
+
   it("persists and reloads billing hours entries across a process restart", async () => {
     const state = await loadSystemState(filePath);
     const entry = state.billingHours.log({ matterId: "m1", actorId: "p1", date: "2026-07-28", hours: 2, description: "Discovery review" });

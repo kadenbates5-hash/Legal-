@@ -6,6 +6,7 @@ import type { AuditLog } from "../core/audit.js";
 import type { PracticeAreaModule } from "../config/practice-area.js";
 import type { Actor } from "../core/types.js";
 import type { FirmConfig } from "../config/firm-config.js";
+import type { ConflictChecker } from "../core/conflicts.js";
 import type { UtilizationTracker } from "../core/utilization.js";
 
 export interface IntakeDemoTurn {
@@ -35,6 +36,8 @@ export class IntakeDemoSessions {
   #module: PracticeAreaModule;
   #utilization: UtilizationTracker | undefined;
   #firmConfig: FirmConfig | undefined;
+  /** Firm-wide conflicts screen. Optional so a firm with no matter records yet still runs intake. */
+  #conflictChecker: ConflictChecker | undefined;
 
   constructor(params: {
     accessControl: AccessControl;
@@ -42,11 +45,13 @@ export class IntakeDemoSessions {
     module: PracticeAreaModule;
     utilization?: UtilizationTracker;
     firmConfig?: FirmConfig;
+    conflictChecker?: ConflictChecker;
   }) {
     this.#router = new Router(params.accessControl, params.auditLog);
     this.#module = params.module;
     this.#utilization = params.utilization;
     this.#firmConfig = params.firmConfig;
+    this.#conflictChecker = params.conflictChecker;
   }
 
   start(actor: Actor): { sessionId: string; turn: IntakeDemoTurn } {
@@ -58,6 +63,7 @@ export class IntakeDemoSessions {
       actor,
       ...(this.#utilization ? { utilization: this.#utilization } : {}),
       ...(this.#firmConfig ? { firmConfig: this.#firmConfig } : {}),
+      ...(this.#conflictChecker ? { conflictChecker: this.#conflictChecker } : {}),
     });
     this.#sessions.set(sessionId, session);
     return { sessionId, turn: { reply: session.greet(), done: false } };

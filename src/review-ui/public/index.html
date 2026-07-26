@@ -18,6 +18,7 @@
     <button data-panel="intake"><span class="dot"></span>Live Intake Demo</button>
     <button data-panel="drafting" id="navDrafting" hidden><span class="dot"></span>Drafting</button>
     <button data-panel="cases" id="navCases" hidden><span class="dot"></span>Cases</button>
+    <button data-panel="conflicts" id="navConflicts" hidden><span class="dot"></span>Conflicts</button>
     <button data-panel="research" id="navResearch" hidden><span class="dot"></span>Research</button>
     <button data-panel="assistant" id="navAssistant" hidden><span class="dot"></span>Assistant</button>
     <button data-panel="staff" id="navStaff"><span class="dot"></span>Staff</button>
@@ -230,6 +231,57 @@
         <ul id="casesList" class="list"></ul>
       </div>
       <div id="caseDetail"></div>
+    </section>
+
+    <!-- ===== Conflicts (paralegal/attorney) ===== -->
+    <section class="panel" id="panel-conflicts">
+      <p class="subtitle">Screen names against every matter the firm has on record before taking on new work. ABA Model Rule 1.10 imputes one lawyer's conflict to the whole firm, so this searches everything — not just your own matters. Results are candidates for an attorney to judge; nothing here clears itself.</p>
+      <div class="card">
+        <h3>Run a check</h3>
+        <div class="field-row">
+          <label class="field grow">Names (one per line — prospective client, opposing parties, anyone involved)
+            <textarea id="conflictNames" rows="4" placeholder="Jane Doe&#10;Acme Corp"></textarea>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field">These names would be our
+            <select id="conflictRole">
+              <option value="client">client (we'd represent them)</option>
+              <option value="adverse">adverse party (we'd act against them)</option>
+            </select>
+          </label>
+          <button class="btn primary" id="runConflictCheck">Run conflicts check</button>
+        </div>
+        <div id="conflictVerdict"></div>
+        <ul id="conflictHits" class="list"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Matter record</h3>
+        <p class="subtitle-inline">Who the client and opposing parties are. These are what every future conflicts check searches, so keeping them accurate is what makes screening work. Editing is attorney-only.</p>
+        <div class="field-row">
+          <label class="field">Matter ID <input id="matterRecordId" list="matterOptions" autocomplete="off" /></label>
+          <button class="btn" id="loadMatterRecord">Load</button>
+        </div>
+        <div class="field-row">
+          <label class="field grow">Title <input id="matterTitle" placeholder="State v. Ruiz" /></label>
+          <label class="field">Status
+            <select id="matterStatus">
+              <option value="prospective">prospective</option>
+              <option value="open">open</option>
+              <option value="closed">closed</option>
+            </select>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field grow">Client name(s), one per line <textarea id="matterClients" rows="2"></textarea></label>
+          <label class="field grow">Adverse party name(s), one per line <textarea id="matterAdverse" rows="2"></textarea></label>
+        </div>
+        <div class="field-row">
+          <button class="btn primary" id="saveMatterRecord">Save matter record</button>
+        </div>
+        <ul id="matterList" class="list"></ul>
+      </div>
     </section>
 
     <!-- ===== Research (paralegal/attorney) ===== -->

@@ -682,6 +682,80 @@ recompress embedded images when condensing (see `pdf-condenser.ts`'s doc
 comment above) — a scanned, image-heavy PDF condenses poorly by design,
 not by bug.
 
+## Matters and conflict-of-interest screening
+
+The one thing a law firm is *ethically obliged* to get right before
+taking on work, and the biggest domain gap this project had: conflicts
+screening ran as `lowered.includes(name)` against a hardcoded list
+passed into the chat session, and there was no firm-wide record of who
+any client or adversary actually was.
+
+- `core/matters.ts` — `MatterStore`. Until now a "matter" was just a
+  `matterId` string that `WorkProductStore`/`DocumentStore`/
+  `BillingHoursStore`/`AccessControl` happened to key on. A `Matter`
+  record adds what screening needs: title, status
+  (`prospective`/`open`/`closed`), responsible attorney, and **parties**
+  with a `client`/`adverse`/`related` role. Deliberately keyed on the
+  same `matterId` string rather than a new primary key, so every
+  existing store keeps working untouched and a matter can still be
+  referenced before its record is filled in. A record here is
+  *descriptive* — `AccessControl` remains the only thing deciding who
+  can see what.
+- `core/conflicts.ts` — `ConflictChecker`. Screens names against every
+  matter in the firm, because **ABA Model Rule 1.10 imputes one
+  lawyer's conflict to the whole firm** — a check scoped to the
+  caller's own matters would return a dangerously clean answer.
+  Classifies hits as `direct` (Rule 1.7, adverse to a current client),
+  `former_client` (Rule 1.9, adverse to a closed matter — turns on
+  whether the matters are substantially related, which is an attorney's
+  call, not the software's), `same_side`, or `informational`.
+  - **It deliberately over-matches.** A false positive costs a minute of
+    reading; a false negative is a rule violation and possibly
+    disqualification. `normalizeName()` handles the shapes intake
+    actually produces — `"SMITH, John Q."` vs `"john smith"`, honorifics
+    and generational/professional suffixes, diacritics, and entity
+    suffixes so `"Acme, Inc."` and `"ACME Corporation"` are one
+    adversary. `compareNames()` grades a match `exact` / `strong`
+    (subset-of-tokens, so a middle name doesn't defeat it) / `possible`
+    (same surname and first initial) so a human can triage.
+  - Nothing auto-clears. The result is an input to an attorney's
+    judgement, the same philosophy as the review gate.
+- `review-ui/matters-service.ts` — two *different* access shapes on
+  purpose. Matter records are matter-scoped like everything else (a
+  paralegal sees only their assigned matter), and **editing one is
+  attorney-only**, since those party fields are the input to every
+  future check — letting them be edited more widely would let someone
+  quietly weaken the firm's screening. Conflict *checking* is
+  deliberately not matter-scoped, per Rule 1.10 above; the result is
+  limited to what discharging the duty requires (which matter, its
+  title/status, the matching party), and **every check is audited**,
+  because being able to show that a check was run, by whom, over which
+  names, is itself part of the obligation.
+- `receptionist/chat-agent.ts` now runs the real firm-wide screen at the
+  conflict gate, OR'd with the legacy literal-name list — never instead
+  of it. `signal-extraction.ts`'s `extractCandidatePartyNames()` pulls
+  capitalized runs out of the caller's answer (falling back to the whole
+  answer when nothing is capitalized, so an all-lower-case typist is
+  still screened).
+  - Candidates are screened as **adverse**, because that's the reading
+    that actually stops an intake: screening them as "client" would only
+    ever yield same-side/informational hits, which by design don't
+    block, so a real Rule 1.7 conflict would sail straight through. The
+    accepted cost is that an existing client who names themselves here
+    can trip the gate and get handed to an attorney — the safe direction
+    to be wrong, and the same tradeoff `signal-extraction.ts` already
+    makes for escalation triggers.
+- `server.ts` wires `GET /api/matters`, `GET|PUT /api/matters/:matterId`
+  and `POST /api/conflicts/check` (404 if no `MattersService` was
+  passed). The UI is the "Conflicts" panel: run a check, read the hits
+  with their rule citations, and maintain the matter records that make
+  screening work.
+
+What this does **not** do: decide whether a conflict is waivable, judge
+whether two matters are "substantially related" under Rule 1.9, or know
+anything about matters the firm never wrote down — the panel says that
+last part out loud on a clean result, rather than implying an all-clear.
+
 ## Transport & session security
 
 Hardening that applies to every route, independent of any one panel.
@@ -829,8 +903,8 @@ distinct trust levels:
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over fifteen panels — Home, Review Queue, Deadlines,
-Scheduling, Live Intake Demo, Drafting, Cases, Research, Assistant,
+between sections) over sixteen panels — Home, Review Queue, Deadlines,
+Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Research, Assistant,
 Staff, Messages, Schedule, Billing, Accounts, and Audit Log (Drafting/
 Cases/Research/Assistant/Billing and Accounts/Audit Log hidden from the
 nav for roles that can't use them; Staff/Messages/Schedule are open to

@@ -87,3 +87,49 @@ export function extractSignalsFromText(text: string): Partial<EscalationSignals>
 
   return signals;
 }
+
+/**
+ * Pulls candidate party names out of a caller's free-text answer, for
+ * firm-wide conflicts screening (see `core/conflicts.ts`).
+ *
+ * Capitalized runs are the signal: "I'm being sued by Acme Corp" yields
+ * "Acme Corp". Over-extraction is harmless here and under-extraction is
+ * not — a spurious candidate simply matches nothing in the firm's
+ * records, whereas a missed one is a conflict that slipped through. That
+ * asymmetry is the same reason the escalation extractors above prefer to
+ * over-trigger.
+ *
+ * Falls back to the whole answer when nothing is capitalized, so a caller
+ * who types entirely in lower case is still screened rather than silently
+ * skipped.
+ */
+const NAME_STOPWORDS = new Set([
+  "i", "i'm", "im", "my", "me", "we", "he", "she", "they", "the", "a", "an", "and", "or", "but",
+  "is", "was", "are", "were", "am", "be", "been", "it", "this", "that", "there", "here",
+  "yes", "no", "ok", "okay", "hi", "hello", "please", "thanks", "thank",
+  "mr", "mrs", "ms", "miss", "dr",
+]);
+
+export function extractCandidatePartyNames(text: string): string[] {
+  const candidates = new Set<string>();
+  // Runs of 1-4 capitalized words, e.g. "John Q Smith", "Acme Corp".
+  const runs = text.match(/\b[A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,3}\b/g) ?? [];
+  for (const run of runs) {
+    const trimmed = run.trim();
+    if (!trimmed) continue;
+    const words = trimmed.split(/\s+/);
+    // A lone capitalized word is usually just a sentence opener; keep it
+    // only when it isn't an obvious stopword and is long enough to be a
+    // real name rather than an initial.
+    if (words.length === 1) {
+      const lone = words[0]!.toLowerCase().replace(/[^a-z']/g, "");
+      if (lone.length < 3 || NAME_STOPWORDS.has(lone)) continue;
+    }
+    candidates.add(trimmed);
+  }
+  if (candidates.size === 0) {
+    const fallback = text.trim();
+    if (fallback) candidates.add(fallback);
+  }
+  return [...candidates];
+}

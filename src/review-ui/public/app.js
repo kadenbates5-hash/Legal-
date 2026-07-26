@@ -6,6 +6,7 @@ const PANEL_TITLES = {
   intake: "Live Intake Demo",
   drafting: "Drafting",
   cases: "Cases",
+  conflicts: "Conflicts",
   research: "Research",
   assistant: "Assistant",
   staff: "Staff",
@@ -22,7 +23,7 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
     for (const b of document.querySelectorAll("nav.nav button")) b.classList.toggle("active", b === btn);
     for (const s of document.querySelectorAll("section.panel")) s.classList.toggle("active", s.id === `panel-${panel}`);
     document.getElementById("panelTitle").textContent = PANEL_TITLES[panel] || "";
-    if (["messages", "staff-schedule", "drafting", "billing", "research", "cases", "scheduling"].includes(panel)) {
+    if (["messages", "staff-schedule", "drafting", "billing", "research", "cases", "scheduling", "conflicts"].includes(panel)) {
       refreshPickers();
     }
     if (panel === "home") loadHome();
@@ -67,6 +68,7 @@ async function loadWhoami() {
     if (me.role === "attorney" || me.role === "paralegal") {
       document.getElementById("navDrafting").hidden = false;
       document.getElementById("navCases").hidden = false;
+      document.getElementById("navConflicts").hidden = false;
       document.getElementById("navResearch").hidden = false;
       document.getElementById("navAssistant").hidden = false;
       document.getElementById("navBilling").hidden = false;
@@ -1528,3 +1530,162 @@ async function loadHome() {
   }
   if (today.children.length === 0) today.innerHTML = '<li class="static empty">Nothing scheduled.</li>';
 }
+
+/* ===== Conflicts =====
+   Deliberately presents every hit rather than reducing the check to a
+   yes/no. A conflicts screen is an input to an attorney's judgement
+   (is this matter "substantially related" under Rule 1.9?), not a
+   decision the software gets to make. */
+const SEVERITY_LABEL = {
+  direct: "direct conflict",
+  former_client: "former-client conflict",
+  same_side: "existing client",
+  informational: "for information",
+};
+const SEVERITY_BADGE = {
+  direct: "rejected",
+  former_client: "pending_review",
+  same_side: "confirmed",
+  informational: "",
+};
+
+function linesOf(id) {
+  return document
+    .getElementById(id)
+    .value.split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+async function runConflictCheck() {
+  showError("");
+  const verdict = document.getElementById("conflictVerdict");
+  const hitList = document.getElementById("conflictHits");
+  try {
+    const names = linesOf("conflictNames");
+    if (names.length === 0) {
+      verdict.innerHTML = '<p class="subtitle-inline">Enter at least one name.</p>';
+      hitList.innerHTML = "";
+      return;
+    }
+    const role = document.getElementById("conflictRole").value;
+    const roleByName = Object.fromEntries(names.map((n) => [n, role]));
+    const result = await api("/api/conflicts/check", { method: "POST", body: JSON.stringify({ names, roleByName }) });
+
+    verdict.innerHTML = result.requiresAttorneyReview
+      ? `<div class="flags"><strong>Attorney review required.</strong> ${result.hits.length} match(es) found — do not open this matter until an attorney has cleared them.</div>`
+      : result.hits.length
+        ? `<p class="subtitle-inline">${result.hits.length} match(es) found, none directly adverse. Confirm they're the same people before proceeding.</p>`
+        : `<p class="subtitle-inline">No matches in the firm's recorded matters. Note this only covers matters that have been written down here.</p>`;
+
+    hitList.innerHTML = "";
+    for (const h of result.hits) {
+      hitList.appendChild(
+        (() => {
+          const li = document.createElement("li");
+          li.classList.add("static");
+          li.innerHTML = `<span class="badge ${SEVERITY_BADGE[h.severity] || ""}">${escapeHtml(SEVERITY_LABEL[h.severity] || h.severity)}</span>
+            <span class="badge">${escapeHtml(h.matchStrength)} match</span>
+            <strong>${escapeHtml(h.searchedName)}</strong> ↔ <strong>${escapeHtml(h.matchedName)}</strong>
+            <div class="mt-xs">${escapeHtml(h.matterTitle)} <span class="badge">${escapeHtml(h.matterId)}</span> <span class="badge">${escapeHtml(h.matterStatus)}</span></div>
+            <div class="meta-tight">${escapeHtml(h.explanation)}</div>`;
+          return li;
+        })(),
+      );
+    }
+    if (result.hits.length === 0) hitList.innerHTML = '<li class="static empty">No matches.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+function partiesToTextareas(matter) {
+  const pick = (role) =>
+    (matter.parties || [])
+      .filter((p) => p.role === role)
+      .map((p) => p.name)
+      .join("\n");
+  document.getElementById("matterClients").value = pick("client");
+  document.getElementById("matterAdverse").value = pick("adverse");
+}
+
+async function loadMatterRecord() {
+  showError("");
+  try {
+    const id = document.getElementById("matterRecordId").value.trim();
+    if (!id) return;
+    const matter = await api(`/api/matters/${encodeURIComponent(id)}`);
+    document.getElementById("matterTitle").value = matter.title || "";
+    document.getElementById("matterStatus").value = matter.status || "open";
+    partiesToTextareas(matter);
+  } catch (err) {
+    // A matter with no record yet is the normal case, not an error worth shouting about.
+    if (/no matter/i.test(err.message)) {
+      document.getElementById("matterTitle").value = "";
+      document.getElementById("matterClients").value = "";
+      document.getElementById("matterAdverse").value = "";
+      showError("No record for that matter yet — fill this in and save to create one.");
+    } else {
+      showError(err.message);
+    }
+  }
+}
+
+async function saveMatterRecord() {
+  showError("");
+  try {
+    const id = document.getElementById("matterRecordId").value.trim();
+    if (!id) return;
+    const parties = [
+      ...linesOf("matterClients").map((name) => ({ name, role: "client" })),
+      ...linesOf("matterAdverse").map((name) => ({ name, role: "adverse" })),
+    ];
+    await api(`/api/matters/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: document.getElementById("matterTitle").value.trim(),
+        status: document.getElementById("matterStatus").value,
+        parties,
+      }),
+    });
+    await loadMatterList();
+    await refreshMatterOptions();
+    showError("Matter record saved.");
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadMatterList() {
+  const list = document.getElementById("matterList");
+  if (!list) return;
+  try {
+    const all = await api("/api/matters");
+    list.innerHTML = "";
+    for (const m of all) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      const clients = (m.parties || []).filter((p) => p.role === "client").map((p) => p.name);
+      const adverse = (m.parties || []).filter((p) => p.role === "adverse").map((p) => p.name);
+      li.innerHTML = `<strong>${escapeHtml(m.title)}</strong>
+        <span class="badge">${escapeHtml(m.matterId)}</span>
+        <span class="badge ${m.status === "closed" ? "rejected" : "approved"}">${escapeHtml(m.status)}</span>
+        <div class="meta-tight">Client: ${escapeHtml(clients.join(", ") || "—")} · Adverse: ${escapeHtml(adverse.join(", ") || "—")}</div>`;
+      const open = mkButton("Edit", () => {
+        document.getElementById("matterRecordId").value = m.matterId;
+        loadMatterRecord();
+      });
+      li.appendChild(document.createElement("br"));
+      li.appendChild(open);
+      list.appendChild(li);
+    }
+    if (all.length === 0) list.innerHTML = '<li class="static empty">No matter records yet. Conflicts screening only covers matters recorded here.</li>';
+  } catch (err) {
+    list.innerHTML = '<li class="static empty">Matter records are paralegal/attorney-only.</li>';
+  }
+}
+
+document.getElementById("runConflictCheck").addEventListener("click", runConflictCheck);
+document.getElementById("loadMatterRecord").addEventListener("click", loadMatterRecord);
+document.getElementById("saveMatterRecord").addEventListener("click", saveMatterRecord);
+document.getElementById("navConflicts").addEventListener("click", loadMatterList);

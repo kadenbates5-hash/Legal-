@@ -1,12 +1,13 @@
 import { Router, newIntakeState, type IntakeState } from "../core/router.js";
 import type { EscalationSignals, RouteDirective } from "../core/escalation.js";
 import { disclosurePolicyFor } from "../core/confidentiality.js";
-import { extractSignalsFromText, parseHoursUntil } from "./signal-extraction.js";
+import { extractSignalsFromText, extractCandidatePartyNames, parseHoursUntil } from "./signal-extraction.js";
 import { BILLING_HANDOFF_SCRIPT, DIRECTIVE_SCRIPTS, OUTRO_CLEARED_FOR_INTAKE, RECORDING_CONSENT_REFUSED_SCRIPT, WRAP_UP, greetingFor, recordingConsentScriptFor } from "./scripts.js";
 import { RECORDING_CONSENT_REFUSAL_RE } from "./signal-extraction.js";
 import type { IntakeQuestion, PracticeAreaModule } from "../config/practice-area.js";
 import type { Actor } from "../core/types.js";
 import type { UtilizationTracker } from "../core/utilization.js";
+import type { ConflictChecker } from "../core/conflicts.js";
 import { isWithinBusinessHours, type FirmConfig } from "../config/firm-config.js";
 
 /**
@@ -61,6 +62,7 @@ export class ReceptionistChatSession {
   #utilization: UtilizationTracker | undefined;
   #utilizationEntryId: string | undefined;
   #conflictedNames: string[];
+  #conflictChecker: ConflictChecker | undefined;
   #orderedQuestions: IntakeQuestion[];
 
   #state: IntakeState;
@@ -76,7 +78,10 @@ export class ReceptionistChatSession {
     module: PracticeAreaModule;
     router: Router;
     actor: Actor;
+    /** Legacy stand-in, kept for tests and for a firm with no matter records yet. Prefer `conflictChecker`. */
     conflictedNames?: string[];
+    /** The real firm-wide screen (see core/conflicts.ts). When present it runs *in addition to* conflictedNames — never instead of. */
+    conflictChecker?: ConflictChecker;
     utilization?: UtilizationTracker;
     /** §1 layer 3: drives greeting branding, after-hours notice, and consent-disclosure wording. Never affects escalation. */
     firmConfig?: FirmConfig;
@@ -88,6 +93,7 @@ export class ReceptionistChatSession {
     this.#actor = params.actor;
     this.#utilization = params.utilization;
     this.#conflictedNames = (params.conflictedNames ?? []).map((n) => n.toLowerCase());
+    this.#conflictChecker = params.conflictChecker;
     this.#orderedQuestions = orderIntakeQuestions(params.module.intakeQuestions);
     this.#state = newIntakeState({ matterId: params.matterId, callerType: "unknown" });
     this.#firmConfig = params.firmConfig;
@@ -127,7 +133,28 @@ export class ReceptionistChatSession {
     } else if (this.#pendingGate === "hold_for_conflict_check") {
       this.#state.conflictCheckRun = true;
       const lowered = text.toLowerCase();
-      const conflict = this.#conflictedNames.some((name) => lowered.includes(name));
+      // Two screens, OR'd together — never one instead of the other. The
+      // literal list is a firm-supplied override; the checker is the real
+      // firm-wide screen over recorded matter parties (ABA Rule 1.10
+      // imputes a conflict across the whole firm). A caller naming an
+      // adverse party in an open matter must stop here, which is exactly
+      // what the old substring-only check would miss.
+      const listHit = this.#conflictedNames.some((name) => lowered.includes(name));
+      const candidateNames = extractCandidatePartyNames(text);
+      const checkerHit =
+        this.#conflictChecker?.check({
+          names: candidateNames,
+          // At this gate we can't tell from free text which side a named
+          // person is on, so every candidate is screened as *adverse* —
+          // the reading that actually stops an intake. Screening them as
+          // "client" instead would only ever produce same-side or
+          // informational hits, which by design don't block, so a real
+          // Rule 1.7 conflict would sail straight through. Over-flagging
+          // here costs an attorney a glance; under-flagging is the
+          // malpractice case.
+          roleByName: Object.fromEntries(candidateNames.map((n) => [n, "adverse" as const])),
+        }).requiresAttorneyReview ?? false;
+      const conflict = listHit || checkerHit;
       this.#state.conflictCheckResolved = !conflict;
       if (conflict) {
         return this.#finish(

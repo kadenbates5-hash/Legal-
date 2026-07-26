@@ -57,7 +57,14 @@ telemetry; and, on the Cases panel, a PDF intake pipeline — draft a
 report from an uploaded PDF's extracted text (always flagged for
 attorney verification) or condense one into a smaller file — plus the
 interfaces a practice-area module and firm config
-plug into. Docket opens on a role-aware **Home** panel showing what
+plug into; and a **Conflicts** panel with real matter records (client and
+adverse parties) behind a firm-wide conflict-of-interest screen —
+name-normalizing so "Acme, Inc." and "ACME Corporation" are one
+adversary, classifying hits against ABA Model Rules 1.7/1.9 and
+searching every matter because Rule 1.10 imputes a conflict to the whole
+firm, auditing every check, and wired into live intake so a caller who
+names a current client stops the conversation. Docket opens on a
+role-aware **Home** panel showing what
 needs you, and every person/matter field is a picker rather than an id
 typed from memory. Security-wise it ships **login brute-force
 throttling** (per-username and per-IP, audited, time-boxed so it can't

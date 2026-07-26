@@ -12,6 +12,7 @@ import { MessagingStore, type MessagingSnapshot } from "../core/messaging.js";
 import { StaffScheduleStore, type StaffScheduleEntry } from "../core/staff-schedule.js";
 import { BillingHoursStore, type BillingHoursEntry } from "../core/billing-hours.js";
 import { LoginThrottle, type LoginThrottleSnapshot } from "../core/login-throttle.js";
+import { MatterStore, type Matter } from "../core/matters.js";
 import type { FirmConfig } from "../config/firm-config.js";
 import { fileStateStore, type StateStore } from "./state-store.js";
 
@@ -49,6 +50,8 @@ export interface SystemStateSnapshot {
   billingHours?: BillingHoursEntry[];
   /** Recent failed-login counters (see core/login-throttle.ts) — persisted so a restart can't be used to clear a lockout. */
   loginThrottle?: LoginThrottleSnapshot;
+  /** Matter records: client/adverse parties, status, responsible attorney (see core/matters.ts). The input to conflicts screening. */
+  matters?: Matter[];
 }
 
 export interface SystemState {
@@ -66,6 +69,7 @@ export interface SystemState {
   staffSchedule: StaffScheduleStore;
   billingHours: BillingHoursStore;
   loginThrottle: LoginThrottle;
+  matters: MatterStore;
 }
 
 export interface LoadSystemStateOptions {
@@ -89,6 +93,7 @@ function emptySnapshot(): SystemStateSnapshot {
     staffSchedule: [],
     billingHours: [],
     loginThrottle: { failures: [] },
+    matters: [],
   };
 }
 
@@ -111,6 +116,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const staffSchedule = StaffScheduleStore.fromSnapshot(snapshot.staffSchedule ?? []);
   const billingHours = BillingHoursStore.fromSnapshot(snapshot.billingHours ?? []);
   const loginThrottle = LoginThrottle.fromSnapshot(snapshot.loginThrottle ?? { failures: [] });
+  const matters = MatterStore.fromSnapshot(snapshot.matters ?? []);
   return {
     auditLog,
     utilization,
@@ -125,6 +131,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
     staffSchedule,
     billingHours,
     loginThrottle,
+    matters,
   };
 }
 
@@ -144,6 +151,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     staffSchedule: state.staffSchedule.toSnapshot(),
     billingHours: state.billingHours.toSnapshot(),
     loginThrottle: state.loginThrottle.toSnapshot(),
+    matters: state.matters.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }
