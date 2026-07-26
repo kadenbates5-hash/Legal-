@@ -82,3 +82,40 @@ the table (`docket_state`) is created automatically on first connect. Set
 `TRUST_PROXY=true` only when actually deployed behind a reverse proxy that
 terminates TLS and sets `X-Forwarded-Proto` itself — never on a
 directly-exposed process.
+
+## Deploying (e.g. Railway)
+
+The app is a plain Node HTTP server (`npm run build && npm start`,
+respects `PORT`), so it runs on any Node-hosting PaaS. Railway steps:
+
+1. Push this repo to GitHub (already done if you're reading this from a
+   clone) and create a new Railway project from it — Railway's Nixpacks
+   builder auto-detects `npm run build` (build command) and `npm start`
+   (start command) from `package.json`.
+2. Set environment variables on the Railway service: at minimum
+   `ATTORNEY_USERNAME` / `ATTORNEY_PASSWORD` (first-boot login seed —
+   see "Real authentication" in CLAUDE.md) and `TRUST_PROXY=true`
+   (Railway terminates TLS in front of your service, so the session
+   cookie needs to know to trust `X-Forwarded-Proto`). Add any of the
+   optional integration env vars from the Commands section in CLAUDE.md
+   as needed (Twilio, Voicebox, CourtListener, Anthropic, Google
+   Calendar).
+3. **Attach a persistent Volume** if you're staying on the file-backed
+   store (the default — no `DATABASE_URL` set): mount it at whatever
+   `STATE_FILE`'s directory resolves to (default `./data`, so mount at
+   `/app/data` and leave `STATE_FILE` unset, or set `STATE_FILE` to a
+   path inside the volume). **This step is not optional** — most PaaS
+   containers, Railway included, wipe the filesystem on every redeploy
+   or restart; without a mounted volume, every account/matter/message
+   this app has ever stored disappears the next time you ship a change.
+   Moving to Postgres (set `DATABASE_URL` to a Railway Postgres
+   add-on's connection string) sidesteps this entirely, since the
+   database is a separate, persistent service — see "Persistence" in
+   CLAUDE.md for that tradeoff.
+4. Deploy. Railway assigns a public URL and sets `PORT` itself — `start.ts`
+   already reads it. Once it's up, visit `https://<your-app>.up.railway.app/login.html`.
+
+The same shape (build once, run `node dist/review-ui/start.js`, read
+`PORT`/`DATABASE_URL`/`TRUST_PROXY` from the environment) works on
+Render or Fly.io too — only the console steps for setting env vars and
+attaching persistent storage differ.
