@@ -338,3 +338,28 @@
 .diff .diff-from { color: var(--danger); text-decoration: line-through; }
 .diff .diff-to { color: var(--ok); }
 .integrity-ok { color: var(--ok); font-size: 0.85rem; margin: 0; }
+
+/* ---------- Global search ---------- */
+.global-search {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.82rem;
+  min-width: 240px;
+  color: var(--text);
+}
+.global-search:focus { outline: none; border-color: var(--accent); }
+.hit-kind {
+  display: inline-block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  margin-right: 0.4rem;
+}
+.hit-snippet { font-size: 0.82rem; margin-top: 0.25rem; line-height: 1.45; }
+.hit-snippet mark { background: var(--warn-soft); color: inherit; padding: 0 0.1rem; border-radius: 2px; }

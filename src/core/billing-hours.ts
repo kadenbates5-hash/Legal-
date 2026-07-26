@@ -46,6 +46,11 @@ export class BillingHoursStore {
     return this.#byId.get(id);
   }
 
+  /** Every entry, unscoped — callers are responsible for access control (see `SearchService`). */
+  listAll(): BillingHoursEntry[] {
+    return [...this.#byId.values()].map((e) => ({ ...e }));
+  }
+
   listByMatter(matterId: string): BillingHoursEntry[] {
     return [...this.#byId.values()].filter((e) => e.matterId === matterId);
   }

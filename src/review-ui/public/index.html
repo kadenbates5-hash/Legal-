@@ -39,6 +39,8 @@
   <div class="topbar">
     <h1 id="panelTitle">Home</h1>
     <div class="who">
+      <input id="globalSearch" class="global-search" type="search" placeholder="Search matters, drafts, files…" hidden
+             autocomplete="off" aria-label="Search everything you can see" />
       <span id="whoami"></span>
       <button class="btn" id="changePasswordBtn">Change password</button>
       <button class="btn" id="logout">Log out</button>
@@ -59,6 +61,20 @@
       <div class="card">
         <div class="field-row"><h3 class="row-title">Today</h3></div>
         <ul id="homeToday" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- ===== Search ===== -->
+    <section class="panel" id="panel-search">
+      <p class="subtitle">Everything you can already see, in one place — matter records, drafted work product, uploaded file names, saved research, and logged time. Matters you aren't assigned to simply don't appear.</p>
+      <div class="card">
+        <div class="field-row">
+          <label class="field grow">Search <input id="searchQuery" placeholder="e.g. motion to suppress" /></label>
+          <button class="btn primary" id="runSearch">Search</button>
+        </div>
+        <p class="subtitle-inline" id="searchSummary"></p>
+        <ul id="searchResults" class="list"></ul>
+        <p class="meta-xs" id="searchCaveat"></p>
       </div>
     </section>
 

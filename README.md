@@ -90,7 +90,10 @@ monthly totals counted in the firm's own timezone, where open shifts
 never inflate a total and corrections are attorney-only and keep the
 original on the record; and a **Payroll**
 panel for what the firm pays its staff, with historical rates so a raise
-never restates an already-paid period. Docket opens on a
+never restates an already-paid period. There's a **search** box in the top bar covering matter records, drafted
+work product, uploaded file names, saved research and logged time —
+scoped so a matter you aren't assigned to never appears in results, and
+explicit that file *contents* aren't indexed. Docket opens on a
 role-aware **Home** panel showing what
 needs you, and every person/matter field is a picker rather than an id
 typed from memory. Security-wise it ships **login brute-force

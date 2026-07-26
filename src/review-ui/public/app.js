@@ -1,5 +1,6 @@
 const PANEL_TITLES = {
   home: "Home",
+  search: "Search",
   queue: "Review Queue",
   deadlines: "Deadlines",
   scheduling: "Scheduling",
@@ -70,6 +71,7 @@ async function loadWhoami() {
       document.getElementById("navAudit").hidden = false;
     }
     if (me.role === "attorney" || me.role === "paralegal") {
+      document.getElementById("globalSearch").hidden = false;
       document.getElementById("navDrafting").hidden = false;
       document.getElementById("navCases").hidden = false;
       document.getElementById("navConflicts").hidden = false;
@@ -1734,6 +1736,102 @@ async function loadHome() {
   }
   if (today.children.length === 0) today.innerHTML = '<li class="static empty">Nothing scheduled.</li>';
 }
+
+/* ===== Global search ===== */
+const HIT_PANEL = {
+  matter: "conflicts",
+  work_product: "queue",
+  document: "cases",
+  research: "research",
+  time_entry: "billing",
+};
+
+/**
+ * Wraps matches in <mark>. The snippet is escaped *first* and the marks
+ * inserted after, so a document containing "<script>" is highlighted as
+ * text rather than executed — the search index is full of content this
+ * app never wrote.
+ */
+function highlight(text, query) {
+  const escaped = escapeHtml(text);
+  const words = query
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}§.'-]+/u)
+    .filter((w) => w.length > 1)
+    .map((w) => escapeHtml(w))
+    .sort((a, b) => b.length - a.length);
+  if (words.length === 0) return escaped;
+  const pattern = new RegExp(`(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
+  return escaped.replace(pattern, "<mark>$1</mark>");
+}
+
+async function runSearch(query) {
+  showError("");
+  const box = document.getElementById("searchQuery");
+  if (query !== undefined) box.value = query;
+  const q = box.value.trim();
+  const list = document.getElementById("searchResults");
+  const summary = document.getElementById("searchSummary");
+  const caveat = document.getElementById("searchCaveat");
+  if (!q) {
+    list.innerHTML = "";
+    summary.textContent = "";
+    caveat.textContent = "";
+    return;
+  }
+  try {
+    const results = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    summary.textContent = results.hits.length
+      ? `${results.hits.length}${results.truncated ? "+" : ""} result${results.hits.length === 1 ? "" : "s"} for "${results.query}"`
+      : `Nothing found for "${results.query}".`;
+    caveat.textContent = `Not searched: ${results.notSearched.join("; ")}.`;
+
+    list.innerHTML = "";
+    for (const hit of results.hits) {
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="hit-kind">${escapeHtml(hit.kind.replace(/_/g, " "))}</span>
+        <strong>${highlight(hit.title, q)}</strong>
+        <span class="badge">${escapeHtml(hit.matterId)}</span>
+        <div class="hit-snippet">${highlight(hit.snippet, q)}</div>
+        <div class="meta-tight">${escapeHtml(hit.meta)}</div>`;
+      li.addEventListener("click", () => openHit(hit));
+      list.appendChild(li);
+    }
+    if (results.hits.length === 0) {
+      list.innerHTML = '<li class="static empty">No matches. Matters you aren\'t assigned to are never included.</li>';
+    }
+  } catch (err) {
+    showError(err.message);
+    list.innerHTML = "";
+  }
+}
+
+/** Takes you to the panel that owns the thing, with its matter prefilled. */
+function openHit(hit) {
+  const panel = HIT_PANEL[hit.kind];
+  if (!panel) return;
+  for (const id of ["matterRecordId", "casesMatterId", "researchMatterId", "billingMatterId", "invoiceMatterId"]) {
+    const el = document.getElementById(id);
+    if (el) el.value = hit.matterId;
+  }
+  goToPanel(panel);
+  if (hit.kind === "work_product" && currentRole === "attorney") loadDetail(hit.id);
+}
+
+document.getElementById("runSearch").addEventListener("click", () => runSearch());
+document.getElementById("searchQuery").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") runSearch();
+});
+// The top-bar box is the one people will actually use; it hands off to
+// the panel rather than trying to render results in a dropdown.
+document.getElementById("globalSearch").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const q = e.target.value.trim();
+  if (!q) return;
+  goToPanel("search");
+  runSearch(q);
+  e.target.value = "";
+});
 
 /* ===== Conflicts =====
    Deliberately presents every hit rather than reducing the check to a

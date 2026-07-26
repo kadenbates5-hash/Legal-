@@ -1209,6 +1209,51 @@ uses. Redaction for `system_admin_no_content` drops `changes` too:
 before/after values are exactly the privileged content that role is
 walled off from.
 
+## Search
+
+`review-ui/search-service.ts` — the box in the top bar, backing a
+**Search** panel. The need is mundane and constant (*"where's that
+motion about the traffic stop?"*), and without it a firm with two
+hundred matters navigates by memory.
+
+Searches five things: matter records (caption, id, description, party
+names), drafted work product (the text itself), uploaded **file names**,
+saved research references, and logged time descriptions — often where
+what actually happened is written down.
+
+**Access control is the hard part, not the matching.** A search box is
+the classic way privileged material leaks, because it reaches across
+every store at once. Every hit goes through the same
+`AccessControl.authorize()` check as the panel it came from, and an
+unreachable matter is **silently omitted** — not refused, not counted,
+not hinted at, since "3 results hidden" is itself a disclosure. Verified
+live: a paralegal assigned to one matter searching a term that only
+appears in another gets "Nothing found", while the attorney gets two
+hits. Receptionists can't search at all.
+
+Two implementation points worth naming:
+
+- **Authorization is cached per (matter, category) for the duration of a
+  search.** Uncached, a query touching 500 records across 40 matters
+  would write 500 denial entries into the audit log and drown it. A
+  test pins the bound at exactly `matters × categories + 1`.
+- **Every search is logged**, with the query. A search is precisely the
+  kind of broad access an attorney reviewing an incident wants a record
+  of, and the query is the interesting part of it.
+
+Ranking is deliberately simple: an exact phrase outranks scattered
+words, and a title match outranks a body match. This is a
+find-the-thing-you-remember tool, not an IR system, and predictable
+beats clever.
+
+`SearchResults.notSearched` is displayed on every search rather than
+buried in docs: **file contents are not indexed, only file names.** A
+firm that assumes otherwise will conclude a document doesn't exist when
+it simply wasn't looked inside — being explicit is the difference
+between a limitation and a trap. (Drafting a report from a PDF extracts
+its text into work product, which *is* searchable.) `server.ts` wires
+`GET /api/search?q=`; 404 without a `SearchService`.
+
 ## Transport & session security
 
 Hardening that applies to every route, independent of any one panel.
@@ -1356,7 +1401,7 @@ distinct trust levels:
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over twenty panels — Home, Review Queue, Deadlines,
+between sections) over twenty-one panels — Home, Search, Review Queue, Deadlines,
 Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Trust, Invoices,
 Time Clock, Payroll, Research, Assistant,
 Staff, Messages, Schedule, Billing, Accounts, and Audit Log (Drafting/

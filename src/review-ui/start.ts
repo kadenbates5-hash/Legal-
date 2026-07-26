@@ -7,6 +7,7 @@ import { DraftingService } from "./drafting-service.js";
 import { DocumentsService } from "./documents-service.js";
 import { CasesService } from "./cases-service.js";
 import { AuditService } from "./audit-service.js";
+import { SearchService } from "./search-service.js";
 import { ResearchService } from "./research-service.js";
 import { CourtListenerClient } from "../integrations/courtlistener.js";
 import { loadSystemState, saveSystemState } from "../persistence/system-state.js";
@@ -322,6 +323,22 @@ const invoicing = new InvoicingService({
   },
 });
 
+/**
+ * Backs the global search box. Given every store directly rather than
+ * the panel services, because it needs to read across all of them at
+ * once — and does its own `AccessControl` filtering, silently omitting
+ * matters the caller can't reach (see `search-service.ts`).
+ */
+const search = new SearchService({
+  accessControl: state.accessControl,
+  auditLog: state.auditLog,
+  matters: state.matters,
+  workProducts: state.workProductStore,
+  documents: state.documentStore,
+  research: state.researchLibrary,
+  billingHours: state.billingHours,
+});
+
 /** Backs the "Payroll" panel — what the firm pays its people, deliberately unconnected to client matters or trust. */
 const payroll = new PayrollService({ store: state.payroll, auditLog: state.auditLog });
 
@@ -503,6 +520,7 @@ const server = createReviewServer(service, state.auth, {
   trust,
   clientFile,
   invoicing,
+  search,
   payroll,
   timeClock,
   maxRequestBodyBytes,

@@ -27,6 +27,7 @@ import type { MattersService } from "./matters-service.js";
 import type { TrustService } from "./trust-service.js";
 import type { ClientFileService } from "./client-file-service.js";
 import type { InvoicingService } from "./invoicing-service.js";
+import type { SearchService } from "./search-service.js";
 import type { PayrollService } from "./payroll-service.js";
 import type { TimeClockService } from "./time-clock-service.js";
 import { TimeClockError, type BucketKind } from "../core/time-clock.js";
@@ -425,6 +426,7 @@ export interface ReviewServerOptions {
   trust?: TrustService;
   clientFile?: ClientFileService;
   invoicing?: InvoicingService;
+  search?: SearchService;
   payroll?: PayrollService;
   timeClock?: TimeClockService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
@@ -485,6 +487,7 @@ async function handleRequest(
     trust,
     clientFile,
     invoicing,
+    search,
     payroll,
     timeClock,
     voiceCalls,
@@ -740,6 +743,16 @@ async function handleRequest(
       }
       sendJson(res, 200, clientFile.export(actor, matterId));
       // The export is audited, so it changes persisted state.
+      onMutated?.();
+      return;
+    }
+
+    if (url.pathname === "/api/search" && req.method === "GET") {
+      if (!search) {
+        sendJson(res, 404, { error: "search is not configured on this server" });
+        return;
+      }
+      sendJson(res, 200, search.search(actor, url.searchParams.get("q") ?? ""));
       onMutated?.();
       return;
     }
