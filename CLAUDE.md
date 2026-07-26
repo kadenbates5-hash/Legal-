@@ -194,6 +194,39 @@ the rest of core:
 
 ## Deadline redundancy (§7 open item #1 — resolved)
 
+### What counts as an independent source
+
+The rule is "two independent sources agree". What *independence* means
+is the whole feature, and keying it on the source **type** alone
+(`agent`/`human`/`calendar_system`) was wrong in a way that quietly
+broke it: a second attorney who independently checked a date changed
+nothing, because both were `human`. The deadline read "not verified"
+forever unless a calendar integration happened to be wired up — a real
+check the system refused to count, which teaches people the status is
+noise.
+
+`independenceKey()` fixes that without weakening anything:
+
+- the **agent** is one source however many times it calculates,
+- the **calendar system** likewise,
+- but each **person** is their own source, tracked via
+  `DeadlineCalculation.recordedBy`.
+
+So two different attorneys agreeing is redundancy; the same attorney
+entering it twice is not; and the agent still cannot confirm its own
+arithmetic by running again — the failure the requirement exists to
+prevent. Entries written before `recordedBy` existed collapse to a
+single identity, so an old snapshot can never become retroactively
+"confirmed" by a second check that never happened. All five cases are
+pinned by tests.
+
+`ReviewGateService.deadlineVerificationHint()` turns the state into a
+sentence, because "unconfirmed" leaves people guessing and the usual
+answer — *someone else needs to check this* — isn't something anyone
+would infer from the word. It is addressed to the reader: the person who
+entered the date is told it needs a colleague; a different attorney is
+told that confirming it themselves completes the check.
+
 `src/core/deadline.ts` — `DeadlineTracker`. §3: "Deadline calculations are
 never single-sourced... agent-calculated dates require redundant human/
 calendar-system verification." A deadline (`speedy_trial`, `arraignment`,

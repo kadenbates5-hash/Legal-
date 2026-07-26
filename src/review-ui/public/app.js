@@ -388,13 +388,25 @@ async function checkDeadline() {
     const type = document.getElementById("deadlineType").value;
     const status = await api(`/api/deadlines?matterId=${encodeURIComponent(matterId)}&type=${encodeURIComponent(type)}`);
     const el = document.getElementById("deadlineStatus");
-    if (status.state === "confirmed") {
-      el.innerHTML = `<p><span class="badge confirmed">confirmed</span> ${status.date}</p>`;
-    } else if (status.state === "conflict") {
-      el.innerHTML = `<p><span class="badge conflict">conflict</span> sources disagree: ${status.calculations.map((c) => `${c.source}: ${c.date}`).join(", ")}</p>`;
-    } else {
-      el.innerHTML = `<p class="empty">Unconfirmed (${status.calculations.length} calculation(s) so far).</p>`;
-    }
+    const badge =
+      status.state === "confirmed"
+        ? `<span class="badge confirmed">verified</span> ${escapeHtml(status.date)}`
+        : status.state === "conflict"
+          ? '<span class="badge conflict">sources disagree</span>'
+          : '<span class="badge pending_review">not yet verified</span>';
+    // Who recorded what, so "it needs a second check" is actionable
+    // rather than mysterious.
+    const recorded = status.calculations
+      .map(
+        (c) =>
+          `<li class="static"><strong>${escapeHtml(c.date)}</strong> <span class="badge">${escapeHtml(c.source)}</span>${
+            c.recordedBy ? ` <span class="badge">${escapeHtml(c.recordedBy)}</span>` : ""
+          }<div class="meta-tight">${new Date(c.recordedAt).toLocaleString()}</div></li>`,
+      )
+      .join("");
+    el.innerHTML = `<p>${badge}</p>
+      ${status.hint ? `<p class="subtitle-inline">${escapeHtml(status.hint)}</p>` : ""}
+      ${recorded ? `<ul class="list">${recorded}</ul>` : ""}`;
     await loadConflicts();
   } catch (err) {
     showError(err.message);

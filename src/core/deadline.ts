@@ -29,6 +29,41 @@ export interface DeadlineCalculation {
   readonly source: DeadlineSource;
   readonly recordedAt: string;
   readonly note: string | undefined;
+  /**
+   * Who recorded it. This is what makes **two different people** count as
+   * two independent checks — see `independenceKey`. Absent on entries
+   * written before this was tracked, which is safe: they collapse to a
+   * single identity and stay unconfirmed rather than becoming
+   * retroactively confirmed.
+   */
+  readonly recordedBy: string | undefined;
+}
+
+/**
+ * What makes one calculation *independent* of another.
+ *
+ * The rule this system enforces is "two independent sources agree". The
+ * question is what independence means, and getting it wrong breaks the
+ * feature in one of two ways:
+ *
+ * - Keying only on the source **type** (`agent` / `human` /
+ *   `calendar_system`) means a second attorney who independently checks
+ *   a date changes nothing: the deadline reads "not verified" forever
+ *   unless a calendar integration happens to be wired up. That is a real
+ *   check the system refuses to count, and it teaches people the status
+ *   is noise.
+ * - Keying only on the **person** would let the agent's arithmetic be
+ *   confirmed by the agent running twice, which is the exact failure the
+ *   redundancy requirement exists to prevent.
+ *
+ * So: the agent is one source however many times it calculates; the
+ * calendar system likewise; and each *human* is their own source. Two
+ * different attorneys checking the same date is redundancy. The same
+ * attorney entering it twice is not.
+ */
+function independenceKey(calculation: DeadlineCalculation): string {
+  if (calculation.source === "human") return `human:${calculation.recordedBy ?? "unattributed"}`;
+  return calculation.source;
 }
 
 export interface DeadlineConflict {
@@ -78,7 +113,15 @@ export class DeadlineTracker {
    * independently-sourced calculation (human or calendar_system) agreeing
    * on the same date to reach `"confirmed"`.
    */
-  record(params: { matterId: string; type: DeadlineType; date: string; source: DeadlineSource; note?: string }): DeadlineStatus {
+  record(params: {
+    matterId: string;
+    type: DeadlineType;
+    date: string;
+    source: DeadlineSource;
+    note?: string;
+    /** Required in practice for `human` — without it, two people can't be told apart. */
+    recordedBy?: string;
+  }): DeadlineStatus {
     const k = key(params.matterId, params.type);
     const existing = this.#calculationsByKey.get(k) ?? [];
     const calculation: DeadlineCalculation = {
@@ -88,6 +131,7 @@ export class DeadlineTracker {
       source: params.source,
       recordedAt: new Date().toISOString(),
       note: params.note,
+      recordedBy: params.recordedBy,
     };
     const updated = [...existing, calculation];
     this.#calculationsByKey.set(k, updated);
@@ -98,11 +142,12 @@ export class DeadlineTracker {
     const calculations = this.#calculationsByKey.get(key(matterId, type)) ?? [];
     if (calculations.length === 0) return { state: "unconfirmed", calculations };
 
-    const distinctSources = new Set(calculations.map((c) => c.source));
+    const distinctSources = new Set(calculations.map(independenceKey));
     const distinctDates = new Set(calculations.map((c) => c.date));
 
     if (distinctSources.size < 2) {
-      // Only ever seen from one source (however many times) — still single-sourced.
+      // Only ever seen from one independent source, however many times it
+      // was recorded — still single-sourced.
       return { state: "unconfirmed", calculations };
     }
 
@@ -111,6 +156,16 @@ export class DeadlineTracker {
     }
 
     return { state: "confirmed", date: calculations[0]!.date, calculations };
+  }
+
+  /**
+   * The independent sources that have weighed in so far, for a UI that
+   * needs to say *what would confirm this* rather than only that it
+   * isn't confirmed.
+   */
+  independentSources(matterId: string, type: DeadlineType): string[] {
+    const calculations = this.#calculationsByKey.get(key(matterId, type)) ?? [];
+    return [...new Set(calculations.map(independenceKey))];
   }
 
   isConfirmed(matterId: string, type: DeadlineType): boolean {

@@ -983,7 +983,13 @@ async function handleDeadlineRequest(
       sendJson(res, 400, { error: "matterId and type query params are required" });
       return;
     }
-    sendJson(res, 200, service.getDeadlineStatus(actor, matterId, type));
+    sendJson(res, 200, {
+      ...service.getDeadlineStatus(actor, matterId, type),
+      // What would confirm it, in words. "unconfirmed" alone leaves
+      // people guessing, and the usual answer — "someone else needs to
+      // check this" — isn't something anyone would infer from it.
+      hint: service.deadlineVerificationHint(actor, matterId, type),
+    });
     return;
   }
 

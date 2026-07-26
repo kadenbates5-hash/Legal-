@@ -92,7 +92,7 @@
 
     <!-- ===== Deadlines ===== -->
     <section class="panel" id="panel-deadlines">
-      <p class="subtitle">A deadline confirms only once a second, independent source (an attorney's own confirmation, or the calendar integration's own credential) agrees with the agent's calculated date. Disagreement is a conflict, surfaced here — never silently resolved.</p>
+      <p class="subtitle">A deadline counts as verified only once two <em>independent</em> sources agree on the date — two different people, the agent and a person, or a person and the calendar integration. One person recording it twice is not two checks. Disagreement is a conflict, surfaced here and never silently resolved by picking one.</p>
       <div class="card">
         <h3>Check status</h3>
         <div class="field-row">
@@ -111,16 +111,17 @@
         <div id="deadlineStatus"></div>
       </div>
       <div class="card">
-        <h3>Record an independent confirmation</h3>
+        <h3>Record a deadline</h3>
+        <p class="subtitle-inline">Use this both to enter a date for the first time and to confirm one someone else entered. A date counts as verified once <strong>two independent sources</strong> agree — two different people, or a person and the calendar integration. The same person recording it twice is not a second check.</p>
         <div class="field-row">
-          <label class="field">Confirm date <input id="deadlineDate" type="date" /></label>
+          <label class="field">Date <input id="deadlineDate" type="date" /></label>
           <label class="field">Source
             <select id="deadlineSource">
               <option value="human">human (this attorney session)</option>
               <option value="calendar_system">calendar_system (requires the integration's own key)</option>
             </select>
           </label>
-          <button class="btn primary" id="confirmDeadline">Record confirmation</button>
+          <button class="btn primary" id="confirmDeadline">Record</button>
         </div>
       </div>
       <div class="card">

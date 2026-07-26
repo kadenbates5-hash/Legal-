@@ -169,7 +169,46 @@ export class ReviewGateService {
     if (!this.#deadlineTracker) {
       throw new Error("no deadline tracker configured");
     }
-    return this.#deadlineTracker.record({ matterId, type, date, source, note: `confirmed by ${actor.id}` });
+    return this.#deadlineTracker.record({
+      matterId,
+      type,
+      date,
+      source,
+      note: `recorded by ${actor.id}`,
+      // Carried so two different attorneys count as two independent
+      // checks — see `independenceKey` in core/deadline.ts.
+      recordedBy: actor.id,
+    });
+  }
+
+  /**
+   * What a deadline needs before it counts as confirmed, phrased for a
+   * human rather than as a state name. A panel that only says
+   * "unconfirmed" leaves people guessing what would fix it — and the
+   * commonest answer ("someone else needs to check this") is not
+   * something anyone would infer from the word.
+   */
+  deadlineVerificationHint(actor: Actor, matterId: string, type: DeadlineType): string {
+    requireAttorney(actor);
+    if (!this.#deadlineTracker) return "No deadline tracker is configured.";
+    const status = this.#deadlineTracker.status(matterId, type);
+    if (status.calculations.length === 0) return "Nothing recorded for this deadline yet.";
+    if (status.state === "confirmed") return "Confirmed — two independent sources agree on this date.";
+    if (status.state === "conflict") {
+      const dates = [...new Set(status.calculations.map((c) => c.date))].sort();
+      return `Sources disagree: ${dates.join(" and ")}. Find out which is right — this is not resolved by picking one.`;
+    }
+    const sources = this.#deadlineTracker.independentSources(matterId, type);
+    const only = sources[0] ?? "";
+    if (only === "agent") {
+      return "Calculated by the agent only. A person or the calendar integration must independently confirm it before it counts.";
+    }
+    if (only === "calendar_system") {
+      return "Seen on the calendar only. Someone here should independently confirm the date.";
+    }
+    return only === `human:${actor.id}`
+      ? "You recorded this. It needs a second, independent check — a colleague confirming the same date, or the calendar integration."
+      : "Recorded by one person. Confirming it yourself will complete the second, independent check.";
   }
 
   getDeadlineStatus(actor: Actor, matterId: string, type: DeadlineType): DeadlineStatus {

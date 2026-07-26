@@ -165,3 +165,114 @@ describe("upcoming deadlines — audit independence", () => {
     expect(auditLog.count()).toBe(before);
   });
 });
+
+describe("DeadlineTracker — what counts as an independent source", () => {
+  it("still refuses to let the agent confirm its own arithmetic", () => {
+    const tracker = new DeadlineTracker();
+    // The agent calculating the same date ten times is one source.
+    for (let i = 0; i < 10; i++) {
+      tracker.record({ matterId: "m-1", type: "speedy_trial", date: "2026-08-01", source: "agent" });
+    }
+    expect(tracker.status("m-1", "speedy_trial").state).toBe("unconfirmed");
+  });
+
+  it("does not let one person confirm their own entry by recording it twice", () => {
+    const tracker = new DeadlineTracker();
+    tracker.record({ matterId: "m-1", type: "arraignment", date: "2026-08-01", source: "human", recordedBy: "a1" });
+    tracker.record({ matterId: "m-1", type: "arraignment", date: "2026-08-01", source: "human", recordedBy: "a1" });
+    // Recording it twice isn't checking it twice.
+    expect(tracker.status("m-1", "arraignment").state).toBe("unconfirmed");
+  });
+
+  it("counts two different people as two independent checks", () => {
+    const tracker = new DeadlineTracker();
+    tracker.record({ matterId: "m-1", type: "arraignment", date: "2026-08-01", source: "human", recordedBy: "a1" });
+    tracker.record({ matterId: "m-1", type: "arraignment", date: "2026-08-01", source: "human", recordedBy: "a2" });
+    // This is the case the old source-type-only model refused to count,
+    // leaving a genuinely double-checked date reading "unverified" forever.
+    expect(tracker.status("m-1", "arraignment").state).toBe("confirmed");
+  });
+
+  it("reports a conflict when two different people disagree", () => {
+    const tracker = new DeadlineTracker();
+    tracker.record({ matterId: "m-1", type: "arraignment", date: "2026-08-01", source: "human", recordedBy: "a1" });
+    tracker.record({ matterId: "m-1", type: "arraignment", date: "2026-08-06", source: "human", recordedBy: "a2" });
+    expect(tracker.status("m-1", "arraignment").state).toBe("conflict");
+  });
+
+  it("keeps agent + one person confirming, exactly as before", () => {
+    const tracker = new DeadlineTracker();
+    tracker.record({ matterId: "m-1", type: "speedy_trial", date: "2026-08-01", source: "agent" });
+    tracker.record({ matterId: "m-1", type: "speedy_trial", date: "2026-08-01", source: "human", recordedBy: "a1" });
+    expect(tracker.status("m-1", "speedy_trial").state).toBe("confirmed");
+  });
+
+  it("treats the calendar system as one source however often it syncs", () => {
+    const tracker = new DeadlineTracker();
+    for (let i = 0; i < 5; i++) {
+      tracker.record({ matterId: "m-1", type: "other", date: "2026-08-01", source: "calendar_system" });
+    }
+    expect(tracker.status("m-1", "other").state).toBe("unconfirmed");
+  });
+
+  it("does not retroactively confirm old unattributed entries", () => {
+    // Records written before `recordedBy` existed collapse to a single
+    // identity — safer to leave them unverified than to invent a second
+    // check that never happened.
+    const tracker = DeadlineTracker.fromSnapshot([
+      { matterId: "m-1", type: "arraignment", date: "2026-08-01", source: "human", recordedAt: "2026-01-01T00:00:00Z", note: undefined, recordedBy: undefined },
+      { matterId: "m-1", type: "arraignment", date: "2026-08-01", source: "human", recordedAt: "2026-01-02T00:00:00Z", note: undefined, recordedBy: undefined },
+    ]);
+    expect(tracker.status("m-1", "arraignment").state).toBe("unconfirmed");
+  });
+
+  it("lists the independent sources seen so far", () => {
+    const tracker = new DeadlineTracker();
+    tracker.record({ matterId: "m-1", type: "other", date: "2026-08-01", source: "agent" });
+    tracker.record({ matterId: "m-1", type: "other", date: "2026-08-01", source: "human", recordedBy: "a1" });
+    tracker.record({ matterId: "m-1", type: "other", date: "2026-08-01", source: "human", recordedBy: "a1" });
+    expect(tracker.independentSources("m-1", "other").sort()).toEqual(["agent", "human:a1"]);
+  });
+});
+
+describe("ReviewGateService.deadlineVerificationHint", () => {
+  function service(tracker: DeadlineTracker) {
+    return new ReviewGateService(new WorkProductStore(), tracker);
+  }
+
+  it("says nothing is recorded yet", () => {
+    expect(service(new DeadlineTracker()).deadlineVerificationHint(attorney, "m-1", "other")).toMatch(/nothing recorded/i);
+  });
+
+  it("tells the person who recorded it that someone else must check", () => {
+    const tracker = new DeadlineTracker();
+    tracker.record({ matterId: "m-1", type: "other", date: "2026-08-01", source: "human", recordedBy: "a1" });
+    expect(service(tracker).deadlineVerificationHint(attorney, "m-1", "other")).toMatch(/you recorded this.*second, independent check/is);
+  });
+
+  it("tells a different attorney that confirming it completes the check", () => {
+    const tracker = new DeadlineTracker();
+    tracker.record({ matterId: "m-1", type: "other", date: "2026-08-01", source: "human", recordedBy: "someone-else" });
+    expect(service(tracker).deadlineVerificationHint(attorney, "m-1", "other")).toMatch(/confirming it yourself will complete/i);
+  });
+
+  it("names the disagreeing dates on a conflict and refuses to suggest picking one", () => {
+    const tracker = new DeadlineTracker();
+    tracker.record({ matterId: "m-1", type: "other", date: "2026-08-01", source: "human", recordedBy: "a1" });
+    tracker.record({ matterId: "m-1", type: "other", date: "2026-08-06", source: "human", recordedBy: "a2" });
+    const hint = service(tracker).deadlineVerificationHint(attorney, "m-1", "other");
+    expect(hint).toContain("2026-08-01");
+    expect(hint).toContain("2026-08-06");
+    expect(hint).toMatch(/not resolved by picking one/i);
+  });
+
+  it("says an agent-only date needs a person or the calendar", () => {
+    const tracker = new DeadlineTracker();
+    tracker.record({ matterId: "m-1", type: "speedy_trial", date: "2026-08-01", source: "agent" });
+    expect(service(tracker).deadlineVerificationHint(attorney, "m-1", "speedy_trial")).toMatch(/agent only/i);
+  });
+
+  it("is attorney-only", () => {
+    expect(() => service(new DeadlineTracker()).deadlineVerificationHint(paralegal, "m-1", "other")).toThrow(AccessDeniedError);
+  });
+});
