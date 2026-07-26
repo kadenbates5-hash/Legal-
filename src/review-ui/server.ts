@@ -35,6 +35,7 @@ import { InvoicingError, type LineItemSource, type PaymentMethod } from "../core
 import { PayrollError } from "../core/payroll.js";
 import { TrustAccountingError, type TrustEntryType } from "../core/trust-ledger.js";
 import type { MatterStatus, PartyRole } from "../core/matters.js";
+import { MatterClosingError } from "./matters-service.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { verifyTwilioSignature, twimlPlayThenRecord, twimlPlayThenHangup, downloadTwilioRecording } from "../integrations/twilio-voice.js";
@@ -293,6 +294,7 @@ function errorStatus(err: unknown): number {
     // conflicts with the invoice's current state rather than malformed input.
     return /must be|is required|needs a|does not look like/.test(err.message) ? 400 : 409;
   }
+  if (err instanceof MatterClosingError) return 409;
   if (err instanceof PayrollError) return 400;
   if (err instanceof TimeClockError) {
     // The error says which it is; "already clocked in" / "already posted"
@@ -1609,6 +1611,13 @@ async function handleMattersRequest(
     return;
   }
 
+  // Also firm-wide rather than per-matter: the question is "which closed
+  // files are now past their retention period", across everything.
+  if (url.pathname === "/api/matters/retention-due" && req.method === "GET") {
+    sendJson(res, 200, matters.listRetentionDue(actor));
+    return;
+  }
+
   const segments = url.pathname.replace(/^\/api\/matters\/?/, "").split("/").filter(Boolean);
 
   if (segments.length === 0 && req.method === "GET") {
@@ -1624,6 +1633,28 @@ async function handleMattersRequest(
 
   if (segments.length === 1 && req.method === "GET") {
     sendJson(res, 200, matters.get(actor, matterId));
+    return;
+  }
+
+
+  if (segments.length === 2 && segments[1] === "close" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    sendJson(
+      res,
+      200,
+      matters.close(actor, matterId, {
+        closingNote: String(body["closingNote"] ?? ""),
+        ...(typeof body["retentionYears"] === "number" ? { retentionYears: body["retentionYears"] } : {}),
+      }),
+    );
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 2 && segments[1] === "reopen" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    sendJson(res, 200, matters.reopen(actor, matterId, String(body["reason"] ?? "")));
+    onMutated?.();
     return;
   }
 

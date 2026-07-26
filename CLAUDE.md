@@ -751,6 +751,45 @@ any client or adversary actually was.
   with their rule citations, and maintain the matter records that make
   screening work.
 
+### Closing a matter, and file retention
+
+`MattersService.close()` / `.reopen()` / `.listRetentionDue()`.
+
+**One rule is enforced in code: a matter holding client funds in trust
+cannot be closed.** Closing a file with the client's money still in the
+trust account is how balances become unclaimed property — money held for
+someone the firm has stopped dealing with, which triggers escheat
+obligations in most jurisdictions and is a reliable way to fail a trust
+audit. The error says the amount and what to do about it (refund it, or
+apply it to an invoice — both already exist).
+
+**Everything else is a warning, never a block.** An unpaid invoice is a
+perfectly ordinary reason to close a matter and keep chasing the debt;
+work product that never finished review may genuinely no longer need it.
+Those are the closing attorney's calls, and refusing them would only
+teach people to route around the close. The warnings come back *with*
+the successful close rather than instead of it.
+
+Closing requires a note recording the disposition, and stamps a
+**retention date** from `FirmConfig.fileRetentionYears`. There is
+deliberately no default: retention periods differ substantially by
+jurisdiction and matter type, so absent config a matter closes with no
+retention date rather than one this software invented. Reopening clears
+both the closed date and the retention date, so a live matter can never
+surface as "due for review".
+
+`listRetentionDue()` lists closed matters past their date — and is *only*
+a list. Nothing here deletes anything, and a test asserts there is no
+`destroy`/`purge`/`shred` method at all. Destroying a client file
+carries notice obligations and differs by jurisdiction; software that
+shredded files on a timer would create malpractice exposure rather than
+reduce it. The point is to stop a firm keeping everything forever
+because nobody remembered to look.
+
+Both close and reopen are attorney-only and audited. A refused close is
+**409** (`MatterClosingError`) — the ledger's state says no, it isn't a
+malformed request.
+
 What this does **not** do: decide whether a conflict is waivable, judge
 whether two matters are "substantially related" under Rule 1.9, or know
 anything about matters the firm never wrote down — the panel says that
@@ -1644,6 +1683,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # ANTHROPIC_API_KEY=sk-ant-...  ANTHROPIC_MODEL=claude-sonnet-5  npm run start:review-ui  # enable the Assistant panel; ANTHROPIC_MODEL/ANTHROPIC_BASE_URL are optional overrides
 # AUDIT_ANCHOR_FILE=/mnt/append-only/anchors.jsonl AUDIT_ANCHOR_EMAILS=partner@firm.example npm run start:review-ui  # publish the audit head hash outside this database (see "Anchoring")
 # ... && npm run anchor:audit                                             # one-shot anchor, meant for cron — refuses if the chain is already broken
+# fileRetentionYears in FIRM_CONFIG_FILE                                  # optional — how long a closed file is kept; absent, matters close with no retention date
 # FIRM_TIME_ZONE=America/New_York npm run start:review-ui                 # optional — where the Time Clock's day starts; defaults to the host's zone
 # SMTP_HOST=smtp.example.com SMTP_FROM=billing@firm.example SMTP_USER=... SMTP_PASSWORD=... npm run start:review-ui  # enable emailing invoices (SMTP_PORT defaults to 587/STARTTLS; SMTP_ALLOW_INSECURE=true only for a loopback relay)
 # FIRM_PAYMENT_INSTRUCTIONS="Payable within 30 days."                     # optional — printed under the invoice total

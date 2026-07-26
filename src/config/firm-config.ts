@@ -29,6 +29,14 @@ export interface FirmLetterhead {
 export interface FirmConfig {
   firmName: string;
   letterhead?: FirmLetterhead;
+  /**
+   * How many years a closed client file is kept, used to stamp a
+   * retention date when a matter is closed. Jurisdictions differ
+   * substantially (five, six, seven years, or indefinitely for some
+   * matter types), so there is deliberately no default — absent, matters
+   * close with no retention date rather than one this software invented.
+   */
+  fileRetentionYears?: number;
   attorneys: AttorneyRecord[];
   businessHours: { timezone: string; open: string; close: string; days: number[] };
   branding: { tone: "formal" | "warm" | "neutral"; greeting: string };

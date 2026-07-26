@@ -1930,6 +1930,87 @@ function partiesToTextareas(matter) {
   document.getElementById("matterAdverse").value = pick("adverse");
 }
 
+/**
+ * Closing controls, rendered from the loaded record so the button always
+ * matches the matter's real state rather than whatever it was when the
+ * panel first opened.
+ */
+function renderMatterLifecycle(matter) {
+  const host = document.getElementById("matterLifecycle");
+  host.innerHTML = "";
+  if (!matter || currentRole !== "attorney") return;
+
+  if (matter.status === "closed") {
+    host.innerHTML = `<p class="subtitle-inline">Closed ${escapeHtml((matter.closedAt || "").slice(0, 10))}${
+      matter.retentionUntil ? ` · keep the file until ${escapeHtml(matter.retentionUntil)}` : " · no retention date recorded"
+    }${matter.closingNote ? `<br />${escapeHtml(matter.closingNote)}` : ""}</p>`;
+    const reopen = mkButton("Reopen matter", async () => {
+      const reason = prompt("Why is this matter being reopened? (kept on the record)");
+      if (!reason) return;
+      await matterAction(matter.matterId, "reopen", { reason });
+    });
+    host.appendChild(reopen);
+    return;
+  }
+
+  const note = document.createElement("input");
+  note.id = "closingNote";
+  note.placeholder = "How did it end? e.g. charges dismissed at the suppression hearing";
+  const label = document.createElement("label");
+  label.className = "field grow";
+  label.textContent = "Closing note ";
+  label.appendChild(note);
+
+  const row = document.createElement("div");
+  row.className = "field-row";
+  row.appendChild(label);
+  const close = mkButton("Close matter", async () => {
+    if (!note.value.trim()) { showError("A closing note is required — it records how the matter ended."); return; }
+    await matterAction(matter.matterId, "close", { closingNote: note.value.trim() });
+  });
+  close.classList.add("danger");
+  row.appendChild(close);
+  host.appendChild(row);
+}
+
+async function matterAction(matterId, action, body) {
+  showError("");
+  try {
+    const result = await api(`/api/matters/${encodeURIComponent(matterId)}/${action}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    await loadMatterRecord();
+    await loadMatterList();
+    // Warnings aren't failures — the close happened. They're the things
+    // the attorney should know they've just left behind.
+    if (result.warnings?.length) {
+      showError(`Matter closed, but note: ${result.warnings.join(" ")}`);
+    }
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadRetentionDue() {
+  showError("");
+  const list = document.getElementById("retentionList");
+  try {
+    const due = await api("/api/matters/retention-due");
+    list.innerHTML = "";
+    for (const m of due) {
+      list.appendChild(
+        listRow(`<strong>${escapeHtml(m.title)}</strong> <span class="badge">${escapeHtml(m.matterId)}</span>
+          <span class="badge rejected">retention ended ${escapeHtml(m.retentionUntil)}</span>
+          <div class="meta-tight">Closed ${escapeHtml((m.closedAt || "").slice(0, 10))}${m.closingNote ? ` · ${escapeHtml(m.closingNote)}` : ""}</div>`),
+      );
+    }
+    if (due.length === 0) list.innerHTML = '<li class="static empty">No closed file has passed its retention date.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 async function loadMatterRecord() {
   showError("");
   try {
@@ -1939,12 +2020,14 @@ async function loadMatterRecord() {
     document.getElementById("matterTitle").value = matter.title || "";
     document.getElementById("matterStatus").value = matter.status || "open";
     partiesToTextareas(matter);
+    renderMatterLifecycle(matter);
   } catch (err) {
     // A matter with no record yet is the normal case, not an error worth shouting about.
     if (/no matter/i.test(err.message)) {
       document.getElementById("matterTitle").value = "";
       document.getElementById("matterClients").value = "";
       document.getElementById("matterAdverse").value = "";
+      renderMatterLifecycle(null);
       showError("No record for that matter yet — fill this in and save to create one.");
     } else {
       showError(err.message);
@@ -2008,6 +2091,7 @@ async function loadMatterList() {
 
 document.getElementById("runConflictCheck").addEventListener("click", runConflictCheck);
 document.getElementById("loadMatterRecord").addEventListener("click", loadMatterRecord);
+document.getElementById("loadRetentionDue").addEventListener("click", loadRetentionDue);
 document.getElementById("saveMatterRecord").addEventListener("click", saveMatterRecord);
 document.getElementById("navConflicts").addEventListener("click", loadMatterList);
 

@@ -63,7 +63,10 @@ name-normalizing so "Acme, Inc." and "ACME Corporation" are one
 adversary, classifying hits against ABA Model Rules 1.7/1.9 and
 searching every matter because Rule 1.10 imputes a conflict to the whole
 firm, auditing every check, and wired into live intake so a caller who
-names a current client stops the conversation; a **Trust** panel for
+names a current client stops the conversation — plus **matter closing**
+that refuses while client funds remain in trust, stamps a retention date
+from the firm's period, and lists files past it without ever deleting
+one; a **Trust** panel for
 client funds (IOLTA) where a client's balance can never go negative,
 entries are corrected by reversal rather than edited, money is integer
 cents, moving funds *out* is attorney-only, and three-way reconciliation

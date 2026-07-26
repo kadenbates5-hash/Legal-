@@ -1,9 +1,28 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AccessControl } from "../core/access-control.js";
 import { diffFields, type AuditLog } from "../core/audit.js";
-import type { Matter, MatterInput, MatterStore } from "../core/matters.js";
+import { addYears, type Matter, type MatterInput, type MatterStore } from "../core/matters.js";
+import type { TrustLedger } from "../core/trust-ledger.js";
+import type { InvoiceStore } from "../core/invoicing.js";
+import type { WorkProductStore } from "../core/work-product-store.js";
 import type { ConflictCheckResult, ConflictChecker } from "../core/conflicts.js";
 import type { PartyRole } from "../core/matters.js";
+
+/**
+ * Refusing to close a matter isn't a malformed request or an access
+ * problem — it's the ledger saying no, so it gets its own type and a 409.
+ */
+export class MatterClosingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MatterClosingError";
+  }
+}
+
+/** Plain dollars for a message, without pulling the invoice renderer into this file. */
+function formatCentsPlain(cents: number): string {
+  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 function requireLegalStaff(actor: Actor): void {
   if (actor.role !== "paralegal" && actor.role !== "attorney") {
@@ -74,16 +93,32 @@ export class MattersService {
   #accessControl: AccessControl;
   #auditLog: AuditLog;
 
+  #trust: TrustLedger | undefined;
+  #invoices: InvoiceStore | undefined;
+  #workProducts: WorkProductStore | undefined;
+  #retentionYears: number;
+
   constructor(params: {
     store: MatterStore;
     checker: ConflictChecker;
     accessControl: AccessControl;
     auditLog: AuditLog;
+    /** Closing a matter checks this: client funds still held block the close outright. */
+    trust?: TrustLedger;
+    /** Consulted for closing *warnings* only — an unpaid bill never blocks a close. */
+    invoices?: InvoiceStore;
+    workProducts?: WorkProductStore;
+    /** How long a closed file is kept. 0 records no retention date at all. */
+    retentionYears?: number;
   }) {
     this.#store = params.store;
     this.#checker = params.checker;
     this.#accessControl = params.accessControl;
     this.#auditLog = params.auditLog;
+    this.#trust = params.trust;
+    this.#invoices = params.invoices;
+    this.#workProducts = params.workProducts;
+    this.#retentionYears = params.retentionYears ?? 0;
   }
 
   /** Matter records the caller can actually open, so a paralegal sees only their own. */
@@ -128,6 +163,115 @@ export class MattersService {
       ...(changes.length ? { changes } : {}),
     });
     return record;
+  }
+
+  /**
+   * Closes a matter.
+   *
+   * The one rule enforced in code rather than asked of a human:
+   * **a matter holding client funds in trust cannot be closed.** Closing
+   * a file with the client's money still in the trust account is how
+   * balances become unclaimed funds — money the firm is holding for
+   * someone it has stopped dealing with, which in most jurisdictions
+   * triggers escheat obligations and is a reliable way to fail a trust
+   * audit. The money must be refunded or applied to an invoice first,
+   * both of which the Trust and Invoices panels already do.
+   *
+   * Everything else is reported as a **warning**, not a block. An
+   * unpaid invoice is a perfectly ordinary reason to close a matter and
+   * keep chasing the debt; work product still awaiting review may
+   * genuinely no longer need it. Those are the closing attorney's calls,
+   * and refusing them would just teach people to route around this.
+   */
+  close(
+    actor: Actor,
+    matterId: string,
+    params: { closingNote: string; retentionYears?: number },
+  ): { matter: Matter; warnings: string[] } {
+    requireAttorney(actor, "closing a matter");
+    this.#accessControl.authorize({ actor, matterId, category: "case_file" });
+    const existing = this.#store.get(matterId);
+    if (existing?.status === "closed") throw new Error(`matter '${matterId}' is already closed`);
+    if (!params.closingNote.trim()) throw new Error("closing a matter needs a note recording its disposition");
+
+    const trustBalance = this.#trust?.balanceForMatter(matterId) ?? 0;
+    if (trustBalance > 0) {
+      throw new MatterClosingError(
+        `matter '${matterId}' still holds ${formatCentsPlain(trustBalance)} of the client's money in trust. ` +
+          "Refund it or apply it to an invoice before closing — a closed file with client funds in it becomes unclaimed property.",
+      );
+    }
+
+    const warnings = this.#closingWarnings(matterId);
+    const years = params.retentionYears ?? this.#retentionYears;
+    const closedOn = new Date().toISOString().slice(0, 10);
+    const matter = this.#store.upsert(matterId, {
+      status: "closed",
+      closingNote: params.closingNote.trim(),
+      ...(years > 0 ? { retentionUntil: addYears(closedOn, years) } : {}),
+    });
+
+    this.#auditLog.append({
+      actor,
+      matterId,
+      action: "matter_closed",
+      detail:
+        `note=${params.closingNote.trim()} retentionUntil=${matter.retentionUntil ?? "none"}` +
+        (warnings.length ? ` warnings=${warnings.length}` : ""),
+    });
+    return { matter, warnings };
+  }
+
+  /** Reopening is attorney-only and audited: a closed file is a statement, and unmaking it should be visible. */
+  reopen(actor: Actor, matterId: string, reason: string): Matter {
+    requireAttorney(actor, "reopening a matter");
+    this.#accessControl.authorize({ actor, matterId, category: "case_file" });
+    if (!reason.trim()) throw new Error("reopening a matter needs a reason");
+    const matter = this.#store.upsert(matterId, { status: "open" });
+    this.#auditLog.append({ actor, matterId, action: "matter_reopened", detail: `reason=${reason.trim()}` });
+    return matter;
+  }
+
+  /**
+   * Closed matters whose retention period has run out.
+   *
+   * A list, never an action. What happens next — notifying the client,
+   * transferring the file, destroying it — is a judgement with notice
+   * obligations attached and differs by jurisdiction. Software's job
+   * here is to stop a firm from keeping everything forever by default
+   * because nobody remembered to look.
+   */
+  listRetentionDue(actor: Actor, asOf: Date = new Date()): Matter[] {
+    requireAttorney(actor, "reviewing file retention");
+    const today = asOf.toISOString().slice(0, 10);
+    return this.#store
+      .listAll()
+      .filter((m) => m.status === "closed" && m.retentionUntil && m.retentionUntil <= today)
+      .sort((a, b) => (a.retentionUntil ?? "").localeCompare(b.retentionUntil ?? ""));
+  }
+
+  /** What an attorney should know before closing — surfaced, never enforced. */
+  #closingWarnings(matterId: string): string[] {
+    const warnings: string[] = [];
+
+    const outstanding = (this.#invoices?.listByMatter(matterId) ?? []).filter(
+      (i) => (i.status === "sent" || i.status === "partially_paid") && this.#invoices!.totals(i.id).balanceCents > 0,
+    );
+    if (outstanding.length > 0) {
+      const due = outstanding.reduce((sum, i) => sum + this.#invoices!.totals(i.id).balanceCents, 0);
+      warnings.push(
+        `${outstanding.length} unpaid invoice(s) totalling ${formatCentsPlain(due)} — closing the matter doesn't write the debt off, but nobody will be watching the receivables list for it.`,
+      );
+    }
+
+    const pending = (this.#workProducts?.listByMatter(matterId) ?? []).filter(
+      (wp) => wp.status === "draft" || wp.status === "pending_review" || wp.status === "revision_requested",
+    );
+    if (pending.length > 0) {
+      warnings.push(`${pending.length} work product(s) never finished review — they will stay in the file unreleased.`);
+    }
+
+    return warnings;
   }
 
   /**

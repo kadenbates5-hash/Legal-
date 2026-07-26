@@ -219,6 +219,12 @@ const matters = new MattersService({
   checker: conflictChecker,
   accessControl: state.accessControl,
   auditLog: state.auditLog,
+  // Closing a matter refuses while client funds remain in trust; the
+  // other two are consulted for warnings only.
+  trust: state.trustLedger,
+  invoices: state.invoices,
+  workProducts: state.workProductStore,
+  ...(firmConfig?.fileRetentionYears ? { retentionYears: firmConfig.fileRetentionYears } : {}),
 });
 
 /**

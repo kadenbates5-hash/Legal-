@@ -303,7 +303,16 @@
         <div class="field-row">
           <button class="btn primary" id="saveMatterRecord">Save matter record</button>
         </div>
+        <div id="matterLifecycle"></div>
         <ul id="matterList" class="list"></ul>
+      </div>
+      <div class="card" id="retentionCard">
+        <div class="field-row">
+          <h3 class="row-title">Files past their retention period</h3>
+          <button class="btn" id="loadRetentionDue">Check</button>
+        </div>
+        <p class="subtitle-inline">Closed matters whose retention date has passed. This is a list, never an action — destroying a client file carries notice obligations and differs by jurisdiction, so nothing here deletes anything on a timer.</p>
+        <ul id="retentionList" class="list"></ul>
       </div>
     </section>
 

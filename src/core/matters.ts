@@ -46,6 +46,18 @@ export interface MatterParty {
  * to any other party — mailing a bill to the opposing side would be far
  * worse than not mailing it at all.
  */
+/**
+ * Adds whole years to an ISO date. Used to derive a retention date from
+ * the firm's retention period; February 29 lands on the 28th in a
+ * non-leap year rather than silently rolling into March.
+ */
+export function addYears(isoDate: string, years: number): string {
+  const [y, m, d] = isoDate.slice(0, 10).split("-").map(Number) as [number, number, number];
+  const targetYear = y + years;
+  const daysInMonth = new Date(Date.UTC(targetYear, m, 0)).getUTCDate();
+  return `${targetYear}-${String(m).padStart(2, "0")}-${String(Math.min(d, daysInMonth)).padStart(2, "0")}`;
+}
+
 export function billingEmailFor(matter: Matter | undefined): string | undefined {
   return matter?.parties.find((p) => p.role === "client" && p.email?.trim())?.email?.trim();
 }
@@ -61,6 +73,17 @@ export interface Matter {
   parties: MatterParty[];
   openedAt: string;
   closedAt: string | undefined;
+  /**
+   * The date until which the client file must be kept, set when the
+   * matter is closed from the firm's retention period. Purely a record:
+   * nothing in this system deletes anything when it passes. Destroying a
+   * client file is a decision with notice obligations attached, and
+   * software that quietly shredded files on a timer would be creating
+   * malpractice exposure rather than reducing it.
+   */
+  retentionUntil: string | undefined;
+  /** Why it was closed — the disposition, in the closing attorney's words. */
+  closingNote: string | undefined;
   updatedAt: string;
 }
 
@@ -71,6 +94,8 @@ export interface MatterInput {
   responsibleAttorneyId?: string;
   description?: string;
   parties?: MatterParty[];
+  retentionUntil?: string;
+  closingNote?: string;
 }
 
 export class MatterStore {
@@ -100,6 +125,12 @@ export class MatterStore {
       // Closing stamps a date; reopening clears it, so "closed" and
       // "closedAt" can never disagree.
       closedAt: status === "closed" ? existing?.closedAt ?? now : undefined,
+      // Retention and the closing note belong to a closed file. Reopening
+      // clears them rather than leaving a stale retention date on a live
+      // matter, which would eventually surface it as "due for review"
+      // while work is still going on.
+      retentionUntil: status === "closed" ? input.retentionUntil ?? existing?.retentionUntil : undefined,
+      closingNote: status === "closed" ? input.closingNote ?? existing?.closingNote : undefined,
       updatedAt: now,
     };
     this.#byId.set(id, record);
