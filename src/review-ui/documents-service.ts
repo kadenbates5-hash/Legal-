@@ -12,7 +12,20 @@ import { DocumentStore } from "../core/document-store.js";
  * document is scoped to exactly one matter and this is exposed over HTTP by
  * matter id/document id, which any authenticated caller could otherwise
  * name arbitrarily.
+ *
+ * `maxUploadBytes` guards this project's single-JSON-blob persistence
+ * model (see `CLAUDE.md`'s "Persistence" section): every document's
+ * base64 content lives inline in the same document that's rewritten
+ * whole on every mutation (`onMutated` in `server.ts`), so an unbounded
+ * upload doesn't just cost disk — it makes *every other* request slower
+ * as the whole state blob grows. Defaults to 25 MB per file, comfortably
+ * inside Postgres's 1 GB per-`JSONB`-value limit and Node's in-memory
+ * string limits even with many documents, while still ruling out the
+ * pathological "someone uploads a 2 GB video" case. Configurable via
+ * `MAX_DOCUMENT_UPLOAD_BYTES` (see `start.ts`) since a firm on Postgres
+ * with real headroom may reasonably want it higher.
  */
+const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export interface DocumentSummary {
   id: string;
   matterId: string;
@@ -48,10 +61,17 @@ function summarize(doc: CaseDocument): DocumentSummary {
 export class DocumentsService {
   #accessControl: AccessControl;
   #store: DocumentStore;
+  #maxUploadBytes: number;
 
-  constructor(params: { accessControl: AccessControl; store: DocumentStore }) {
+  constructor(params: { accessControl: AccessControl; store: DocumentStore; maxUploadBytes?: number }) {
     this.#accessControl = params.accessControl;
     this.#store = params.store;
+    this.#maxUploadBytes = params.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
+  }
+
+  /** Exposed so the UI can tell a paralegal/attorney the limit before they try uploading something over it. */
+  getMaxUploadBytes(): number {
+    return this.#maxUploadBytes;
   }
 
   listMatterDocuments(actor: Actor, matterId: string): DocumentSummary[] {
@@ -64,6 +84,10 @@ export class DocumentsService {
     requireCaseFileRole(actor);
     this.#accessControl.authorize({ actor, matterId, category: "case_file" });
     if (!params.fileName.trim()) throw new Error("fileName is required");
+    const size = Buffer.byteLength(params.content, "base64");
+    if (size > this.#maxUploadBytes) {
+      throw new Error(`file is ${size} bytes, over the ${this.#maxUploadBytes}-byte upload limit for this server`);
+    }
     const doc = this.#store.upload({
       matterId,
       fileName: params.fileName,

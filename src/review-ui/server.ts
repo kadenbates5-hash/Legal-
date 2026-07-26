@@ -20,6 +20,7 @@ import type { MessagingService } from "./messaging-service.js";
 import type { StaffScheduleService } from "./staff-schedule-service.js";
 import type { StaffScheduleStatus } from "../core/staff-schedule.js";
 import type { BillingHoursService } from "./billing-hours-service.js";
+import type { PdfReportService } from "./pdf-report-service.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { verifyTwilioSignature, twimlPlayThenRecord, twimlPlayThenHangup, downloadTwilioRecording } from "../integrations/twilio-voice.js";
@@ -242,6 +243,7 @@ export interface ReviewServerOptions {
   messaging?: MessagingService;
   staffSchedule?: StaffScheduleService;
   billingHours?: BillingHoursService;
+  pdfReports?: PdfReportService;
   /** Real-call telephony voice channel (see `receptionist/voice-call-sessions.ts`) — `voiceCalls`/`audioClips`/`twilio` must all be set together for `/api/voice/*` to be configured. */
   voiceCalls?: VoiceCallSessions;
   audioClips?: AudioClipStore;
@@ -278,6 +280,7 @@ async function handleRequest(
     messaging,
     staffSchedule,
     billingHours,
+    pdfReports,
     voiceCalls,
     audioClips,
     twilio,
@@ -475,6 +478,15 @@ async function handleRequest(
         return;
       }
       await handleBillingHoursRequest(billingHours, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/pdf-reports")) {
+      if (!pdfReports) {
+        sendJson(res, 404, { error: "PDF reports are not configured on this server" });
+        return;
+      }
+      await handlePdfReportsRequest(pdfReports, req, res, actor, url, onMutated);
       return;
     }
 
@@ -798,6 +810,11 @@ async function handleDocumentsRequest(
 ): Promise<void> {
   const segments = url.pathname.replace(/^\/api\/documents\/?/, "").split("/").filter(Boolean);
 
+  if (segments.length === 1 && segments[0] === "limits" && req.method === "GET") {
+    sendJson(res, 200, { maxUploadBytes: documents.getMaxUploadBytes() });
+    return;
+  }
+
   if (segments[0] !== "matters" || !segments[1]) {
     sendJson(res, 404, { error: "not found" });
     return;
@@ -835,6 +852,41 @@ async function handleDocumentsRequest(
   if (segments.length === 3 && req.method === "DELETE") {
     documents.delete(actor, matterId, id);
     sendJson(res, 200, { ok: true });
+    onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handlePdfReportsRequest(
+  pdfReports: PdfReportService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  const segments = url.pathname.replace(/^\/api\/pdf-reports\/?/, "").split("/").filter(Boolean);
+
+  if (segments[0] !== "matters" || !segments[1] || !segments[2] || !segments[3]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const matterId = segments[1]!;
+  const documentId = segments[2]!;
+  const action = segments[3]!;
+
+  if (action === "draft-report" && req.method === "POST") {
+    const result = await pdfReports.draftReportFromDocument(actor, matterId, documentId);
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (action === "condense" && req.method === "POST") {
+    const result = await pdfReports.condenseDocument(actor, matterId, documentId);
+    sendJson(res, 200, result);
     onMutated?.();
     return;
   }

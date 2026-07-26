@@ -27,6 +27,16 @@ import type { UtilizationTracker } from "../core/utilization.js";
  *    via `PracticeAreaModule.deriveWorkProductFlags`
  */
 export const RESEARCH_REQUIRES_VERIFICATION_FLAG = "research_requires_attorney_verification";
+/**
+ * Unconditional, like the research-verification flag above: text
+ * extracted from an uploaded PDF (via `integrations/pdf-text.ts`) can be
+ * wrong or incomplete — a scanned/image-only page yields no text at all,
+ * and even a real text layer can carry OCR artifacts or lose layout
+ * (tables, multi-column text). A drafted report built from it is never
+ * more reliable than that extraction, so it always needs the same
+ * attorney sign-off before it can be treated as accurate.
+ */
+export const PDF_EXTRACTION_REQUIRES_VERIFICATION_FLAG = "pdf_extraction_requires_attorney_verification";
 /** Re-exported from core/deadline.ts, where it conceptually belongs, for backward compatibility. */
 export { DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG };
 
@@ -48,6 +58,15 @@ export interface ResearchSummaryRequest {
 
 export interface BillingNarrativeRequest {
   content: string;
+}
+
+export interface DocumentReportRequest {
+  /** The uploaded PDF this report was generated from — see core/document-store.ts. */
+  sourceDocumentId: string;
+  sourceFileName: string;
+  /** Raw text pulled from the PDF (see integrations/pdf-text.ts) — never edited by this method, only wrapped in a report header. */
+  extractedText: string;
+  pageCount: number;
 }
 
 let workProductSequence = 0;
@@ -129,6 +148,23 @@ export class ParalegalDraftingSession {
     const content = `${request.content}\n\nCitations:\n${request.citations.map((c) => `- ${c}`).join("\n")}`;
     const workProduct = this.#startDraft("research_summary", content, "draft legal research summary");
     workProduct.addFlag(RESEARCH_REQUIRES_VERIFICATION_FLAG);
+    return workProduct;
+  }
+
+  /**
+   * A report drafted from a previously uploaded PDF's extracted text
+   * (§3's "draft from templates" family, extended to PDF intake). Unlike
+   * `draftFromTemplate`, this always carries
+   * `PDF_EXTRACTION_REQUIRES_VERIFICATION_FLAG` unconditionally — see
+   * that flag's doc comment for why.
+   */
+  draftDocumentReport(request: DocumentReportRequest): WorkProduct {
+    if (!request.extractedText.trim()) {
+      throw new Error("no extractable text was found in this PDF — it may be a scanned/image-only document");
+    }
+    const content = `Document analysis report — ${request.sourceFileName} (${request.pageCount} page${request.pageCount === 1 ? "" : "s"})\n\n${request.extractedText}`;
+    const workProduct = this.#startDraft("document_report", content, `draft report from ${request.sourceFileName}`);
+    workProduct.addFlag(PDF_EXTRACTION_REQUIRES_VERIFICATION_FLAG);
     return workProduct;
   }
 

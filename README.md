@@ -51,9 +51,12 @@ assignment, visible to every logged-in human); a **Messages** panel with
 direct messages, named group chats, and a firm-wide Announcements channel
 anyone can post to; a **Schedule** panel tracking who's in the office,
 remote, or out on a given day (self-service, or attorney-set for anyone
-else); and a **Billing** panel where lawyers and paralegals log billable
+else); a **Billing** panel where lawyers and paralegals log billable
 hours against a matter, kept distinct from the AI-utilization
-telemetry — plus the interfaces a practice-area module and firm config
+telemetry; and, on the Cases panel, a PDF intake pipeline — draft a
+report from an uploaded PDF's extracted text (always flagged for
+attorney verification) or condense one into a smaller file — plus the
+interfaces a practice-area module and firm config
 plug into. See CLAUDE.md's "Not yet built" section for what's still ahead
 (the one-time Twilio console step of pointing a real phone number at
 this, MFA, Google Calendar key rotation/vendor due-diligence).

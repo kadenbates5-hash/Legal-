@@ -1280,6 +1280,7 @@ async function loadCaseDetail(matterId) {
           </label>
           <button class="btn primary" id="caseUploadBtn">Upload</button>
         </div>
+        <div id="uploadLimitNote" style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;"></div>
       </div>
       <div class="card">
         <h3>Documents</h3>
@@ -1291,17 +1292,56 @@ async function loadCaseDetail(matterId) {
       </div>
     `;
 
+    api("/api/documents/limits")
+      .then((limits) => {
+        document.getElementById("uploadLimitNote").textContent = `Max upload size: ${formatBytes(limits.maxUploadBytes)} per file.`;
+      })
+      .catch(() => {});
+
     const docList = document.getElementById("caseDocuments");
     docList.innerHTML = "";
     for (const doc of detail.documents) {
+      const isPdf = doc.contentType === "application/pdf" || doc.fileName.toLowerCase().endsWith(".pdf");
       const li = document.createElement("li");
       li.classList.add("static");
-      li.innerHTML = `<strong>${doc.fileName}</strong>
+      li.innerHTML = `<strong>${escapeHtml(doc.fileName)}</strong>
         <span class="badge">${formatBytes(doc.size)}</span>
-        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">Uploaded by ${doc.uploadedBy} on ${new Date(doc.uploadedAt).toLocaleString()}</div>`;
+        <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">Uploaded by ${escapeHtml(doc.uploadedBy)} on ${new Date(doc.uploadedAt).toLocaleString()}</div>`;
       const downloadBtn = mkButton("Download", () => downloadDocument(matterId, doc));
       li.appendChild(document.createElement("br"));
       li.appendChild(downloadBtn);
+      if (isPdf) {
+        const draftReportBtn = mkButton("Draft report from this PDF", async () => {
+          showError("");
+          try {
+            draftReportBtn.disabled = true;
+            await api(`/api/pdf-reports/matters/${encodeURIComponent(matterId)}/${doc.id}/draft-report`, { method: "POST" });
+            await loadCaseDetail(matterId);
+          } catch (err) {
+            showError(err.message);
+          } finally {
+            draftReportBtn.disabled = false;
+          }
+        });
+        draftReportBtn.classList.add("primary");
+        const condenseBtn = mkButton("Condense", async () => {
+          showError("");
+          try {
+            condenseBtn.disabled = true;
+            const result = await api(`/api/pdf-reports/matters/${encodeURIComponent(matterId)}/${doc.id}/condense`, { method: "POST" });
+            await loadCaseDetail(matterId);
+            showError(
+              `Condensed '${result.originalDocument.fileName}': ${formatBytes(result.originalBytes)} -> ${formatBytes(result.condensedBytes)}, ` +
+                `saved as a new document '${result.condensedDocument.fileName}'.`,
+            );
+          } catch (err) {
+            showError(err.message);
+          } finally {
+            condenseBtn.disabled = false;
+          }
+        });
+        li.append(draftReportBtn, condenseBtn);
+      }
       docList.appendChild(li);
     }
     if (detail.documents.length === 0) docList.innerHTML = '<li class="static empty">No documents uploaded yet.</li>';

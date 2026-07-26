@@ -581,6 +581,94 @@ What this doesn't do: give an announcement poster any special role check
 actual client invoice from logged billing hours — it's the timekeeping
 record, not the billing pipeline.
 
+## PDF intake, document-report drafting, and PDF condensing (resolved)
+
+A place to insert PDF files, have them read, and get a draft report out
+the other side — plus a way to shrink a PDF's size. Both are built on
+top of already-uploaded documents (`core/document-store.ts`), not a
+separate upload surface.
+
+- `integrations/pdf-text.ts` — `PdfTextExtractor`/`PdfParseTextExtractor`,
+  a vendor-agnostic interface (same pattern as `CaseLawSearchClient`/
+  `ClaudeClient`) over `pdf-parse`. `pdf-parse` and `pdf-lib` (below) are
+  deliberate, justified exceptions to this project's dependency-light
+  style — same reasoning as `pg` being the one earlier exception:
+  reimplementing PDF text extraction or object-stream rewriting from
+  scratch isn't a reasonable ask. `pdf-parse` only reads a PDF's real
+  text layer — it does **not** OCR scanned/image-only pages, so those
+  come back with little or no text.
+- `paralegal/drafting.ts` — `ParalegalDraftingSession.draftDocumentReport()`
+  wraps extracted text into a `document_report`-kind `WorkProduct`,
+  unconditionally carrying `PDF_EXTRACTION_REQUIRES_VERIFICATION_FLAG` —
+  same unconditional-flag pattern as `RESEARCH_REQUIRES_VERIFICATION_FLAG`,
+  since extracted text can be wrong, incomplete, or (for a scanned page)
+  entirely absent. `review-ui/drafting-service.ts` exposes it the same
+  way as `draftResearchSummary`/`draftBillingNarrative`.
+- `integrations/pdf-condenser.ts` — `PdfCondenser`/`PdfLibCondenser`, over
+  `pdf-lib`: reloads a PDF, strips its metadata (title/author/subject/
+  keywords/creator/producer), and re-saves with compressed object
+  streams. This meaningfully shrinks PDFs with many small objects
+  (exported from word processors, form-heavy documents) but does **not**
+  recompress or downsample embedded images — a scanned, image-heavy PDF
+  will see little to no reduction. Real image recompression needs an
+  image codec or an external tool (e.g. Ghostscript), deliberately out
+  of scope, the same "not a substitute for a real tool" caveat this
+  project already gives Voicebox/CourtListener for their own limits.
+- `review-ui/pdf-report-service.ts` — `PdfReportService`, backing the
+  Cases panel's "Draft report from this PDF" and "Condense" buttons on
+  any uploaded PDF. Deliberately a thin composition over `DocumentsService`
+  (already the access-controlled gate on a matter's uploaded files) and
+  `DraftingService` (already the access-controlled gate on drafting) —
+  it adds no `AccessControl` checks of its own beyond a role check, since
+  every store access already goes through one of those two services.
+  Condensing never overwrites the original file — it uploads the
+  condensed bytes as a *new* document named `<original> (condensed).pdf`,
+  same reasoning as `reviseDraft` never mutating an already-submitted
+  `WorkProduct` in place.
+- `server.ts` wires this as `POST /api/pdf-reports/matters/:matterId/:documentId/draft-report`
+  and `POST /api/pdf-reports/matters/:matterId/:documentId/condense`
+  (404 if no `PdfReportService` was passed to `createReviewServer`), plus
+  `GET /api/documents/limits` (see storage capacity below).
+
+**Storage capacity.** Every uploaded file's base64 content lives inline
+in the single JSON document this whole project persists as (see
+"Persistence" below) — there's no separate filesystem/object-store path.
+That means an unbounded upload doesn't just cost disk: `onMutated`
+rewrites the *entire* state blob on every mutation, so a huge file makes
+every other request slower too, and both backends have their own hard
+ceiling regardless:
+
+- **File-backed (default)**: bounded by available disk plus Node's
+  in-memory string/JSON limits — practically, tens of MB total is
+  comfortable; hundreds of MB starts costing real latency on every
+  request; there's no enforced ceiling from Node itself until you're
+  well past what this architecture is meant for.
+- **Postgres-backed**: the entire state document is one `JSONB` value
+  (see `postgres-store.ts`), and Postgres hard-caps a single `JSONB`
+  value at **1 GB** — that's a hard ceiling on the *sum* of every
+  document, work product, message, and everything else this project
+  persists, not just PDFs.
+
+Given that, `DocumentsService` enforces a **25 MB per-file** upload cap
+by default (`DEFAULT_MAX_UPLOAD_BYTES` in `documents-service.ts`) —
+generous for a scanned contract or brief, nowhere near either backend's
+ceiling even with many files, and it rules out someone uploading
+something the architecture was never meant to hold (a video, a database
+dump). It's configurable via `MAX_DOCUMENT_UPLOAD_BYTES` in `start.ts`
+for a firm on Postgres with real headroom that wants it higher — but
+raising it doesn't raise Postgres's 1 GB *total* ceiling, it only changes
+how much of that ceiling one file can claim. `GET /api/documents/limits`
+surfaces the configured number to the UI so a paralegal/attorney sees it
+before trying to upload something over it, rather than discovering the
+cap by having an upload rejected.
+
+What none of this does: OCR a scanned PDF (so `draftDocumentReport` on
+one will legitimately have little or nothing to summarize — the
+unconditional verification flag is exactly the safety net for that), or
+recompress embedded images when condensing (see `pdf-condenser.ts`'s doc
+comment above) — a scanned, image-heavy PDF condenses poorly by design,
+not by bug.
+
 ## Real authentication (§5/§6 — resolved)
 
 `src/core/auth.ts` — `AuthService`. Replaces the earlier
@@ -732,13 +820,13 @@ session sees an inline "attorney-only" message instead of a background
   it. `/api/intake/*`, `/api/accounts*`, `/api/drafting/*`,
   `/api/documents/*`, `/api/cases*`, `/api/audit*`, `/api/research/*`,
   `/api/assistant/*`, `/api/staff`, `/api/messages/*`,
-  `/api/staff-schedule/*`, and `/api/billing-hours/*` are 404 if no
-  `IntakeDemoSessions`/`AccountsService`/`DraftingService`/
+  `/api/staff-schedule/*`, `/api/billing-hours/*`, and `/api/pdf-reports/*`
+  are 404 if no `IntakeDemoSessions`/`AccountsService`/`DraftingService`/
   `DocumentsService`/`CasesService`/`AuditService`/`ResearchService`/
   `AssistantService`/`StaffService`/`MessagingService`/
-  `StaffScheduleService`/`BillingHoursService` was passed to
-  `createReviewServer`, respectively. `npm run build` copies `public/`
-  into `dist/` since `tsc` only compiles `.ts` files.
+  `StaffScheduleService`/`BillingHoursService`/`PdfReportService` was
+  passed to `createReviewServer`, respectively. `npm run build` copies
+  `public/` into `dist/` since `tsc` only compiles `.ts` files.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
 - `public/index.html` — the Docket app shell: a dark sidebar (brand +
@@ -752,8 +840,11 @@ session sees an inline "attorney-only" message instead of a background
   revise/submit — nav item hidden unless `GET /api/me` reports role
   `attorney` or `paralegal`), Cases (a clickable list of every matter,
   expanding into that matter's uploaded documents — upload a file and
-  download it back out as a data URI — alongside its drafted work product;
-  same role gate as Drafting), Research (search case law, "Save to
+  download it back out as a data URI, plus "Draft report from this PDF"
+  and "Condense" actions on any uploaded PDF (see "PDF intake,
+  document-report drafting, and PDF condensing" above) — alongside its
+  drafted work product; same role gate as Drafting), Research (search
+  case law, "Save to
   matter" on any result, and a per-matter quick-access list with a
   Remove action — same role gate as Drafting), Assistant (a chat window
   driving `assistant-service.ts` — "Start new conversation" then ask it
@@ -893,6 +984,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
 # ANTHROPIC_API_KEY=sk-ant-...  ANTHROPIC_MODEL=claude-sonnet-5  npm run start:review-ui  # enable the Assistant panel; ANTHROPIC_MODEL/ANTHROPIC_BASE_URL are optional overrides
+# MAX_DOCUMENT_UPLOAD_BYTES=52428800 npm run start:review-ui               # optional — override the 25 MB default per-file cap on Cases-panel uploads (see "PDF intake..." above for why this cap exists)
 ```
 
 ## §7 open items — status

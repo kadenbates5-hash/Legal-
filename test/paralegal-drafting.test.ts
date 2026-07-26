@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ParalegalDraftingSession, RESEARCH_REQUIRES_VERIFICATION_FLAG, DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG } from "../src/paralegal/drafting.js";
+import {
+  ParalegalDraftingSession,
+  RESEARCH_REQUIRES_VERIFICATION_FLAG,
+  DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG,
+  PDF_EXTRACTION_REQUIRES_VERIFICATION_FLAG,
+} from "../src/paralegal/drafting.js";
 import { AccessControl } from "../src/core/access-control.js";
 import { AuditLog } from "../src/core/audit.js";
 import { UtilizationTracker } from "../src/core/utilization.js";
@@ -108,6 +113,30 @@ describe("paralegal drafting session", () => {
   it("refuses to draft a research summary with no citations", () => {
     const { session } = makeSession();
     expect(() => session.draftResearchSummary({ content: "some analysis", citations: [] })).toThrow(/citation/);
+  });
+
+  it("always flags a document report drafted from a PDF for attorney verification, unconditionally", () => {
+    const { session } = makeSession();
+    const wp = session.draftDocumentReport({
+      sourceDocumentId: "doc_1",
+      sourceFileName: "contract.pdf",
+      extractedText: "This agreement is entered into by...",
+      pageCount: 3,
+    });
+    expect(wp.flags.has(PDF_EXTRACTION_REQUIRES_VERIFICATION_FLAG)).toBe(true);
+    expect(wp.content).toContain("contract.pdf");
+    expect(wp.content).toContain("3 pages");
+    expect(wp.content).toContain("This agreement is entered into by...");
+
+    session.submitForReview(wp);
+    expect(() => wp.approve(attorney)).toThrow(ReviewGateError);
+  });
+
+  it("refuses to draft a document report with no extractable text", () => {
+    const { session } = makeSession();
+    expect(() =>
+      session.draftDocumentReport({ sourceDocumentId: "doc_1", sourceFileName: "scan.pdf", extractedText: "   ", pageCount: 1 }),
+    ).toThrow(/no extractable text/);
   });
 
   it("scopes billing narratives to billing_internal, separately from case_file drafting", () => {

@@ -11,6 +11,7 @@ import {
   type DraftFromTemplateRequest,
   type ResearchSummaryRequest,
   type BillingNarrativeRequest,
+  type DocumentReportRequest,
 } from "../paralegal/drafting.js";
 
 /**
@@ -118,6 +119,12 @@ export class DraftingService {
   draftBillingNarrative(actor: Actor, matterId: string, request: BillingNarrativeRequest): WorkProductDetail {
     requireDraftingRole(actor);
     const wp = this.#sessionFor(actor, matterId).draftBillingNarrative(request);
+    return detail(wp);
+  }
+
+  draftDocumentReport(actor: Actor, matterId: string, request: DocumentReportRequest): WorkProductDetail {
+    requireDraftingRole(actor);
+    const wp = this.#sessionFor(actor, matterId).draftDocumentReport(request);
     return detail(wp);
   }
 

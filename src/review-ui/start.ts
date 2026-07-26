@@ -26,6 +26,9 @@ import { StaffService } from "./staff-service.js";
 import { MessagingService } from "./messaging-service.js";
 import { StaffScheduleService } from "./staff-schedule-service.js";
 import { BillingHoursService } from "./billing-hours-service.js";
+import { PdfReportService } from "./pdf-report-service.js";
+import { PdfParseTextExtractor } from "../integrations/pdf-text.js";
+import { PdfLibCondenser } from "../integrations/pdf-condenser.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -137,12 +140,38 @@ const drafting = new DraftingService({
   deadlineTracker: state.deadlineTracker,
 });
 
-/** Backs the "Cases" panel: uploaded documents (documents) plus the clickable per-matter view combining them with drafted work product (cases). */
-const documents = new DocumentsService({ accessControl: state.accessControl, store: state.documentStore });
+/**
+ * Backs the "Cases" panel: uploaded documents (documents) plus the
+ * clickable per-matter view combining them with drafted work product
+ * (cases). `MAX_DOCUMENT_UPLOAD_BYTES` overrides `DocumentsService`'s
+ * 25 MB default — see that file's doc comment for why this cap exists at
+ * all (this project's single-JSON-blob persistence model).
+ */
+const MAX_DOCUMENT_UPLOAD_BYTES = process.env["MAX_DOCUMENT_UPLOAD_BYTES"];
+const documents = new DocumentsService({
+  accessControl: state.accessControl,
+  store: state.documentStore,
+  ...(MAX_DOCUMENT_UPLOAD_BYTES ? { maxUploadBytes: Number(MAX_DOCUMENT_UPLOAD_BYTES) } : {}),
+});
 const cases = new CasesService({
   accessControl: state.accessControl,
   workProductStore: state.workProductStore,
   documentStore: state.documentStore,
+});
+
+/**
+ * Backs the Cases panel's "Draft report"/"Condense" actions on an
+ * uploaded PDF — see pdf-report-service.ts. Both `pdf-parse` (text
+ * extraction) and `pdf-lib` (condensing) are pure-JS, so unlike the
+ * Voicebox/Twilio integrations there's no separate vendor process or API
+ * key to configure; this is always available whenever `documents`/
+ * `drafting` are.
+ */
+const pdfReports = new PdfReportService({
+  documents,
+  drafting,
+  extractor: new PdfParseTextExtractor(),
+  condenser: new PdfLibCondenser(),
 });
 
 /** Backs the attorney-only "Audit Log" panel — see audit-service.ts. */
@@ -265,6 +294,7 @@ const server = createReviewServer(service, state.auth, {
   messaging,
   staffSchedule,
   billingHours,
+  pdfReports,
   trustProxy,
   ...(assistant ? { assistant } : {}),
   ...voiceOptions,

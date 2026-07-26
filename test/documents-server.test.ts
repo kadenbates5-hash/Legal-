@@ -81,6 +81,14 @@ describe("documents HTTP API", () => {
     expect(res.status).toBe(401);
   });
 
+  it("reports the configured max upload size", async () => {
+    const res = await fetch(`${baseUrl}/api/documents/limits`, withCookie(paralegalCookie));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(typeof body.maxUploadBytes).toBe("number");
+    expect(body.maxUploadBytes).toBeGreaterThan(0);
+  });
+
   it("uploads and lists a document on the paralegal's assigned matter", async () => {
     const uploadRes = await fetch(
       `${baseUrl}/api/documents/matters/m1`,

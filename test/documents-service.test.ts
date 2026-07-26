@@ -29,6 +29,21 @@ describe("DocumentsService", () => {
     expect(doc.uploadedBy).toBe("p1");
   });
 
+  it("rejects an upload over the configured max size", () => {
+    const accessControl = new AccessControl(new AuditLog());
+    accessControl.assignParalegal("p1", "m1");
+    const documents = new DocumentsService({ accessControl, store: new DocumentStore(), maxUploadBytes: 4 });
+    expect(() =>
+      documents.upload(paralegal, "m1", { fileName: "big.pdf", contentType: "application/pdf", content: Buffer.from("this is definitely over 4 bytes").toString("base64") }),
+    ).toThrow(/upload limit/);
+  });
+
+  it("reports the configured max upload size", () => {
+    const accessControl = new AccessControl(new AuditLog());
+    const documents = new DocumentsService({ accessControl, store: new DocumentStore(), maxUploadBytes: 12345 });
+    expect(documents.getMaxUploadBytes()).toBe(12345);
+  });
+
   it("denies uploading on a matter the paralegal isn't assigned to", () => {
     const { documents } = makeService();
     expect(() =>
