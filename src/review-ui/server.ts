@@ -1317,6 +1317,14 @@ async function handleInvoicingRequest(
       case "pay-from-trust":
         result = invoicing.payFromTrust(actor, matterId, invoiceId, Number(body["amountCents"]));
         break;
+      case "remind":
+        result = await invoicing.emailReminder(
+          actor,
+          matterId,
+          invoiceId,
+          typeof body["to"] === "string" && body["to"] ? body["to"] : undefined,
+        );
+        break;
       case "email":
         result = await invoicing.emailInvoice(
           actor,

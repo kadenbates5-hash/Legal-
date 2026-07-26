@@ -240,6 +240,63 @@ export function renderInvoice(params: RenderInvoiceParams): RenderedInvoice {
   return { subject, text: t.join("\n"), html: h.join("\n") };
 }
 
+/**
+ * The covering note for a payment reminder.
+ *
+ * A reminder is a different communication from the bill, and reads badly
+ * if it is just the bill sent twice. Three things it must do and this
+ * does: say plainly what is owed and since when, restate the itemisation
+ * underneath so the client isn't asked to go find the original, and
+ * **not accuse anyone**. The overwhelmingly common reason a legal bill
+ * goes unpaid is that it was mislaid, and a firm that opens with an
+ * accusation over a filing error damages a client relationship to chase
+ * money it was going to get anyway. The wording stays factual, offers
+ * the possibility that payment has crossed in the post, and invites a
+ * reply — a firm wanting something sterner can say so itself.
+ */
+export function renderReminder(params: RenderInvoiceParams & { daysOverdue: number }): RenderedInvoice {
+  const invoice = params.invoice;
+  const matterTitle = params.matterTitle || invoice.matterId;
+  const balance = formatCents(params.totals.balanceCents);
+  const partlyPaid = params.totals.paidCents > 0;
+
+  const subject =
+    params.daysOverdue > 0
+      ? `Reminder: invoice ${invoice.number} — ${balance} outstanding`
+      : `Invoice ${invoice.number} — ${balance} outstanding`;
+
+  const opening = [
+    params.clientName ? `Dear ${params.clientName},` : "Hello,",
+    "",
+    params.daysOverdue > 0
+      ? `Our records show invoice ${invoice.number} for ${matterTitle} remains unpaid. It was due on ${invoice.dueDate}, ${params.daysOverdue} day${params.daysOverdue === 1 ? "" : "s"} ago.`
+      : `This is a reminder that invoice ${invoice.number} for ${matterTitle} is outstanding.`,
+    "",
+    partlyPaid
+      ? `${formatCents(params.totals.paidCents)} has been received against a total of ${formatCents(params.totals.subtotalCents)}, leaving ${balance} outstanding.`
+      : `The amount outstanding is ${balance}.`,
+    "",
+    "If payment has already been sent, please accept our thanks and disregard this note — the two may simply have crossed. If anything on the invoice needs discussing, reply to this message and we will go through it with you.",
+    "",
+    "The full invoice is set out below and attached.",
+    "",
+    "—",
+    "",
+  ].join("\n");
+
+  const invoiceCopy = renderInvoice(params);
+  const htmlOpening = opening
+    .split("\n\n")
+    .map((para) => `<p style="margin:0 0 12px">${escapeHtml(para).replace(/\n/g, "<br />")}</p>`)
+    .join("\n");
+
+  return {
+    subject,
+    text: `${opening}\n${invoiceCopy.text}`,
+    html: `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#111;max-width:720px;font-size:14px;line-height:1.5">${htmlOpening}</div>\n${invoiceCopy.html}`,
+  };
+}
+
 function labelRow(label: string, value: string): string {
   return `<tr><td style="padding:2px 16px 2px 0;color:#666">${escapeHtml(label)}</td><td style="padding:2px 0">${escapeHtml(
     value,

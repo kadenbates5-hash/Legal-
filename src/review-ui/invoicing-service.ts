@@ -14,7 +14,13 @@ import {
 } from "../core/invoicing.js";
 import type { PaymentProcessor } from "../integrations/payment-processor.js";
 import { assertSafeEmailAddress, type EmailSender } from "../integrations/email-sender.js";
-import { renderInvoice, type RenderInvoiceParams, type RenderableFirm, type RenderedInvoice } from "../core/invoice-render.js";
+import {
+  renderInvoice,
+  renderReminder,
+  type RenderInvoiceParams,
+  type RenderableFirm,
+  type RenderedInvoice,
+} from "../core/invoice-render.js";
 import { invoicePdfFilename, type InvoicePdfRenderer } from "../integrations/invoice-pdf.js";
 import { billingEmailFor, type MatterStore } from "../core/matters.js";
 import type { AuthService } from "../core/auth.js";
@@ -36,6 +42,13 @@ export interface OutstandingInvoice extends InvoiceView {
   daysOverdue: number;
   matterTitle: string | undefined;
   clientName: string | undefined;
+  /**
+   * When this client was last chased about this invoice, so nobody sends
+   * a third reminder in a week without meaning to. Surfaced rather than
+   * enforced — how hard to press is the firm's call, not the software's.
+   */
+  lastRemindedAt: string | undefined;
+  reminderCount: number;
 }
 
 /** Whole days between two ISO dates, using UTC so a timezone can't produce an off-by-one. */
@@ -142,9 +155,12 @@ export class InvoicingService {
         continue;
       }
       const daysOverdue = invoice.dueDate && invoice.dueDate < today ? daysBetween(invoice.dueDate, today) : 0;
+      const reminders = invoice.deliveries.filter((d) => d.kind === "reminder");
       rows.push({
         ...this.#view(invoice),
         daysOverdue,
+        lastRemindedAt: reminders.at(-1)?.at,
+        reminderCount: reminders.length,
         matterTitle: this.#matters?.get(invoice.matterId)?.title,
         clientName: this.#matters?.get(invoice.matterId)?.parties.find((p) => p.role === "client")?.name,
       });
@@ -444,22 +460,9 @@ export class InvoicingService {
     if (invoice.status === "void") throw new InvoicingError(`invoice ${invoice.number} is void`);
     if (invoice.lineItems.length === 0) throw new InvoicingError("refusing to send an invoice with no line items");
 
-    // Rethrown as an InvoicingError so a bad address is a 400 rather than
-    // an unhandled 500 — this is user input, not an internal fault.
-    let recipient: string;
-    try {
-      recipient = assertSafeEmailAddress(
-        to ??
-          this.#clientEmail(matterId) ??
-          "",
-      );
-    } catch (err) {
-      throw new InvoicingError(
-        to
-          ? (err as Error).message
-          : `no client email is on record for matter '${matterId}' — add one to the client party on the Conflicts panel, or type an address here`,
-      );
-    }
+    // A bad address surfaces as an InvoicingError (a 400) rather than an
+    // unhandled 500 — this is user input, not an internal fault.
+    const recipient = this.#resolveRecipient(matterId, to);
     // Rendered as *issued*, even though the status transition happens
     // below: the copy in the client's inbox must not say "draft — not
     // yet issued". Only the date is printed, so the sub-second gap
@@ -527,6 +530,99 @@ export class InvoicingService {
       filename: invoicePdfFilename(invoice.number, params.matterTitle ?? invoice.matterId),
       data: await this.#pdf.render(params),
     };
+  }
+
+  /**
+   * Emails a payment reminder for an unpaid issued invoice.
+   *
+   * Attorney-only, like sending the bill: chasing a client for money is
+   * a decision about the relationship, not a clerical act.
+   *
+   * Deliberately **not automated**. The infrastructure to run this on a
+   * schedule exists — the receivables query and the mail transport are
+   * both here — and it is left as a button on purpose. Automated dunning
+   * mails a client who is disputing the bill, or who agreed terms with a
+   * partner last week, or whose relative died; a firm's judgement about
+   * when to chase is not a cron expression. What the software does
+   * instead is make the decision easy to make well: show what's overdue,
+   * show when this client was last chased, and send in one click.
+   */
+  async emailReminder(actor: Actor, matterId: string, invoiceId: string, to?: string): Promise<InvoiceView> {
+    requireLegalStaff(actor);
+    if (actor.role !== "attorney") {
+      throw new AccessDeniedError("sending a payment reminder is attorney-only — it is a decision about the client relationship");
+    }
+    this.#accessControl.authorize({ actor, matterId, category: "billing_internal" });
+    if (!this.#email?.canSend) {
+      throw new InvoicingError(
+        "no email transport is configured — preview the invoice and send a reminder from your own mail client instead",
+      );
+    }
+    const invoice = this.#requireOnMatter(matterId, invoiceId);
+    if (invoice.status === "draft") throw new InvoicingError("send the invoice before reminding anyone about it");
+    if (invoice.status === "void") throw new InvoicingError(`invoice ${invoice.number} is void`);
+
+    const totals = this.#store.totals(invoice.id);
+    // Chasing a client for money they don't owe is the single worst
+    // outcome here, so it's refused outright rather than left to the UI.
+    if (totals.balanceCents <= 0) {
+      throw new InvoicingError(`invoice ${invoice.number} is paid in full — there is nothing to remind anyone about`);
+    }
+
+    const recipient = this.#resolveRecipient(matterId, to);
+    const params = this.#renderParams(invoice);
+    const rendered = renderReminder({ ...params, daysOverdue: this.#daysOverdue(invoice.dueDate) });
+
+    const attachments = this.#pdf
+      ? [
+          {
+            filename: invoicePdfFilename(invoice.number, params.matterTitle ?? invoice.matterId),
+            contentType: "application/pdf",
+            content: await this.#pdf.render(params),
+          },
+        ]
+      : [];
+
+    const result = await this.#email.send({
+      to: recipient,
+      subject: rendered.subject,
+      text: rendered.text,
+      html: rendered.html,
+      ...(attachments.length ? { attachments } : {}),
+    });
+
+    this.#store.recordDelivery(invoice.id, {
+      to: recipient,
+      by: actor.id,
+      kind: "reminder",
+      ...(result.messageId ? { messageId: result.messageId } : {}),
+    });
+    this.#audit(
+      actor,
+      matterId,
+      "invoice_reminder_sent",
+      `invoice=${invoice.number} to=${recipient} balanceCents=${totals.balanceCents} daysOverdue=${this.#daysOverdue(invoice.dueDate)}`,
+    );
+    return this.#view(invoice);
+  }
+
+  #daysOverdue(dueDate: string | undefined, asOf: Date = new Date()): number {
+    if (!dueDate) return 0;
+    const today = asOf.toISOString().slice(0, 10);
+    return dueDate < today ? daysBetween(dueDate, today) : 0;
+  }
+
+  /** Shared by `emailInvoice` and `emailReminder` so both fail the same way on a bad or missing address. */
+  #resolveRecipient(matterId: string, to?: string): string {
+    try {
+      return assertSafeEmailAddress(to ?? this.#clientEmail(matterId) ?? "");
+    } catch (err) {
+      throw new InvoicingError(
+        to
+          ? (err as Error).message
+          : `no client email is on record for matter '${matterId}' — add one to the client party on the Conflicts panel, or type an address here`,
+      );
+    }
   }
 
   #clientEmail(matterId: string): string | undefined {

@@ -2067,13 +2067,47 @@ async function loadProcessorInfo() {
 
 /** Whether the configured processor can actually move money, so the panel offers "charge" only when it would work. */
 let processorCanCharge = false;
+/**
+ * Whether mail is configured, so a reminder button isn't offered where it
+ * would only fail. Fetched once and cached: the receivables list and the
+ * invoice list load in parallel, so a flag set as a side effect of one
+ * would race the other and the button would come and go.
+ */
+let emailTransportPromise = null;
+function emailTransportReady() {
+  emailTransportPromise ??= tryApi("/api/invoices/email-transport").then((t) => t?.canSend ?? false);
+  return emailTransportPromise;
+}
+
+/**
+ * Chasing a client for money is a real communication, so it confirms —
+ * naming the client and the amount — and says how often they've already
+ * been chased. No automatic dunning: when to press is the firm's call.
+ */
+async function sendReminder(row) {
+  showError("");
+  const already = row.reminderCount
+    ? `\n\nThey have already been reminded ${row.reminderCount} time${row.reminderCount === 1 ? "" : "s"}, most recently on ${new Date(row.lastRemindedAt).toLocaleDateString()}.`
+    : "";
+  const who = row.clientName || "the client";
+  if (!confirm(`Email ${who} a reminder that ${row.number} (${centsToDollars(row.totals.balanceCents)}) is outstanding?${already}`)) return;
+  try {
+    await api(`/api/invoices/matters/${encodeURIComponent(row.matterId)}/${row.id}/remind`, {
+      method: "POST",
+      body: "{}",
+    });
+    await loadOutstanding();
+  } catch (err) {
+    showError(err.message);
+  }
+}
 
 /** The accounts-receivable view: unpaid issued invoices, most overdue first. */
 async function loadOutstanding() {
   const list = document.getElementById("outstandingList");
   const summary = document.getElementById("outstandingSummary");
   try {
-    const rows = await api("/api/invoices/outstanding");
+    const [rows, canRemind] = await Promise.all([api("/api/invoices/outstanding"), emailTransportReady()]);
     list.innerHTML = "";
     const totalCents = rows.reduce((sum, r) => sum + r.totals.balanceCents, 0);
     const overdue = rows.filter((r) => r.daysOverdue > 0);
@@ -2084,17 +2118,31 @@ async function loadOutstanding() {
 
     for (const row of rows) {
       const li = document.createElement("li");
+      // How often this client has already been chased, so a third
+      // reminder in a week is a deliberate act rather than an accident.
+      const chased = row.reminderCount
+        ? ` · reminded ${row.reminderCount}×, last ${new Date(row.lastRemindedAt).toLocaleDateString()}`
+        : "";
       li.innerHTML = `<strong>${escapeHtml(row.number)}</strong>
         <span class="badge ${row.daysOverdue > 0 ? "rejected" : "pending_review"}">${escapeHtml(centsToDollars(row.totals.balanceCents))} due</span>
         ${row.daysOverdue > 0 ? `<span class="badge rejected">${row.daysOverdue} day${row.daysOverdue === 1 ? "" : "s"} overdue</span>` : ""}
-        <div class="meta-tight">${escapeHtml(row.clientName || "client not on record")} · ${escapeHtml(row.matterTitle || row.matterId)}${row.dueDate ? ` · due ${escapeHtml(row.dueDate)}` : " · no due date set"}</div>`;
-      // Clicking one jumps straight to it, rather than making someone
-      // retype the matter id they just read.
+        <div class="meta-tight">${escapeHtml(row.clientName || "client not on record")} · ${escapeHtml(row.matterTitle || row.matterId)}${row.dueDate ? ` · due ${escapeHtml(row.dueDate)}` : " · no due date set"}${escapeHtml(chased)}</div>`;
+
+      // Clicking the row jumps to the invoice; the button must not, or
+      // "send a reminder" would also navigate away from the list.
       li.addEventListener("click", async () => {
         document.getElementById("invoiceMatterId").value = row.matterId;
         await loadInvoices();
         await showInvoice(row.matterId, row.id);
       });
+      if (currentRole === "attorney" && canRemind) {
+        const remind = mkButton("Send reminder", async (event) => {
+          event.stopPropagation();
+          await sendReminder(row);
+        });
+        li.appendChild(document.createElement("br"));
+        li.appendChild(remind);
+      }
       list.appendChild(li);
     }
     if (rows.length === 0) list.innerHTML = '<li class="static empty">Nothing outstanding — every issued invoice is paid.</li>';

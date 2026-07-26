@@ -564,3 +564,131 @@ describe("InvoicingService — outstanding receivables", () => {
     expect(() => ctx.service.listOutstanding({ id: "r1", role: "receptionist" }, asOf)).toThrow(AccessDeniedError);
   });
 });
+
+describe("InvoicingService — payment reminders", () => {
+  function overdue(ctx: ReturnType<typeof setup>, amountCents = 500_00, dueDate = "2020-01-01") {
+    const invoice = ctx.service.createDraft(attorney, "m-1", { dueDate });
+    ctx.service.addLineItem(attorney, "m-1", invoice.id, {
+      description: "Drafted motion to suppress",
+      source: "time",
+      quantityMilli: 2_000,
+      unitAmountCents: amountCents / 2,
+      workedOn: "2026-07-22",
+      timekeeperId: "p1",
+    });
+    ctx.service.send(attorney, "m-1", invoice.id);
+    return invoice;
+  }
+
+  it("sends a reminder that states the balance and restates the itemisation", async () => {
+    const ctx = setup();
+    const invoice = overdue(ctx);
+    await ctx.service.emailReminder(attorney, "m-1", invoice.id);
+
+    const sent = (ctx.email as FakeEmailSender).sent[0]!;
+    expect(sent.to).toBe("maria@example.com");
+    expect(sent.subject).toMatch(/^Reminder: invoice INV-\d+ — \$500\.00 outstanding$/);
+    expect(sent.text).toContain("Dear Maria Ruiz,");
+    expect(sent.text).toContain("$500.00");
+    // The itemisation travels with it, so the client needn't dig out the original.
+    expect(sent.text).toContain("Drafted motion to suppress");
+    expect(sent.attachments![0]!.contentType).toBe("application/pdf");
+  });
+
+  it("does not accuse the client, and allows that payment may have crossed", async () => {
+    const ctx = setup();
+    await ctx.service.emailReminder(attorney, "m-1", overdue(ctx).id);
+    const text = (ctx.email as FakeEmailSender).sent[0]!.text;
+    expect(text).toMatch(/if payment has already been sent/i);
+    expect(text).not.toMatch(/failed to pay|delinquent|你|immediately/i);
+  });
+
+  it("counts the days overdue from the due date", async () => {
+    const ctx = setup();
+    const invoice = ctx.service.createDraft(attorney, "m-1", { dueDate: "2020-01-01" });
+    ctx.service.addLineItem(attorney, "m-1", invoice.id, {
+      description: "Work",
+      source: "flat",
+      quantityMilli: 1_000,
+      unitAmountCents: 100_00,
+    });
+    ctx.service.send(attorney, "m-1", invoice.id);
+    await ctx.service.emailReminder(attorney, "m-1", invoice.id);
+    expect((ctx.email as FakeEmailSender).sent[0]!.text).toMatch(/\d{3,} days ago/);
+  });
+
+  it("shows what is still outstanding on a part-paid invoice, not the original total", async () => {
+    const ctx = setup();
+    const invoice = overdue(ctx, 1_000_00);
+    ctx.service.recordPayment(attorney, "m-1", invoice.id, { amountCents: 400_00, method: "check" });
+    await ctx.service.emailReminder(attorney, "m-1", invoice.id);
+    const text = (ctx.email as FakeEmailSender).sent[0]!.text;
+    expect(text).toContain("$400.00 has been received against a total of $1,000.00, leaving $600.00 outstanding");
+  });
+
+  it("refuses to chase a paid invoice — the worst possible outcome here", async () => {
+    const ctx = setup();
+    const invoice = overdue(ctx);
+    ctx.service.recordPayment(attorney, "m-1", invoice.id, { amountCents: 500_00, method: "check" });
+    await expect(ctx.service.emailReminder(attorney, "m-1", invoice.id)).rejects.toThrow(/paid in full/i);
+    expect((ctx.email as FakeEmailSender).sent).toHaveLength(0);
+  });
+
+  it("refuses to remind about a draft or a voided invoice", async () => {
+    const ctx = setup();
+    const draft = draftWithALine(ctx);
+    await expect(ctx.service.emailReminder(attorney, "m-1", draft.id)).rejects.toThrow(/send the invoice before/i);
+
+    const voided = overdue(ctx);
+    // A sent invoice with no payments can still be voided.
+    ctx.service.void(attorney, "m-1", voided.id, "billed in error");
+    await expect(ctx.service.emailReminder(attorney, "m-1", voided.id)).rejects.toThrow(/void/i);
+  });
+
+  it("is attorney-only", async () => {
+    const ctx = setup();
+    const invoice = overdue(ctx);
+    await expect(ctx.service.emailReminder(paralegal, "m-1", invoice.id)).rejects.toThrow(AccessDeniedError);
+  });
+
+  it("records the reminder separately from the invoice's own delivery", async () => {
+    const ctx = setup();
+    const invoice = ctx.service.createDraft(attorney, "m-1", { dueDate: "2020-01-01" });
+    ctx.service.addLineItem(attorney, "m-1", invoice.id, {
+      description: "Work",
+      source: "flat",
+      quantityMilli: 1_000,
+      unitAmountCents: 100_00,
+    });
+    await ctx.service.emailInvoice(attorney, "m-1", invoice.id);
+    const view = await ctx.service.emailReminder(attorney, "m-1", invoice.id);
+    expect(view.deliveries.map((d) => d.kind)).toEqual(["invoice", "reminder"]);
+  });
+
+  it("surfaces how often a client has been chased, so a third reminder is deliberate", async () => {
+    const ctx = setup();
+    const invoice = overdue(ctx);
+    expect(ctx.service.listOutstanding(attorney)[0]).toMatchObject({ reminderCount: 0, lastRemindedAt: undefined });
+
+    await ctx.service.emailReminder(attorney, "m-1", invoice.id);
+    await ctx.service.emailReminder(attorney, "m-1", invoice.id);
+
+    const row = ctx.service.listOutstanding(attorney)[0]!;
+    expect(row.reminderCount).toBe(2);
+    expect(row.lastRemindedAt).toBeDefined();
+  });
+
+  it("audits the reminder with the balance chased", async () => {
+    const ctx = setup();
+    await ctx.service.emailReminder(attorney, "m-1", overdue(ctx).id);
+    const entry = ctx.auditLog.read("attorney").find((e) => e.action === "invoice_reminder_sent")!;
+    expect(entry.detail).toContain("to=maria@example.com");
+    expect(entry.detail).toContain("balanceCents=50000");
+  });
+
+  it("says so plainly when no mail transport is configured", async () => {
+    const ctx = setup({ email: new UnconfiguredEmailSender() });
+    const invoice = overdue(ctx);
+    await expect(ctx.service.emailReminder(attorney, "m-1", invoice.id)).rejects.toThrow(/no email transport/i);
+  });
+});

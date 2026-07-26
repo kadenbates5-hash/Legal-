@@ -82,8 +82,17 @@ export interface Payment {
   readonly recordedAt: string;
 }
 
+/**
+ * Why a copy went out. A reminder is a materially different act from
+ * issuing the bill — it is the firm asking for money it is already owed
+ * — and a firm that can't tell the two apart can neither show it chased
+ * a debt nor notice it has chased the same client six times.
+ */
+export type DeliveryKind = "invoice" | "reminder";
+
 /** One record of the invoice actually leaving the building. */
 export interface InvoiceDelivery {
+  readonly kind: DeliveryKind;
   readonly to: string;
   readonly at: string;
   readonly by: string;
@@ -299,9 +308,10 @@ export class InvoiceStore {
   }
 
   /** Records that a copy went out. Never gated on status — a receipt for a paid invoice is a legitimate thing to resend. */
-  recordDelivery(invoiceId: string, params: { to: string; by: string; messageId?: string }): InvoiceDelivery {
+  recordDelivery(invoiceId: string, params: { to: string; by: string; messageId?: string; kind?: DeliveryKind }): InvoiceDelivery {
     const invoice = this.#require(invoiceId);
     const delivery: InvoiceDelivery = Object.freeze({
+      kind: params.kind ?? "invoice",
       to: params.to,
       at: new Date().toISOString(),
       by: params.by,
@@ -363,7 +373,8 @@ export class InvoiceStore {
         ...invoice,
         lineItems: (invoice.lineItems ?? []).map((l) => Object.freeze({ ...l })),
         // Older snapshots predate delivery tracking; an absent list is empty, not broken.
-        deliveries: (invoice.deliveries ?? []).map((d) => Object.freeze({ ...d })),
+        // Those written before reminders existed were all the invoice itself.
+        deliveries: (invoice.deliveries ?? []).map((d) => Object.freeze({ ...d, kind: d.kind ?? "invoice" })),
       });
     }
     store.#payments = (snapshot.payments ?? []).map((p) => Object.freeze({ ...p }));

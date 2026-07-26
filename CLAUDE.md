@@ -976,6 +976,33 @@ draft is not money anyone owes yet. Each row carries the client name and
 matter title so a receivable can be chased without opening the matter,
 and clicking one jumps straight to that invoice.
 
+**Payment reminders.** `emailReminder()` sends a covering note plus the
+full itemisation and the PDF, from a "Send reminder" button on each
+outstanding receivable. Three deliberate choices:
+
+- **Not automated.** The receivables query and the mail transport both
+  exist, so a nightly dunning job would be easy — and wrong. Automated
+  chasing mails the client who is disputing the bill, or who agreed
+  terms with a partner last week, or whose relative just died. When to
+  press is a judgement about a relationship, not a cron expression. What
+  the software does instead is make the judgement easy to make well:
+  show what's overdue, show when this client was last chased and how
+  often, and send in one click.
+- **It doesn't accuse anyone.** The overwhelmingly common reason a legal
+  bill goes unpaid is that it was mislaid. The wording states what is
+  owed and since when, allows that payment may have crossed in the post,
+  and invites a reply about anything disputed. A firm wanting something
+  sterner can write it themselves.
+- **It refuses to chase a paid invoice** outright rather than leaving it
+  to the UI — asking a client for money they don't owe is the worst
+  outcome available here. Drafts and voided invoices are refused too.
+
+Deliveries carry a `kind` (`invoice` / `reminder`), so the record
+distinguishes issuing a bill from chasing one, and `listOutstanding()`
+returns `reminderCount`/`lastRemindedAt` so a third reminder in a week
+is a deliberate act rather than an accident. Attorney-only, and audited
+with the balance chased.
+
 **Letterhead** comes from `FirmConfig.letterhead` (`addressLines`,
 `phone`, `billingEmail`, `paymentInstructions`) in `FIRM_CONFIG_FILE`,
 falling back to `SMTP_FROM`/`FIRM_PAYMENT_INSTRUCTIONS`. Every field is
@@ -990,6 +1017,7 @@ textarea because saving rebuilds the whole party list, so anything the
 editor can't display it would silently delete.
 
 `server.ts` adds `GET /api/invoices/outstanding`,
+`POST /api/invoices/matters/:matterId/:invoiceId/remind`,
 `GET /api/invoices/email-transport`,
 `GET /api/invoices/matters/:matterId/:invoiceId/preview` and
 `POST /api/invoices/matters/:matterId/:invoiceId/email`. Configured via
