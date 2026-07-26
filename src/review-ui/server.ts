@@ -26,6 +26,10 @@ import type { PdfReportService } from "./pdf-report-service.js";
 import type { MattersService } from "./matters-service.js";
 import type { TrustService } from "./trust-service.js";
 import type { ClientFileService } from "./client-file-service.js";
+import type { InvoicingService } from "./invoicing-service.js";
+import type { PayrollService } from "./payroll-service.js";
+import { InvoicingError, type LineItemSource, type PaymentMethod } from "../core/invoicing.js";
+import { PayrollError } from "../core/payroll.js";
 import { TrustAccountingError, type TrustEntryType } from "../core/trust-ledger.js";
 import type { MatterStatus, PartyRole } from "../core/matters.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
@@ -257,6 +261,13 @@ function errorStatus(err: unknown): number {
   if (err instanceof AccessDeniedError) return 403;
   // An overdraw or a double-reversal is a conflict with the ledger's current
   // state, not a malformed request — 409 says "the world says no", not "you typed it wrong".
+  if (err instanceof InvoicingError) {
+    if (err.message.startsWith("no invoice")) return 404;
+    // "can't edit a sent invoice", "exceeds the balance", "already sent" are all
+    // conflicts with the invoice's current state rather than malformed input.
+    return /must be|is required|needs a/.test(err.message) ? 400 : 409;
+  }
+  if (err instanceof PayrollError) return 400;
   if (err instanceof TrustAccountingError) {
     return err.message.startsWith("no trust entry") ? 404 : 409;
   }
@@ -267,6 +278,7 @@ function errorStatus(err: unknown): number {
   if (err instanceof Error && err.message.startsWith("no document")) return 404;
   if (err instanceof Error && err.message.startsWith("no matter")) return 404;
   if (err instanceof Error && err.message.startsWith("no trust entry")) return 404;
+  if (err instanceof Error && err.message.startsWith("no worked-hours entry")) return 404;
   if (err instanceof Error && err.message.startsWith("no saved reference")) return 404;
   if (err instanceof Error && err.message.startsWith("no assistant session")) return 404;
   if (err instanceof Error && err.message.startsWith("cannot disable")) return 409;
@@ -382,6 +394,8 @@ export interface ReviewServerOptions {
   matters?: MattersService;
   trust?: TrustService;
   clientFile?: ClientFileService;
+  invoicing?: InvoicingService;
+  payroll?: PayrollService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
   /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
@@ -439,6 +453,8 @@ async function handleRequest(
     matters,
     trust,
     clientFile,
+    invoicing,
+    payroll,
     voiceCalls,
     audioClips,
     twilio,
@@ -663,6 +679,24 @@ async function handleRequest(
       sendJson(res, 200, clientFile.export(actor, matterId));
       // The export is audited, so it changes persisted state.
       onMutated?.();
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/invoices")) {
+      if (!invoicing) {
+        sendJson(res, 404, { error: "invoicing is not configured on this server" });
+        return;
+      }
+      await handleInvoicingRequest(invoicing, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/payroll")) {
+      if (!payroll) {
+        sendJson(res, 404, { error: "payroll is not configured on this server" });
+        return;
+      }
+      await handlePayrollRequest(payroll, req, res, actor, url, onMutated);
       return;
     }
 
@@ -1111,6 +1145,189 @@ async function handleDocumentsRequest(
     sendJson(res, 200, { ok: true });
     onMutated?.();
     return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleInvoicingRequest(
+  invoicing: InvoicingService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  if (url.pathname === "/api/invoices/processor" && req.method === "GET") {
+    sendJson(res, 200, invoicing.processorInfo(actor));
+    return;
+  }
+
+  const segments = url.pathname.replace(/^\/api\/invoices\/?/, "").split("/").filter(Boolean);
+  if (segments[0] !== "matters" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const matterId = segments[1]!;
+
+  if (segments.length === 2 && req.method === "GET") {
+    sendJson(res, 200, invoicing.listForMatter(actor, matterId));
+    return;
+  }
+
+  if (segments.length === 2 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = invoicing.createDraft(actor, matterId, {
+      ...(typeof body["dueDate"] === "string" && body["dueDate"] ? { dueDate: body["dueDate"] } : {}),
+      ...(typeof body["note"] === "string" && body["note"] ? { note: body["note"] } : {}),
+    });
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  const invoiceId = segments[2];
+  if (!invoiceId) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+
+  if (segments.length === 3 && req.method === "GET") {
+    sendJson(res, 200, invoicing.get(actor, matterId, invoiceId));
+    return;
+  }
+
+  if (segments.length === 4 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    let result;
+    switch (segments[3]) {
+      case "lines":
+        result = invoicing.addLineItem(actor, matterId, invoiceId, {
+          description: String(body["description"] ?? ""),
+          source: (body["source"] as LineItemSource) ?? "flat",
+          quantityMilli: Number(body["quantityMilli"]),
+          unitAmountCents: Number(body["unitAmountCents"]),
+        });
+        break;
+      case "add-time":
+        result = invoicing.addTimeFromBillingHours(actor, matterId, invoiceId, Number(body["hourlyRateCents"]));
+        break;
+      case "send":
+        result = invoicing.send(actor, matterId, invoiceId);
+        break;
+      case "void":
+        result = invoicing.void(actor, matterId, invoiceId, String(body["reason"] ?? ""));
+        break;
+      case "payments":
+        result = invoicing.recordPayment(actor, matterId, invoiceId, {
+          amountCents: Number(body["amountCents"]),
+          method: (body["method"] as PaymentMethod) ?? "other",
+          ...(typeof body["reference"] === "string" && body["reference"] ? { reference: body["reference"] } : {}),
+        });
+        break;
+      case "charge":
+        result = await invoicing.chargePayment(actor, matterId, invoiceId, {
+          amountCents: Number(body["amountCents"]),
+          ...(typeof body["instrumentToken"] === "string" && body["instrumentToken"]
+            ? { instrumentToken: body["instrumentToken"] }
+            : {}),
+        });
+        break;
+      case "pay-from-trust":
+        result = invoicing.payFromTrust(actor, matterId, invoiceId, Number(body["amountCents"]));
+        break;
+      default:
+        sendJson(res, 404, { error: "not found" });
+        return;
+    }
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 5 && segments[3] === "lines" && req.method === "DELETE") {
+    sendJson(res, 200, invoicing.removeLineItem(actor, matterId, invoiceId, segments[4]!));
+    onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handlePayrollRequest(
+  payroll: PayrollService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  if (url.pathname === "/api/payroll/summary" && req.method === "GET") {
+    sendJson(
+      res,
+      200,
+      payroll.summarize(actor, url.searchParams.get("from") ?? "", url.searchParams.get("to") ?? ""),
+    );
+    onMutated?.();
+    return;
+  }
+
+  const segments = url.pathname.replace(/^\/api\/payroll\/?/, "").split("/").filter(Boolean);
+  if (segments[0] !== "actor" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const actorId = decodeURIComponent(segments[1]!);
+
+  if (segments[2] === "rates") {
+    if (req.method === "GET") {
+      sendJson(res, 200, payroll.listRates(actor, actorId));
+      return;
+    }
+    if (req.method === "POST") {
+      const body = await readJsonBody(req);
+      const result = payroll.setRate(actor, actorId, {
+        hourlyCents: Number(body["hourlyCents"]),
+        effectiveFrom: String(body["effectiveFrom"] ?? ""),
+        ...(typeof body["note"] === "string" && body["note"] ? { note: body["note"] } : {}),
+      });
+      sendJson(res, 200, result);
+      onMutated?.();
+      return;
+    }
+  }
+
+  if (segments[2] === "hours") {
+    if (segments.length === 3 && req.method === "GET") {
+      sendJson(
+        res,
+        200,
+        payroll.listHours(
+          actor,
+          actorId,
+          url.searchParams.get("from") ?? undefined,
+          url.searchParams.get("to") ?? undefined,
+        ),
+      );
+      return;
+    }
+    if (segments.length === 3 && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const result = payroll.recordHours(actor, actorId, {
+        date: String(body["date"] ?? ""),
+        hoursMilli: Number(body["hoursMilli"]),
+        description: String(body["description"] ?? ""),
+      });
+      sendJson(res, 200, result);
+      onMutated?.();
+      return;
+    }
+    if (segments.length === 4 && req.method === "DELETE") {
+      payroll.deleteHours(actor, actorId, segments[3]!);
+      sendJson(res, 200, { ok: true });
+      onMutated?.();
+      return;
+    }
   }
 
   sendJson(res, 404, { error: "not found" });

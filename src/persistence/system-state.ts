@@ -14,6 +14,8 @@ import { BillingHoursStore, type BillingHoursEntry } from "../core/billing-hours
 import { LoginThrottle, type LoginThrottleSnapshot } from "../core/login-throttle.js";
 import { MatterStore, type Matter } from "../core/matters.js";
 import { TrustLedger, type TrustLedgerSnapshot } from "../core/trust-ledger.js";
+import { InvoiceStore, type InvoiceSnapshot } from "../core/invoicing.js";
+import { PayrollStore, type PayrollSnapshot } from "../core/payroll.js";
 import type { FirmConfig } from "../config/firm-config.js";
 import { fileStateStore, type StateStore } from "./state-store.js";
 
@@ -55,6 +57,10 @@ export interface SystemStateSnapshot {
   matters?: Matter[];
   /** Client trust (IOLTA) ledger entries (see core/trust-ledger.ts). Append-only; corrections are reversing entries. */
   trustLedger?: TrustLedgerSnapshot;
+  /** Client invoices and payments received (see core/invoicing.ts). */
+  invoices?: InvoiceSnapshot;
+  /** Staff pay rates and worked hours (see core/payroll.ts) — what the firm pays its people, distinct from billable time. */
+  payroll?: PayrollSnapshot;
 }
 
 export interface SystemState {
@@ -74,6 +80,8 @@ export interface SystemState {
   loginThrottle: LoginThrottle;
   matters: MatterStore;
   trustLedger: TrustLedger;
+  invoices: InvoiceStore;
+  payroll: PayrollStore;
 }
 
 export interface LoadSystemStateOptions {
@@ -99,6 +107,8 @@ function emptySnapshot(): SystemStateSnapshot {
     loginThrottle: { failures: [] },
     matters: [],
     trustLedger: { entries: [], nextId: 1 },
+    invoices: { invoices: [], payments: [], nextInvoiceNumber: 1, nextId: 1 },
+    payroll: { rates: [], workedHours: [], nextId: 1 },
   };
 }
 
@@ -123,6 +133,10 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const loginThrottle = LoginThrottle.fromSnapshot(snapshot.loginThrottle ?? { failures: [] });
   const matters = MatterStore.fromSnapshot(snapshot.matters ?? []);
   const trustLedger = TrustLedger.fromSnapshot(snapshot.trustLedger ?? { entries: [], nextId: 1 });
+  const invoices = InvoiceStore.fromSnapshot(
+    snapshot.invoices ?? { invoices: [], payments: [], nextInvoiceNumber: 1, nextId: 1 },
+  );
+  const payroll = PayrollStore.fromSnapshot(snapshot.payroll ?? { rates: [], workedHours: [], nextId: 1 });
   return {
     auditLog,
     utilization,
@@ -139,6 +153,8 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
     loginThrottle,
     matters,
     trustLedger,
+    invoices,
+    payroll,
   };
 }
 
@@ -160,6 +176,8 @@ export async function saveSystemState(source: string | StateStore, state: System
     loginThrottle: state.loginThrottle.toSnapshot(),
     matters: state.matters.toSnapshot(),
     trustLedger: state.trustLedger.toSnapshot(),
+    invoices: state.invoices.toSnapshot(),
+    payroll: state.payroll.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }

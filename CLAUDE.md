@@ -814,6 +814,72 @@ the client file and whether a retaining lien applies, so the bundle
 carries a notice telling the attorney to review and withhold rather than
 pretending the question is settled.
 
+## Invoicing, payments, and staff payroll
+
+Three money surfaces, deliberately kept apart because conflating them is
+how firms get into trouble: **invoices** are money coming in from
+clients, the **trust ledger** is client money the firm merely holds, and
+**payroll** is money going out to staff. There is no code path from
+payroll to trust.
+
+- `core/invoicing.ts` — `InvoiceStore`. Integer cents throughout, same
+  reasoning as the trust ledger. The rule that matters most: **line
+  items lock the moment an invoice is sent.** An invoice the firm can
+  edit after the client has a copy is not a record of anything — the
+  same reasoning that locks `WorkProduct.content` at review. Correct a
+  sent invoice by voiding and reissuing. Voiding is refused once
+  payments exist (that's a refund, not a disappearance), payment is
+  refused before sending and after voiding, and **overpayment is
+  refused** rather than absorbed into a negative balance, since it's
+  money the firm would then owe back.
+- `integrations/payment-processor.ts` — vendor-agnostic
+  `PaymentProcessor`, same pattern as `SpeechToText`/`ClaudeClient`.
+  **The compliance point driving the design:** most general-purpose
+  processors net their fee out of the deposit, which against a trust
+  account means the balance no longer equals the sum of client
+  ledgers — exactly what `TrustLedger.reconcile()` exists to catch, and
+  a serious violation. Legal-specific processors (LawPay and similar)
+  route fees to the operating account instead. `charge()` is therefore
+  only ever used for *operating* receipts; trust funds are applied by
+  ledger movement and never round-tripped through a processor.
+  `ManualPaymentProcessor` is the default and reports `canCharge:
+  false`, so the UI can say "record payment" rather than offering a card
+  charge that will fail. Card data must never reach this server — use
+  the processor's client-side tokenization and pass only a token, or
+  this application falls into PCI-DSS scope.
+- `review-ui/invoicing-service.ts` — matter-scoped via `billing_internal`
+  like billing hours and trust. **Sending and voiding are attorney-only**
+  (a paralegal prepares the draft; committing it is supervisory), as is
+  `payFromTrust`. That last method is the important one: applying money
+  the firm already holds is the firm transferring client funds to
+  itself, permissible only for fees actually earned. It writes an
+  `earned_fee_transfer` to the trust ledger *and* records the payment,
+  attempting the trust side **first** — if the client lacks the funds,
+  `TrustLedger` throws and neither record is written, so the two can
+  never disagree about whether money moved. `recordPayment` refuses
+  `trust_application` outright, so the ledger can't be bypassed.
+- `core/payroll.ts` / `review-ui/payroll-service.ts` — what the firm pays
+  its people. Distinct from `billing-hours.ts`, which records **billable**
+  time charged to a client: someone works forty hours and bills
+  thirty-two, and conflating the two produces both a wrong invoice and a
+  wrong paycheck. Rates are **historical** — a shift is priced at the
+  rate in force on the day it was worked, so a raise never restates a
+  period already paid. A shift with no rate on record contributes hours
+  but no money and is reported in `datesMissingRate` with
+  `incomplete: true`; silently pricing it at zero would produce a
+  confidently wrong paycheck. Access is about privacy between
+  colleagues rather than matters: setting a rate is attorney-only, you
+  can see your own hours and rate, and only an attorney can see anyone
+  else's or run the firm-wide summary.
+- `server.ts` wires `/api/invoices/*` and `/api/payroll/*` (each 404s
+  without its service). An invoice-state violation is **409**, malformed
+  input is 400.
+
+What none of this does: accounting, tax withholding, overtime rules,
+benefits, dunning, or filing anything with a tax authority. Payroll
+answers "how many hours, at what rate, so what is gross pay" — the input
+a bookkeeper or payroll provider needs, not a replacement for one.
+
 ## Transport & session security
 
 Hardening that applies to every route, independent of any one panel.
@@ -961,8 +1027,9 @@ distinct trust levels:
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over seventeen panels — Home, Review Queue, Deadlines,
-Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Trust, Research, Assistant,
+between sections) over nineteen panels — Home, Review Queue, Deadlines,
+Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Trust, Invoices,
+Payroll, Research, Assistant,
 Staff, Messages, Schedule, Billing, Accounts, and Audit Log (Drafting/
 Cases/Research/Assistant/Billing and Accounts/Audit Log hidden from the
 nav for roles that can't use them; Staff/Messages/Schedule are open to

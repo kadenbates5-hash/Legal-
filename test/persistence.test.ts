@@ -301,6 +301,43 @@ describe("system-state persistence integration", () => {
     ).toThrow(/overdraw/i);
   });
 
+  it("persists and reloads invoices, payments and the numbering sequence", async () => {
+    const state = await loadSystemState(filePath);
+    const invoice = state.invoices.createDraft({ matterId: "m-1", issuedBy: "a1" });
+    state.invoices.addLineItem(invoice.id, {
+      description: "Drafting",
+      source: "time",
+      quantityMilli: 2_000,
+      unitAmountCents: 300_00,
+    });
+    state.invoices.send(invoice.id);
+    state.invoices.recordPayment({ invoiceId: invoice.id, amountCents: 100_00, method: "check", recordedBy: "a1" });
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.invoices.totals(invoice.id)).toEqual({
+      subtotalCents: 600_00,
+      paidCents: 100_00,
+      balanceCents: 500_00,
+    });
+    // A reloaded sent invoice is still locked.
+    expect(() =>
+      reloaded.invoices.addLineItem(invoice.id, { description: "x", source: "flat", quantityMilli: 1000, unitAmountCents: 1 }),
+    ).toThrow(/can't be edited/i);
+  });
+
+  it("persists and reloads payroll rates and worked hours", async () => {
+    const state = await loadSystemState(filePath);
+    state.payroll.setRate({ actorId: "p1", hourlyCents: 32_00, effectiveFrom: "2026-01-01", setBy: "a1" });
+    state.payroll.recordHours({ actorId: "p1", date: "2026-07-02", hoursMilli: 7_500, description: "Work", recordedBy: "p1" });
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.payroll.summarize("2026-07-01", "2026-07-31").totalGrossPayCents).toBe(240_00);
+  });
+
   it("persists and reloads billing hours entries across a process restart", async () => {
     const state = await loadSystemState(filePath);
     const entry = state.billingHours.log({ matterId: "m1", actorId: "p1", date: "2026-07-28", hours: 2, description: "Discovery review" });

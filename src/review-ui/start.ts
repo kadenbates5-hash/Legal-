@@ -33,6 +33,9 @@ import { MattersService } from "./matters-service.js";
 import { ConflictChecker } from "../core/conflicts.js";
 import { TrustService } from "./trust-service.js";
 import { ClientFileService } from "./client-file-service.js";
+import { InvoicingService } from "./invoicing-service.js";
+import { PayrollService } from "./payroll-service.js";
+import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -239,6 +242,26 @@ const clientFile = new ClientFileService({
   trust: state.trustLedger,
 });
 
+/**
+ * Backs the "Invoices" panel. The payment processor is a vendor-agnostic
+ * seam (see integrations/payment-processor.ts); the default records
+ * payments without contacting anyone, which is what makes invoicing
+ * fully usable before a processor is chosen. Whichever is wired in
+ * later, the thing to verify is that its fees are routed to the
+ * operating account and never netted out of trust deposits.
+ */
+const invoicing = new InvoicingService({
+  store: state.invoices,
+  accessControl: state.accessControl,
+  auditLog: state.auditLog,
+  trust: state.trustLedger,
+  billingHours: state.billingHours,
+  processor: new ManualPaymentProcessor(),
+});
+
+/** Backs the "Payroll" panel — what the firm pays its people, deliberately unconnected to client matters or trust. */
+const payroll = new PayrollService({ store: state.payroll, auditLog: state.auditLog });
+
 /** Backs the attorney-only "Audit Log" panel — see audit-service.ts. */
 const audit = new AuditService(state.auditLog);
 
@@ -363,6 +386,8 @@ const server = createReviewServer(service, state.auth, {
   matters,
   trust,
   clientFile,
+  invoicing,
+  payroll,
   maxRequestBodyBytes,
   loginThrottle: state.loginThrottle,
   auditLog: state.auditLog,

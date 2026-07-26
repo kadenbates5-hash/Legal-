@@ -26,6 +26,8 @@
     <button data-panel="staff-schedule" id="navStaffSchedule"><span class="dot"></span>Schedule</button>
     <button data-panel="billing" id="navBilling" hidden><span class="dot"></span>Billing</button>
     <button data-panel="trust" id="navTrust" hidden><span class="dot"></span>Trust</button>
+    <button data-panel="invoices" id="navInvoices" hidden><span class="dot"></span>Invoices</button>
+    <button data-panel="payroll" id="navPayroll"><span class="dot"></span>Payroll</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
     <button data-panel="audit" id="navAudit" hidden><span class="dot"></span>Audit Log</button>
   </nav>
@@ -484,6 +486,66 @@
         </div>
         <div id="reconcileResult"></div>
         <ul id="reconcileList" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- ===== Invoices (paralegal/attorney) ===== -->
+    <section class="panel" id="panel-invoices">
+      <p class="subtitle">Bill clients and record what comes in. A paralegal can prepare a draft; <strong>sending and voiding are attorney-only</strong>, and a sent invoice's lines are locked — correct it by voiding and reissuing, never by editing what the client already has. Applying money the client already holds in trust writes a matching entry to the trust ledger, so the two can never disagree.</p>
+      <div class="card">
+        <div class="field-row">
+          <label class="field">Matter ID <input id="invoiceMatterId" list="matterOptions" autocomplete="off" /></label>
+          <button class="btn" id="loadInvoices">Load invoices</button>
+          <button class="btn primary" id="newInvoice">New draft</button>
+          <div class="field"><div class="k">Payments</div><div id="processorInfo" class="meta-tight">—</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Invoices on this matter</h3>
+        <ul id="invoiceList" class="list"></ul>
+      </div>
+      <div id="invoiceDetail"></div>
+    </section>
+
+    <!-- ===== Payroll ===== -->
+    <section class="panel" id="panel-payroll">
+      <p class="subtitle">What the firm pays its people — deliberately separate from billable time charged to clients, and with no connection to client trust funds. You can see your own hours and rate; only an attorney can see anyone else's or run the firm-wide summary. This produces gross pay for a bookkeeper; it does not compute tax withholding or file anything.</p>
+
+      <div class="card">
+        <h3>Worked hours</h3>
+        <div class="field-row">
+          <label class="field">Person <select id="payrollActorId"></select></label>
+          <label class="field">Date <input id="payrollDate" type="date" /></label>
+          <label class="field">Hours <input id="payrollHours" type="number" step="0.25" min="0.25" /></label>
+          <label class="field grow">What was worked on <input id="payrollDescription" /></label>
+          <button class="btn primary" id="recordWorkedHours">Record</button>
+        </div>
+        <div class="field-row">
+          <button class="btn" id="loadWorkedHours">Load hours</button>
+        </div>
+        <ul id="workedHoursList" class="list"></ul>
+      </div>
+
+      <div class="card" id="payRateCard">
+        <h3>Pay rate</h3>
+        <p class="subtitle-inline">Attorney-only. A rate applies from its effective date onward and never restates a period that has already been paid.</p>
+        <div class="field-row">
+          <label class="field">Hourly rate <input id="payRateAmount" type="number" step="0.01" min="0.01" placeholder="0.00" /></label>
+          <label class="field">Effective from <input id="payRateFrom" type="date" /></label>
+          <button class="btn primary" id="setPayRate">Set rate</button>
+        </div>
+        <ul id="payRateList" class="list"></ul>
+      </div>
+
+      <div class="card" id="payrollSummaryCard">
+        <h3>Period summary</h3>
+        <div class="field-row">
+          <label class="field">From <input id="payrollFrom" type="date" /></label>
+          <label class="field">To <input id="payrollTo" type="date" /></label>
+          <button class="btn" id="runPayrollSummary">Summarize</button>
+        </div>
+        <div id="payrollSummaryResult"></div>
+        <ul id="payrollSummaryList" class="list"></ul>
       </div>
     </section>
 

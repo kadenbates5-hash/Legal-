@@ -14,6 +14,8 @@ const PANEL_TITLES = {
   "staff-schedule": "Schedule",
   billing: "Billing",
   trust: "Trust",
+  invoices: "Invoices",
+  payroll: "Payroll",
   accounts: "Accounts",
   audit: "Audit Log",
 };
@@ -24,7 +26,7 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
     for (const b of document.querySelectorAll("nav.nav button")) b.classList.toggle("active", b === btn);
     for (const s of document.querySelectorAll("section.panel")) s.classList.toggle("active", s.id === `panel-${panel}`);
     document.getElementById("panelTitle").textContent = PANEL_TITLES[panel] || "";
-    if (["messages", "staff-schedule", "drafting", "billing", "research", "cases", "scheduling", "conflicts", "trust"].includes(panel)) {
+    if (["messages", "staff-schedule", "drafting", "billing", "research", "cases", "scheduling", "conflicts", "trust", "invoices", "payroll"].includes(panel)) {
       refreshPickers();
     }
     if (panel === "home") loadHome();
@@ -74,6 +76,7 @@ async function loadWhoami() {
       document.getElementById("navAssistant").hidden = false;
       document.getElementById("navBilling").hidden = false;
       document.getElementById("navTrust").hidden = false;
+      document.getElementById("navInvoices").hidden = false;
     }
     // Review Queue and Deadlines are attorney-only server-side (ReviewGateService gates
     // every method, including reads) — only fetch them once we know the role, and only
@@ -1851,4 +1854,323 @@ document.getElementById("runReconcile").addEventListener("click", async () => {
     showError(err.message);
     out.innerHTML = "";
   }
+});
+
+/* ===== Invoices ===== */
+const INVOICE_BADGE = { draft: "", sent: "pending_review", partially_paid: "pending_review", paid: "approved", void: "rejected" };
+let selectedInvoiceId = null;
+
+async function loadProcessorInfo() {
+  try {
+    const info = await api("/api/invoices/processor");
+    document.getElementById("processorInfo").textContent = info.canCharge
+      ? `card charging via ${info.name}`
+      : "record manually (no processor configured)";
+  } catch {
+    /* Panel is role-gated; silence is correct for a role that can't see it. */
+  }
+}
+
+async function loadInvoices() {
+  showError("");
+  loadProcessorInfo();
+  const list = document.getElementById("invoiceList");
+  try {
+    const matterId = document.getElementById("invoiceMatterId").value.trim();
+    if (!matterId) return;
+    const invoices = await api(`/api/invoices/matters/${encodeURIComponent(matterId)}`);
+    list.innerHTML = "";
+    for (const inv of invoices) {
+      const li = document.createElement("li");
+      li.innerHTML = `<strong>${escapeHtml(inv.number)}</strong>
+        <span class="badge ${INVOICE_BADGE[inv.status] || ""}">${escapeHtml(inv.status.replace("_", " "))}</span>
+        <span class="badge">${escapeHtml(centsToDollars(inv.totals.subtotalCents))}</span>
+        ${inv.totals.balanceCents > 0 && inv.status !== "void" ? `<span class="badge rejected">due ${escapeHtml(centsToDollars(inv.totals.balanceCents))}</span>` : ""}`;
+      li.addEventListener("click", () => showInvoice(matterId, inv.id));
+      list.appendChild(li);
+    }
+    if (invoices.length === 0) list.innerHTML = '<li class="static empty">No invoices on this matter yet.</li>';
+  } catch (err) {
+    showError(err.message);
+    list.innerHTML = "";
+  }
+}
+
+async function showInvoice(matterId, invoiceId) {
+  showError("");
+  selectedInvoiceId = invoiceId;
+  const el = document.getElementById("invoiceDetail");
+  try {
+    const inv = await api(`/api/invoices/matters/${encodeURIComponent(matterId)}/${invoiceId}`);
+    const isDraft = inv.status === "draft";
+    const payable = inv.status === "sent" || inv.status === "partially_paid";
+    el.innerHTML = `
+      <div class="card">
+        <h3>${escapeHtml(inv.number)} <span class="badge ${INVOICE_BADGE[inv.status] || ""}">${escapeHtml(inv.status.replace("_", " "))}</span></h3>
+        <p class="subtitle-inline">Matter ${escapeHtml(inv.matterId)}${inv.dueDate ? ` · due ${escapeHtml(inv.dueDate)}` : ""}${inv.voidReason ? ` · voided: ${escapeHtml(inv.voidReason)}` : ""}</p>
+        <ul id="invoiceLines" class="list"></ul>
+        <div class="field-row">
+          <div class="field"><div class="k">Total</div><div class="n">${escapeHtml(centsToDollars(inv.totals.subtotalCents))}</div></div>
+          <div class="field"><div class="k">Paid</div><div class="n">${escapeHtml(centsToDollars(inv.totals.paidCents))}</div></div>
+          <div class="field"><div class="k">Balance</div><div class="n">${escapeHtml(centsToDollars(inv.totals.balanceCents))}</div></div>
+        </div>
+        <div class="actions" id="invoiceActions"></div>
+      </div>
+      ${isDraft ? `<div class="card">
+        <h3>Add a line</h3>
+        <div class="field-row">
+          <label class="field grow">Description <input id="lineDescription" /></label>
+          <label class="field">Qty / hours <input id="lineQuantity" type="number" step="0.1" min="0.1" value="1" /></label>
+          <label class="field">Rate / amount <input id="lineUnit" type="number" step="0.01" min="0.01" placeholder="0.00" /></label>
+          <button class="btn" id="addLine">Add line</button>
+        </div>
+        <div class="field-row">
+          <label class="field">Or pull this matter's logged time at <input id="timeRate" type="number" step="0.01" min="0.01" placeholder="hourly rate" /></label>
+          <button class="btn" id="addTimeLines">Add logged time</button>
+        </div>
+      </div>` : ""}
+      ${payable ? `<div class="card">
+        <h3>Record a payment</h3>
+        <div class="field-row">
+          <label class="field">Amount <input id="payAmount" type="number" step="0.01" min="0.01" placeholder="0.00" /></label>
+          <label class="field">Method
+            <select id="payMethod"><option value="check">check</option><option value="ach">ACH</option><option value="cash">cash</option><option value="card">card</option><option value="other">other</option></select>
+          </label>
+          <label class="field">Reference <input id="payReference" placeholder="check no. / txn id" /></label>
+          <button class="btn primary" id="recordPayment">Record payment</button>
+        </div>
+        <div class="field-row">
+          <label class="field">Or apply from the client's trust balance <input id="trustApplyAmount" type="number" step="0.01" min="0.01" placeholder="0.00" /></label>
+          <button class="btn" id="applyTrust">Apply trust funds</button>
+        </div>
+      </div>` : ""}
+      <div class="card"><h3>Payments</h3><ul id="invoicePayments" class="list"></ul></div>
+    `;
+
+    const lines = document.getElementById("invoiceLines");
+    for (const l of inv.lineItems) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>${escapeHtml(centsToDollars(l.amountCents))}</strong>
+        <span class="badge">${escapeHtml(l.source)}</span>
+        <div class="mt-xs">${escapeHtml(l.description)}</div>
+        <div class="meta-tight">${(l.quantityMilli / 1000).toFixed(2)} × ${escapeHtml(centsToDollars(l.unitAmountCents))}</div>`;
+      if (isDraft) {
+        const rm = mkButton("Remove", async () => {
+          try {
+            await api(`/api/invoices/matters/${encodeURIComponent(matterId)}/${invoiceId}/lines/${l.id}`, { method: "DELETE" });
+            await showInvoice(matterId, invoiceId);
+          } catch (err) { showError(err.message); }
+        });
+        rm.classList.add("danger");
+        li.appendChild(document.createElement("br"));
+        li.appendChild(rm);
+      }
+      lines.appendChild(li);
+    }
+    if (inv.lineItems.length === 0) lines.innerHTML = '<li class="static empty">No lines yet.</li>';
+
+    const pays = document.getElementById("invoicePayments");
+    for (const p of inv.payments) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>${escapeHtml(centsToDollars(p.amountCents))}</strong>
+        <span class="badge ${p.method === "trust_application" ? "confirmed" : ""}">${escapeHtml(p.method.replace("_", " "))}</span>
+        <div class="meta-tight">${escapeHtml(p.recordedBy)} · ${new Date(p.recordedAt).toLocaleString()}${p.reference ? ` · ${escapeHtml(p.reference)}` : ""}</div>`;
+      pays.appendChild(li);
+    }
+    if (inv.payments.length === 0) pays.innerHTML = '<li class="static empty">Nothing received yet.</li>';
+
+    const actions = document.getElementById("invoiceActions");
+    const act = async (path, body) => {
+      showError("");
+      try {
+        await api(`/api/invoices/matters/${encodeURIComponent(matterId)}/${invoiceId}/${path}`, {
+          method: "POST",
+          body: JSON.stringify(body || {}),
+        });
+        await loadInvoices();
+        await showInvoice(matterId, invoiceId);
+      } catch (err) { showError(err.message); }
+    };
+    if (isDraft && currentRole === "attorney") {
+      const send = mkButton("Send to client", () => act("send"));
+      send.classList.add("primary");
+      actions.appendChild(send);
+    }
+    if (inv.status !== "void" && inv.payments.length === 0 && currentRole === "attorney") {
+      const v = mkButton("Void", () => {
+        const reason = prompt("Why is this invoice being voided?");
+        if (reason) return act("void", { reason });
+      });
+      v.classList.add("danger");
+      actions.appendChild(v);
+    }
+
+    document.getElementById("addLine")?.addEventListener("click", () =>
+      act("lines", {
+        description: document.getElementById("lineDescription").value,
+        source: "flat",
+        quantityMilli: Math.round(Number(document.getElementById("lineQuantity").value) * 1000),
+        unitAmountCents: dollarsToCents(document.getElementById("lineUnit").value),
+      }),
+    );
+    document.getElementById("addTimeLines")?.addEventListener("click", () =>
+      act("add-time", { hourlyRateCents: dollarsToCents(document.getElementById("timeRate").value) }),
+    );
+    document.getElementById("recordPayment")?.addEventListener("click", () =>
+      act("payments", {
+        amountCents: dollarsToCents(document.getElementById("payAmount").value),
+        method: document.getElementById("payMethod").value,
+        reference: document.getElementById("payReference").value,
+      }),
+    );
+    document.getElementById("applyTrust")?.addEventListener("click", () =>
+      act("pay-from-trust", { amountCents: dollarsToCents(document.getElementById("trustApplyAmount").value) }),
+    );
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("loadInvoices").addEventListener("click", loadInvoices);
+document.getElementById("navInvoices").addEventListener("click", loadInvoices);
+document.getElementById("newInvoice").addEventListener("click", async () => {
+  showError("");
+  try {
+    const matterId = document.getElementById("invoiceMatterId").value.trim();
+    if (!matterId) { showError("Pick a matter first."); return; }
+    const inv = await api(`/api/invoices/matters/${encodeURIComponent(matterId)}`, { method: "POST", body: "{}" });
+    await loadInvoices();
+    await showInvoice(matterId, inv.id);
+  } catch (err) { showError(err.message); }
+});
+
+/* ===== Payroll ===== */
+function payrollActor() {
+  return document.getElementById("payrollActorId").value || currentActorId;
+}
+
+async function loadWorkedHours() {
+  showError("");
+  const list = document.getElementById("workedHoursList");
+  try {
+    const entries = await api(`/api/payroll/actor/${encodeURIComponent(payrollActor())}/hours`);
+    list.innerHTML = "";
+    let totalMilli = 0;
+    for (const e of entries) {
+      totalMilli += e.hoursMilli;
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<span class="badge">${escapeHtml(e.date)}</span>
+        <strong>${(e.hoursMilli / 1000).toFixed(2)}h</strong>
+        <div class="mt-xs">${escapeHtml(e.description)}</div>`;
+      list.appendChild(li);
+    }
+    if (entries.length === 0) list.innerHTML = '<li class="static empty">No hours recorded.</li>';
+    else {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>Total: ${(totalMilli / 1000).toFixed(2)}h</strong>`;
+      list.appendChild(li);
+    }
+    await loadPayRates();
+  } catch (err) {
+    showError(err.message);
+    list.innerHTML = "";
+  }
+}
+
+async function loadPayRates() {
+  const list = document.getElementById("payRateList");
+  try {
+    const rates = await api(`/api/payroll/actor/${encodeURIComponent(payrollActor())}/rates`);
+    list.innerHTML = "";
+    for (const r of rates) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>${escapeHtml(centsToDollars(r.hourlyCents))}/hr</strong>
+        <span class="badge">from ${escapeHtml(r.effectiveFrom)}</span>
+        ${r.note ? `<div class="meta-tight">${escapeHtml(r.note)}</div>` : ""}`;
+      list.appendChild(li);
+    }
+    if (rates.length === 0) list.innerHTML = '<li class="static empty">No rate on record — hours will show but gross pay can\'t be computed.</li>';
+  } catch {
+    list.innerHTML = '<li class="static empty">Only an attorney can view another person\'s pay rate.</li>';
+  }
+}
+
+document.getElementById("recordWorkedHours").addEventListener("click", async () => {
+  showError("");
+  try {
+    const hours = Number(document.getElementById("payrollHours").value);
+    const description = document.getElementById("payrollDescription").value.trim();
+    const date = document.getElementById("payrollDate").value;
+    if (!date || !hours || !description) { showError("Date, hours and a description are all required."); return; }
+    await api(`/api/payroll/actor/${encodeURIComponent(payrollActor())}/hours`, {
+      method: "POST",
+      body: JSON.stringify({ date, hoursMilli: Math.round(hours * 1000), description }),
+    });
+    document.getElementById("payrollHours").value = "";
+    document.getElementById("payrollDescription").value = "";
+    await loadWorkedHours();
+  } catch (err) { showError(err.message); }
+});
+
+document.getElementById("setPayRate").addEventListener("click", async () => {
+  showError("");
+  try {
+    const hourlyCents = dollarsToCents(document.getElementById("payRateAmount").value);
+    const effectiveFrom = document.getElementById("payRateFrom").value;
+    if (!hourlyCents || !effectiveFrom) { showError("A rate and an effective date are both required."); return; }
+    await api(`/api/payroll/actor/${encodeURIComponent(payrollActor())}/rates`, {
+      method: "POST",
+      body: JSON.stringify({ hourlyCents, effectiveFrom }),
+    });
+    document.getElementById("payRateAmount").value = "";
+    await loadPayRates();
+  } catch (err) { showError(err.message); }
+});
+
+document.getElementById("runPayrollSummary").addEventListener("click", async () => {
+  showError("");
+  const out = document.getElementById("payrollSummaryResult");
+  const list = document.getElementById("payrollSummaryList");
+  try {
+    const from = document.getElementById("payrollFrom").value;
+    const to = document.getElementById("payrollTo").value;
+    if (!from || !to) { showError("Pick a period."); return; }
+    const r = await api(`/api/payroll/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    out.innerHTML = r.incomplete
+      ? `<div class="flags"><strong>Total is understated.</strong> Some worked days have no pay rate on record — gross pay so far is ${escapeHtml(centsToDollars(r.totalGrossPayCents))}.</div>`
+      : `<p class="subtitle-inline">Total gross pay: <strong>${escapeHtml(centsToDollars(r.totalGrossPayCents))}</strong></p>`;
+    list.innerHTML = "";
+    for (const line of r.lines) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      const name = knownStaff.find((m) => m.actorId === line.actorId)?.displayName || line.actorId;
+      li.innerHTML = `<strong>${escapeHtml(name)}</strong>
+        <span class="badge">${(line.hoursMilli / 1000).toFixed(2)}h</span>
+        <span class="badge approved">${escapeHtml(centsToDollars(line.grossPayCents))}</span>
+        ${line.datesMissingRate.length ? `<div class="flags">No rate on record for: ${escapeHtml(line.datesMissingRate.join(", "))}</div>` : ""}`;
+      list.appendChild(li);
+    }
+    if (r.lines.length === 0) list.innerHTML = '<li class="static empty">No hours recorded in this period.</li>';
+  } catch (err) {
+    showError(err.message);
+    out.innerHTML = "";
+  }
+});
+
+document.getElementById("loadWorkedHours").addEventListener("click", loadWorkedHours);
+document.getElementById("navPayroll").addEventListener("click", () => {
+  // The rate and firm-wide summary cards are attorney-only server-side; hide
+  // them for everyone else rather than showing controls that will 403.
+  const attorneyOnly = currentRole === "attorney";
+  document.getElementById("payRateCard").hidden = !attorneyOnly;
+  document.getElementById("payrollSummaryCard").hidden = !attorneyOnly;
+  fillPeopleSelect(document.getElementById("payrollActorId"));
+  const el = document.getElementById("payrollActorId");
+  if (el && currentActorId) el.value = currentActorId;
+  loadWorkedHours();
 });
