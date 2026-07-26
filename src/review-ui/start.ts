@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { createReviewServer } from "./server.js";
+import { createReviewServer, maxRequestBodyBytesFor } from "./server.js";
 import { ReviewGateService } from "./review-service.js";
 import { IntakeDemoSessions } from "./intake-demo.js";
 import { AccountsService } from "./accounts-service.js";
@@ -153,6 +153,14 @@ const documents = new DocumentsService({
   store: state.documentStore,
   ...(MAX_DOCUMENT_UPLOAD_BYTES ? { maxUploadBytes: Number(MAX_DOCUMENT_UPLOAD_BYTES) } : {}),
 });
+
+/**
+ * The server-wide request-body ceiling has to clear the largest legitimate
+ * request, which is an upload (base64-inflated). Derived from the same cap
+ * above so raising `MAX_DOCUMENT_UPLOAD_BYTES` can't leave uploads
+ * rejected at the transport layer before `DocumentsService` ever sees them.
+ */
+const maxRequestBodyBytes = maxRequestBodyBytesFor(documents.getMaxUploadBytes());
 const cases = new CasesService({
   accessControl: state.accessControl,
   workProductStore: state.workProductStore,
@@ -295,6 +303,7 @@ const server = createReviewServer(service, state.auth, {
   staffSchedule,
   billingHours,
   pdfReports,
+  maxRequestBodyBytes,
   trustProxy,
   ...(assistant ? { assistant } : {}),
   ...voiceOptions,

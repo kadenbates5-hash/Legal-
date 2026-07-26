@@ -662,6 +662,19 @@ surfaces the configured number to the UI so a paralegal/attorney sees it
 before trying to upload something over it, rather than discovering the
 cap by having an upload rejected.
 
+That per-file cap is not itself a defense against a hostile client,
+though: it runs inside `DocumentsService`, *after* `server.ts` has
+already buffered the whole request body in memory. The actual bound is
+`ReviewServerOptions.maxRequestBodyBytes` — enforced in `readBodyBuffer`
+on every route, including the unauthenticated ones (`/api/login`, the
+Twilio webhooks), rejecting with `413` both on a declared
+`Content-Length` and on the bytes that actually arrive (a chunked
+request declares no length). `start.ts` derives it from the configured
+upload cap via `maxRequestBodyBytesFor()` — base64 inflates by 4/3, plus
+slack for the JSON envelope — so raising `MAX_DOCUMENT_UPLOAD_BYTES`
+raises the transport ceiling with it instead of leaving legitimate
+uploads rejected.
+
 What none of this does: OCR a scanned PDF (so `draftDocumentReport` on
 one will legitimately have little or nothing to summarize — the
 unconditional verification flag is exactly the safety net for that), or

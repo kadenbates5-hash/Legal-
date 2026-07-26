@@ -25,7 +25,7 @@ import { DocumentStore } from "../core/document-store.js";
  * `MAX_DOCUMENT_UPLOAD_BYTES` (see `start.ts`) since a firm on Postgres
  * with real headroom may reasonably want it higher.
  */
-const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+export const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export interface DocumentSummary {
   id: string;
   matterId: string;

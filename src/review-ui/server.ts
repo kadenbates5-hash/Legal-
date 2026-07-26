@@ -10,7 +10,7 @@ import { ReviewGateService } from "./review-service.js";
 import type { IntakeDemoSessions } from "./intake-demo.js";
 import type { AccountsService } from "./accounts-service.js";
 import type { DraftingService } from "./drafting-service.js";
-import type { DocumentsService } from "./documents-service.js";
+import { DEFAULT_MAX_UPLOAD_BYTES, type DocumentsService } from "./documents-service.js";
 import type { CasesService } from "./cases-service.js";
 import type { AuditService } from "./audit-service.js";
 import type { ResearchService } from "./research-service.js";
@@ -119,12 +119,80 @@ function resolveActor(req: IncomingMessage, auth: AuthService): Actor {
   return actor as Actor;
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+export class RequestBodyTooLargeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RequestBodyTooLargeError";
+  }
+}
+
+/**
+ * Every request body is fully buffered in memory before it's parsed, so
+ * without a ceiling a single POST can exhaust the process — and the
+ * `DocumentsService` upload cap can't help, since it only runs *after*
+ * the body has already been read. This is the real bound.
+ *
+ * The cap has to clear the largest legitimate request, which is a Cases
+ * upload: base64 inflates bytes by 4/3, plus a small JSON envelope. See
+ * `maxRequestBodyBytesFor` and `ReviewServerOptions.maxRequestBodyBytes`
+ * — `start.ts` derives it from whatever per-file upload cap is
+ * configured, so raising one raises the other. The default is derived
+ * from `DocumentsService`'s own default rather than restated here, so the
+ * two caps can't drift apart.
+ */
+export function maxRequestBodyBytesFor(maxUploadBytes: number): number {
+  return Math.ceil((maxUploadBytes * 4) / 3) + 1024 * 1024;
+}
+
+const DEFAULT_MAX_REQUEST_BODY_BYTES = maxRequestBodyBytesFor(DEFAULT_MAX_UPLOAD_BYTES);
+
+/**
+ * Set once per request by `handleRequest`/`handleVoiceRequest`, so the
+ * body readers can enforce the configured cap without threading it
+ * through all ~20 route handlers. A `WeakMap` keeps this per-request and
+ * per-server-instance (tests spin up several), with no monkey-patching
+ * of `IncomingMessage`.
+ */
+const requestBodyLimits = new WeakMap<IncomingMessage, number>();
+
+function bodyLimitFor(req: IncomingMessage): number {
+  return requestBodyLimits.get(req) ?? DEFAULT_MAX_REQUEST_BODY_BYTES;
+}
+
+/**
+ * Rejects an oversized body on the declared `Content-Length` before a
+ * single byte is buffered. `readBodyBuffer` still counts what actually
+ * arrives, since the header is client-supplied and absent entirely on
+ * chunked requests.
+ */
+function enforceContentLength(req: IncomingMessage, maxBytes: number): void {
+  const declared = Number(req.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new RequestBodyTooLargeError(`request body of ${declared} bytes exceeds the ${maxBytes}-byte limit`);
+  }
+}
+
+async function readBodyBuffer(req: IncomingMessage): Promise<Buffer> {
+  const maxBytes = bodyLimitFor(req);
+  enforceContentLength(req, maxBytes);
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  if (chunks.length === 0) return {};
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = chunk as Buffer;
+    total += buf.length;
+    if (total > maxBytes) {
+      throw new RequestBodyTooLargeError(`request body exceeds the ${maxBytes}-byte limit`);
+    }
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const raw = await readBodyBuffer(req);
+  if (raw.length === 0) return {};
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return JSON.parse(raw.toString("utf8"));
   } catch {
     throw new Error("invalid JSON body");
   }
@@ -132,9 +200,7 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
 
 /** Twilio posts webhook bodies as `application/x-www-form-urlencoded`, not JSON. */
 async function readFormBody(req: IncomingMessage): Promise<Record<string, string>> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  const params = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+  const params = new URLSearchParams((await readBodyBuffer(req)).toString("utf8"));
   return Object.fromEntries(params.entries());
 }
 
@@ -150,6 +216,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown, extraHeade
 }
 
 function errorStatus(err: unknown): number {
+  if (err instanceof RequestBodyTooLargeError) return 413;
   if (err instanceof AuthError) {
     // Account-creation validation (bad password/duplicate username) is a
     // 400 from an already-authenticated caller, not an auth failure —
@@ -244,6 +311,8 @@ export interface ReviewServerOptions {
   staffSchedule?: StaffScheduleService;
   billingHours?: BillingHoursService;
   pdfReports?: PdfReportService;
+  /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
+  maxRequestBodyBytes?: number;
   /** Real-call telephony voice channel (see `receptionist/voice-call-sessions.ts`) — `voiceCalls`/`audioClips`/`twilio` must all be set together for `/api/voice/*` to be configured. */
   voiceCalls?: VoiceCallSessions;
   audioClips?: AudioClipStore;
@@ -254,7 +323,18 @@ export interface ReviewServerOptions {
 
 export function createReviewServer(service: ReviewGateService, auth: AuthService, options?: ReviewServerOptions): Server {
   return createServer((req, res) => {
-    void handleRequest(service, auth, req, res, options ?? {});
+    // Last-resort guard: `handleRequest` catches per-route errors itself, but
+    // the paths that run before its try block (the Twilio webhook body read,
+    // URL parsing) would otherwise reject with nothing attached — and an
+    // unhandled rejection terminates the process on modern Node. A request
+    // that fails in an unexpected place should fail that one request.
+    void handleRequest(service, auth, req, res, options ?? {}).catch((err) => {
+      if (!res.headersSent) {
+        sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+      } else {
+        res.end();
+      }
+    });
   });
 }
 
@@ -285,7 +365,12 @@ async function handleRequest(
     audioClips,
     twilio,
     trustProxy = false,
+    maxRequestBodyBytes = DEFAULT_MAX_REQUEST_BODY_BYTES,
   } = options;
+  // Bound every buffered body for this request before any route runs — see
+  // `readBodyBuffer`. Applies to the unauthenticated routes (login, Twilio
+  // webhooks) too, which is exactly where it matters most.
+  requestBodyLimits.set(req, maxRequestBodyBytes);
   const url = new URL(req.url ?? "/", "http://localhost");
 
   if (url.pathname.startsWith("/api/voice/")) {
@@ -572,7 +657,8 @@ async function handleLogin(
     );
     onMutated?.();
   } catch (err) {
-    sendJson(res, err instanceof AuthError ? 401 : 400, { error: err instanceof Error ? err.message : "invalid request" });
+    // errorStatus keeps a bad login a 401 while still mapping an oversized body to 413.
+    sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "invalid request" });
   }
 }
 

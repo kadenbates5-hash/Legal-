@@ -774,9 +774,9 @@ async function loadQueue() {
     list.innerHTML = "";
     for (const item of items) {
       const li = document.createElement("li");
-      li.innerHTML = `<strong>${item.kind}</strong> — matter ${item.matterId}
+      li.innerHTML = `<strong>${escapeHtml(item.kind)}</strong> — matter ${escapeHtml(item.matterId)}
         <span class="badge ${item.status}">${item.status}</span>
-        ${item.flags.length ? `<div class="flags">Unresolved flags: ${item.flags.join(", ")}</div>` : ""}`;
+        ${item.flags.length ? `<div class="flags">Unresolved flags: ${escapeHtml(item.flags.join(", "))}</div>` : ""}`;
       li.addEventListener("click", () => loadDetail(item.id));
       list.appendChild(li);
     }
@@ -793,8 +793,8 @@ async function loadDetail(id) {
     const detail = document.getElementById("detail");
     detail.innerHTML = `
       <div class="card">
-        <h3>${wp.kind} <span class="badge ${wp.status}">${wp.status}</span></h3>
-        <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 0.6rem;">Matter: ${wp.matterId}</p>
+        <h3>${escapeHtml(wp.kind)} <span class="badge ${wp.status}">${wp.status}</span></h3>
+        <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 0.6rem;">Matter: ${escapeHtml(wp.matterId)}</p>
         ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${f}</code>`).join(", ")}</div>` : ""}
         <pre>${wp.content}</pre>
         <div class="actions" id="actions"></div>
@@ -840,10 +840,37 @@ async function loadDetail(id) {
   }
 }
 
+/**
+ * Escapes quotes as well as angle brackets, so the same helper is correct
+ * whether the value lands in element text or inside an attribute value.
+ * The textContent/innerHTML trick alone leaves `"` intact, which is enough
+ * to break out of an attribute.
+ */
 function escapeHtml(value) {
-  const div = document.createElement("div");
-  div.textContent = value == null ? "" : String(value);
-  return div.innerHTML;
+  return value == null
+    ? ""
+    : String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+/**
+ * A URL is only safe behind a clickable link if it's actually http(s) —
+ * these come from CourtListener results and from whatever a user typed
+ * when saving a reference, so a stored `javascript:` URL would otherwise
+ * be one click away from running inside a logged-in attorney's session.
+ * Returns "" for anything else, and callers drop the link entirely.
+ */
+function safeUrl(value) {
+  try {
+    const parsed = new URL(String(value), window.location.origin);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "";
+  } catch {
+    return "";
+  }
 }
 
 function mkButton(label, onClick) {
@@ -923,7 +950,7 @@ async function loadConflicts() {
     const list = document.getElementById("conflictList");
     list.innerHTML = conflicts.length
       ? conflicts
-          .map((c) => `<li class="static">${c.matterId} / ${c.type}: ${c.calculations.map((x) => `${x.source}=${x.date}`).join(", ")}</li>`)
+          .map((c) => `<li class="static">${escapeHtml(c.matterId)} / ${escapeHtml(c.type)}: ${escapeHtml(c.calculations.map((x) => `${x.source}=${x.date}`).join(", "))}</li>`)
           .join("")
       : '<li class="static empty">None.</li>';
   } catch (err) {
@@ -999,7 +1026,7 @@ async function loadDueReminders() {
     ? due
         .map(
           (d) =>
-            `<li class="static">Matter ${d.appointment.matterId} — ${d.reminder.offsetMinutesBefore} min before ${new Date(d.appointment.startTime).toLocaleString()}</li>`,
+            `<li class="static">Matter ${escapeHtml(d.appointment.matterId)} — ${d.reminder.offsetMinutesBefore} min before ${new Date(d.appointment.startTime).toLocaleString()}</li>`,
         )
         .join("")
     : '<li class="static empty">None due right now.</li>';
@@ -1076,7 +1103,7 @@ async function loadTemplates() {
   try {
     const templates = await api("/api/drafting/templates");
     const select = document.getElementById("draftTemplateId");
-    select.innerHTML = templates.map((t) => `<option value="${t.id}">${t.name}</option>`).join("");
+    select.innerHTML = templates.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join("");
   } catch (err) {
     // Non-fatal if this account can't draft (e.g. not yet assigned) — the matter list will surface that instead.
   }
@@ -1091,9 +1118,9 @@ async function loadMatterDrafts() {
     list.innerHTML = "";
     for (const item of items) {
       const li = document.createElement("li");
-      li.innerHTML = `<strong>${item.kind}</strong>
+      li.innerHTML = `<strong>${escapeHtml(item.kind)}</strong>
         <span class="badge ${item.status}">${item.status}</span>
-        ${item.flags.length ? `<div class="flags">Unresolved flags: ${item.flags.join(", ")}</div>` : ""}`;
+        ${item.flags.length ? `<div class="flags">Unresolved flags: ${escapeHtml(item.flags.join(", "))}</div>` : ""}`;
       li.addEventListener("click", () => loadDraftDetail(item.id));
       list.appendChild(li);
     }
@@ -1111,7 +1138,7 @@ async function loadDraftDetail(id) {
     const editable = wp.status === "draft" || wp.status === "revision_requested";
     detail.innerHTML = `
       <div class="card">
-        <h3>${wp.kind} <span class="badge ${wp.status}">${wp.status}</span></h3>
+        <h3>${escapeHtml(wp.kind)} <span class="badge ${wp.status}">${wp.status}</span></h3>
         ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${f}</code>`).join(", ")}</div>` : ""}
         <div class="field-row">
           <label class="field grow">Content
@@ -1235,7 +1262,7 @@ async function loadCases() {
     list.innerHTML = "";
     for (const item of items) {
       const li = document.createElement("li");
-      li.innerHTML = `<strong>Matter ${item.matterId}</strong>
+      li.innerHTML = `<strong>Matter ${escapeHtml(item.matterId)}</strong>
         <span class="badge">${item.workProductCount} work product</span>
         <span class="badge">${item.documentCount} document${item.documentCount === 1 ? "" : "s"}</span>`;
       li.addEventListener("click", () => loadCaseDetail(item.matterId));
@@ -1273,7 +1300,7 @@ async function loadCaseDetail(matterId) {
     const el = document.getElementById("caseDetail");
     el.innerHTML = `
       <div class="card">
-        <h3>Matter ${matterId}</h3>
+        <h3>Matter ${escapeHtml(matterId)}</h3>
         <div class="field-row">
           <label class="field grow">Upload a document
             <input id="caseUploadFile" type="file" />
@@ -1351,9 +1378,9 @@ async function loadCaseDetail(matterId) {
     for (const wp of detail.workProducts) {
       const li = document.createElement("li");
       li.classList.add("static");
-      li.innerHTML = `<strong>${wp.kind}</strong>
+      li.innerHTML = `<strong>${escapeHtml(wp.kind)}</strong>
         <span class="badge ${wp.status}">${wp.status}</span>
-        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.join(", ")}</div>` : ""}`;
+        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${escapeHtml(wp.flags.join(", "))}</div>` : ""}`;
       wpList.appendChild(li);
     }
     if (detail.workProducts.length === 0) wpList.innerHTML = '<li class="static empty">No drafted work product on this matter yet.</li>';
@@ -1404,7 +1431,7 @@ async function searchResearch() {
         ${result.citations.length ? `<span class="badge">${escapeHtml(result.citations.join(", "))}</span>` : ""}
         ${result.court ? `<div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">${escapeHtml(result.court)}${result.dateFiled ? ` — ${escapeHtml(result.dateFiled)}` : ""}</div>` : ""}
         ${result.snippet ? `<div style="font-size:0.85rem;margin-top:0.3rem;">${escapeHtml(result.snippet)}</div>` : ""}
-        <div style="margin-top:0.4rem;"><a href="${result.url}" target="_blank" rel="noopener">View on CourtListener</a></div>`;
+        ${safeUrl(result.url) ? `<div style="margin-top:0.4rem;"><a href="${escapeHtml(safeUrl(result.url))}" target="_blank" rel="noopener">View on CourtListener</a></div>` : ""}`;
       const saveBtn = mkButton("Save to matter", async () => {
         showError("");
         try {
@@ -1445,7 +1472,7 @@ async function loadResearchMatter() {
       li.innerHTML = `<strong>${escapeHtml(ref.title)}</strong>
         <span class="badge">${escapeHtml(ref.citation)}</span>
         <div style="color:var(--text-muted);font-size:0.8rem;margin-top:0.3rem;">Saved by ${escapeHtml(ref.savedBy)} on ${new Date(ref.savedAt).toLocaleString()}</div>
-        ${ref.url ? `<div style="margin-top:0.3rem;"><a href="${ref.url}" target="_blank" rel="noopener">View source</a></div>` : ""}`;
+        ${safeUrl(ref.url) ? `<div style="margin-top:0.3rem;"><a href="${escapeHtml(safeUrl(ref.url))}" target="_blank" rel="noopener">View source</a></div>` : ""}`;
       const removeBtn = mkButton("Remove", async () => {
         showError("");
         try {
@@ -1838,11 +1865,11 @@ async function loadAccounts() {
     for (const acct of accountsList) {
       const li = document.createElement("li");
       li.classList.add("static");
-      li.innerHTML = `<span class="status-dot ${acct.disabled ? "disabled" : ""}"></span><strong>${acct.username}</strong>
+      li.innerHTML = `<span class="status-dot ${acct.disabled ? "disabled" : ""}"></span><strong>${escapeHtml(acct.username)}</strong>
         <span class="muted">${escapeHtml(acct.displayName)}</span>
         <span class="badge">${acct.role}</span>
         <span class="badge ${acct.disabled ? "rejected" : "approved"}">${acct.disabled ? "disabled" : "enabled"}</span>
-        ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${acct.matterAssignment.matterId}</span>` : ""}
+        ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${escapeHtml(acct.matterAssignment.matterId)}</span>` : ""}
         ${acct.mustChangePassword ? `<span class="badge pending_review">password reset pending</span>` : ""}`;
       const toggleBtn = mkButton(acct.disabled ? "Enable" : "Disable", async () => {
         showError("");

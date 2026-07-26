@@ -43,28 +43,37 @@ export class MessagingService {
     this.#auth = auth;
   }
 
-  #displayNameFor(actorId: string): string {
-    const user = this.#auth.listUsers().find((u) => u.actorId === actorId);
-    return user?.displayName ?? actorId;
+  /**
+   * One actorId -> displayName map per request, not per message.
+   * `AuthService.listUsers()` deep-copies every account on every call, so
+   * resolving a name inline per message made rendering a conversation
+   * O(messages x accounts) in object allocations — enough to matter on
+   * the Messages panel, which re-fetches a whole thread on every send.
+   */
+  #displayNames(): Map<string, string> {
+    return new Map(this.#auth.listUsers().map((u) => [u.actorId, u.displayName]));
   }
 
-  #toConversationView(conversation: Conversation): ConversationView {
+  #toConversationView(conversation: Conversation, names: Map<string, string>): ConversationView {
     return {
       id: conversation.id,
       kind: conversation.kind,
       name: conversation.name,
-      participants: conversation.participantIds.map((actorId) => ({ actorId, displayName: this.#displayNameFor(actorId) })),
+      participants: conversation.participantIds.map((actorId) => ({
+        actorId,
+        displayName: names.get(actorId) ?? actorId,
+      })),
       createdBy: conversation.createdBy,
       createdAt: conversation.createdAt,
     };
   }
 
-  #toMessageView(message: Message): MessageView {
+  #toMessageView(message: Message, names: Map<string, string>): MessageView {
     return {
       id: message.id,
       conversationId: message.conversationId,
       senderId: message.senderId,
-      senderName: this.#displayNameFor(message.senderId),
+      senderName: names.get(message.senderId) ?? message.senderId,
       body: message.body,
       sentAt: message.sentAt,
     };
@@ -79,23 +88,24 @@ export class MessagingService {
 
   listConversations(actor: Actor): ConversationView[] {
     requireHuman(actor);
-    return this.#store.listConversationsFor(actor.id).map((c) => this.#toConversationView(c));
+    const names = this.#displayNames();
+    return this.#store.listConversationsFor(actor.id).map((c) => this.#toConversationView(c, names));
   }
 
   startDirectConversation(actor: Actor, otherActorId: string): ConversationView {
     requireHuman(actor);
-    return this.#toConversationView(this.#store.getOrCreateDirectConversation(actor.id, otherActorId));
+    return this.#toConversationView(this.#store.getOrCreateDirectConversation(actor.id, otherActorId), this.#displayNames());
   }
 
   createGroup(actor: Actor, name: string, memberActorIds: string[]): ConversationView {
     requireHuman(actor);
-    return this.#toConversationView(this.#store.createGroup(name, actor.id, memberActorIds));
+    return this.#toConversationView(this.#store.createGroup(name, actor.id, memberActorIds), this.#displayNames());
   }
 
   addMember(actor: Actor, conversationId: string, memberActorId: string): ConversationView {
     requireHuman(actor);
     const conversation = this.#requireGroupMembership(actor, conversationId);
-    return this.#toConversationView(this.#store.addMember(conversation.id, memberActorId));
+    return this.#toConversationView(this.#store.addMember(conversation.id, memberActorId), this.#displayNames());
   }
 
   /** Leaving removes yourself; removing someone else requires being the group's creator. */
@@ -105,7 +115,7 @@ export class MessagingService {
     if (memberActorId !== actor.id && conversation.createdBy !== actor.id) {
       throw new AccessDeniedError("only the group's creator can remove another member");
     }
-    return this.#toConversationView(this.#store.removeMember(conversation.id, memberActorId));
+    return this.#toConversationView(this.#store.removeMember(conversation.id, memberActorId), this.#displayNames());
   }
 
   #requireGroupMembership(actor: Actor, conversationId: string): Conversation {
@@ -122,7 +132,8 @@ export class MessagingService {
     const conversation = this.#store.getConversation(conversationId);
     if (!conversation) throw new Error(`no conversation '${conversationId}'`);
     this.#requireMembership(actor, conversation);
-    return this.#store.listMessages(conversation.id).map((m) => this.#toMessageView(m));
+    const names = this.#displayNames();
+    return this.#store.listMessages(conversation.id).map((m) => this.#toMessageView(m, names));
   }
 
   postMessage(actor: Actor, conversationId: string, body: string): MessageView {
@@ -130,7 +141,7 @@ export class MessagingService {
     const conversation = this.#store.getConversation(conversationId);
     if (!conversation) throw new Error(`no conversation '${conversationId}'`);
     this.#requireMembership(actor, conversation);
-    return this.#toMessageView(this.#store.postMessage(conversation.id, actor.id, body));
+    return this.#toMessageView(this.#store.postMessage(conversation.id, actor.id, body), this.#displayNames());
   }
 
   listAnnouncements(actor: Actor): MessageView[] {
