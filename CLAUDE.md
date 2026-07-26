@@ -961,7 +961,36 @@ from the matter's **client** party via `billingEmailFor()`, which
 deliberately never falls back to another party — mailing a bill to the
 opposing side is far worse than not mailing it.
 
-`server.ts` adds `GET /api/invoices/email-transport`,
+**Accounts receivable.** `InvoicingService.listOutstanding()` backs the
+Invoices panel's "Outstanding across all your matters" card and a Home
+tile: every issued, unpaid, non-void invoice, most overdue first, then
+largest balance — the order someone chasing payment works through them
+in. Deliberately **cross-matter**, because "who owes us money" is a
+question about the firm and answering it one file at a time is how a
+receivable quietly ages past collectability. Access stays per-matter
+though: each invoice's matter goes through the same `authorize()` check
+as everywhere else and a failing one is *silently omitted* rather than
+raising, so a paralegal scoped to one matter sees that matter's
+receivables with no hint that others exist. Drafts are excluded — a
+draft is not money anyone owes yet. Each row carries the client name and
+matter title so a receivable can be chased without opening the matter,
+and clicking one jumps straight to that invoice.
+
+**Letterhead** comes from `FirmConfig.letterhead` (`addressLines`,
+`phone`, `billingEmail`, `paymentInstructions`) in `FIRM_CONFIG_FILE`,
+falling back to `SMTP_FROM`/`FIRM_PAYMENT_INSTRUCTIONS`. Every field is
+optional: without any of it the invoice still renders correctly with
+just the firm name, the same "absent config degrades, never gates"
+principle as the rest of that layer.
+
+**The client's email** lives on the matter's client party and is edited
+in the Conflicts panel's matter record as `Name <email@example.com>` —
+the same shape as a mail "To:" field. It has to round-trip through that
+textarea because saving rebuilds the whole party list, so anything the
+editor can't display it would silently delete.
+
+`server.ts` adds `GET /api/invoices/outstanding`,
+`GET /api/invoices/email-transport`,
 `GET /api/invoices/matters/:matterId/:invoiceId/preview` and
 `POST /api/invoices/matters/:matterId/:invoiceId/email`. Configured via
 `SMTP_HOST`/`SMTP_FROM` (plus optional `SMTP_PORT`/`SMTP_USER`/
@@ -1417,7 +1446,7 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 # STATE_FILE=./data/system-state.json PORT=3000 npm run start:review-ui  # override the file-backed default
 # DATABASE_URL=postgres://user:pass@host:5432/docket npm run start:review-ui  # use Postgres instead of the file store
 # TRUST_PROXY=true npm run start:review-ui                               # only behind a real TLS-terminating reverse proxy — see "Real authentication"
-# FIRM_CONFIG_FILE=./data/firm-config.json npm run start:review-ui        # enable scheduling business-hours/attorney-assignment/branding
+# FIRM_CONFIG_FILE=./data/firm-config.json npm run start:review-ui        # enable scheduling business-hours/attorney-assignment/branding, and the invoice letterhead (firmName + letterhead.addressLines/phone/billingEmail/paymentInstructions)
 # CALENDAR_SYSTEM_API_KEY=... npm run start:review-ui                     # pin the calendar-integration key instead of auto-generating one
 GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console

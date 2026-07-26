@@ -9,8 +9,26 @@ export interface AttorneyRecord {
   practiceAreaIds: string[];
 }
 
+/**
+ * What appears on the letterhead of anything a client receives — today
+ * the invoice (see `core/invoice-render.ts` and
+ * `integrations/invoice-pdf.ts`). Every field is optional: a firm that
+ * hasn't filled this in still gets a working, itemised invoice with just
+ * its name on it, the same "absent config degrades, never gates"
+ * principle the rest of this layer follows.
+ */
+export interface FirmLetterhead {
+  addressLines?: string[];
+  phone?: string;
+  /** Where a client should reply about a bill. Distinct from the SMTP envelope sender. */
+  billingEmail?: string;
+  /** Printed under the invoice total — "Payable within 30 days", trust notices, wire details. */
+  paymentInstructions?: string;
+}
+
 export interface FirmConfig {
   firmName: string;
+  letterhead?: FirmLetterhead;
   attorneys: AttorneyRecord[];
   businessHours: { timezone: string; open: string; close: string; days: number[] };
   branding: { tone: "formal" | "warm" | "neutral"; greeting: string };

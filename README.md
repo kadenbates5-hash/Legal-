@@ -80,7 +80,9 @@ carrying the date, the timekeeper, the task, the hours and the rate,
 split into services / expenses / fixed fees) — attached as a **PDF** and
 downloadable from the panel, previewable on screen
 before it goes, refusing to send in the clear over SMTP, and skipping
-hours already billed so pressing the button twice can't double-bill;
+hours already billed so pressing the button twice can't double-bill, and
+showing an **accounts-receivable** view of everything outstanding across
+your matters with the most overdue first;
 a **Time Clock** panel to punch in and out with daily, weekly and
 monthly totals counted in the firm's own timezone, where open shifts
 never inflate a total and corrections are attorney-only and keep the

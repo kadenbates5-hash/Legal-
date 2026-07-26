@@ -223,9 +223,15 @@ export class PdfLibInvoicePdfRenderer implements InvoicePdfRenderer {
     }
 
     /* ---------- line-item sections ---------- */
-    const drawTableHeader = (quantityLabel: string) => {
-      l.text("Date", { x: COL.date, size: 8, font: bold, color: MUTED });
-      l.text("By", { x: COL.by, size: 8, font: bold, color: MUTED });
+    // `showProvenance` is false for a section whose lines carry no date
+    // or timekeeper (a flat fee usually doesn't). Printing empty "Date"
+    // and "By" headers over blank space looks like missing data on a
+    // document a client is being asked to pay.
+    const drawTableHeader = (quantityLabel: string, showProvenance: boolean) => {
+      if (showProvenance) {
+        l.text("Date", { x: COL.date, size: 8, font: bold, color: MUTED });
+        l.text("By", { x: COL.by, size: 8, font: bold, color: MUTED });
+      }
       l.text("Description", { x: COL.description, size: 8, font: bold, color: MUTED });
       l.textRight(quantityLabel, { right: COL.quantityRight, size: 8, font: bold, color: MUTED });
       l.textRight("Rate", { right: COL.rateRight, size: 8, font: bold, color: MUTED });
@@ -243,12 +249,13 @@ export class PdfLibInvoicePdfRenderer implements InvoicePdfRenderer {
       l.ensure(60);
       l.text(section.heading.toUpperCase(), { x: MARGIN, size: 9, font: bold, color: MUTED });
       l.y -= 14;
-      drawTableHeader(section.quantityLabel);
+      const showProvenance = lines.some((item) => item.workedOn || item.timekeeperId);
+      drawTableHeader(section.quantityLabel, showProvenance);
 
       for (const item of lines) {
         const wrapped = wrap(item.description, font, 9, DESCRIPTION_WIDTH);
         const rowHeight = Math.max(wrapped.length * 11, 11) + 6;
-        if (l.ensure(rowHeight)) drawTableHeader(section.quantityLabel);
+        if (l.ensure(rowHeight)) drawTableHeader(section.quantityLabel, showProvenance);
 
         l.text(item.workedOn ?? "", { x: COL.date, size: 9, font, color: MUTED });
         l.text(item.timekeeperId ? names[item.timekeeperId] ?? item.timekeeperId : "", {

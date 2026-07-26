@@ -1493,7 +1493,7 @@ async function loadHome() {
   const isAttorney = currentRole === "attorney";
   const canDraft = isAttorney || currentRole === "paralegal";
 
-  const [pending, conflicts, cases, myHours, announcements, schedule, clock] = await Promise.all([
+  const [pending, conflicts, cases, myHours, announcements, schedule, clock, outstanding] = await Promise.all([
     isAttorney ? tryApi("/api/work-products?status=pending_review") : null,
     isAttorney ? tryApi("/api/deadlines/conflicts") : null,
     canDraft ? tryApi("/api/cases") : null,
@@ -1501,6 +1501,7 @@ async function loadHome() {
     tryApi("/api/messages/announcements"),
     tryApi(`/api/staff-schedule/date/${todayIso()}`),
     currentActorId ? tryApi(`/api/time-clock/actor/${encodeURIComponent(currentActorId)}/summary`) : null,
+    canDraft ? tryApi("/api/invoices/outstanding") : null,
   ]);
 
   if (pending) stats.appendChild(statTile(pending.length, "awaiting your review", { tone: pending.length ? "alert" : "ok", panel: "queue" }));
@@ -1515,6 +1516,16 @@ async function loadHome() {
       statTile(formatMs(clock.thisWeek ? clock.thisWeek.totalMs : 0), "clocked this week", {
         tone: clock.openShift ? "ok" : "",
         panel: "time-clock",
+      }),
+    );
+  }
+  if (outstanding) {
+    const dueCents = outstanding.reduce((sum, r) => sum + r.totals.balanceCents, 0);
+    const overdue = outstanding.filter((r) => r.daysOverdue > 0).length;
+    stats.appendChild(
+      statTile(centsToDollars(dueCents), overdue ? `outstanding — ${overdue} overdue` : "outstanding", {
+        tone: overdue ? "alert" : "",
+        panel: "invoices",
       }),
     );
   }
@@ -1537,6 +1548,17 @@ async function loadHome() {
     row.appendChild(document.createElement("br"));
     row.appendChild(open);
     attention.appendChild(row);
+  }
+  for (const row of (outstanding || []).filter((r) => r.daysOverdue > 0).slice(0, 3)) {
+    const item = listRow(
+      `<strong>${escapeHtml(row.number)} is ${row.daysOverdue} day${row.daysOverdue === 1 ? "" : "s"} overdue</strong>
+       <span class="badge rejected">${escapeHtml(centsToDollars(row.totals.balanceCents))} due</span>
+       <div class="meta-tight">${escapeHtml(row.clientName || row.matterId)} · ${escapeHtml(row.matterTitle || "")}</div>`,
+    );
+    const open = mkButton("Open in Invoices", () => goToPanel("invoices"));
+    item.appendChild(document.createElement("br"));
+    item.appendChild(open);
+    attention.appendChild(item);
   }
   for (const c of (conflicts || []).slice(0, 5)) {
     attention.appendChild(
@@ -1658,11 +1680,30 @@ async function runConflictCheck() {
   }
 }
 
+/**
+ * A party is written as `Name` or `Name <email@example.com>` — the same
+ * shape as an email "To:" field, so it needs no explanation. The email
+ * has to round-trip through this textarea: a save rebuilds the whole
+ * party list, so anything the editor can't display it would silently
+ * delete, and the client's address is what the Invoices panel emails a
+ * bill to.
+ */
+function partyToLine(party) {
+  return party.email ? `${party.name} <${party.email}>` : party.name;
+}
+
+function lineToParty(line, role) {
+  const match = /^(.*?)\s*<([^>]+)>\s*$/.exec(line);
+  return match
+    ? { name: match[1].trim(), role, email: match[2].trim() }
+    : { name: line, role };
+}
+
 function partiesToTextareas(matter) {
   const pick = (role) =>
     (matter.parties || [])
       .filter((p) => p.role === role)
-      .map((p) => p.name)
+      .map(partyToLine)
       .join("\n");
   document.getElementById("matterClients").value = pick("client");
   document.getElementById("matterAdverse").value = pick("adverse");
@@ -1696,8 +1737,8 @@ async function saveMatterRecord() {
     const id = document.getElementById("matterRecordId").value.trim();
     if (!id) return;
     const parties = [
-      ...linesOf("matterClients").map((name) => ({ name, role: "client" })),
-      ...linesOf("matterAdverse").map((name) => ({ name, role: "adverse" })),
+      ...linesOf("matterClients").map((line) => lineToParty(line, "client")),
+      ...linesOf("matterAdverse").map((line) => lineToParty(line, "adverse")),
     ];
     await api(`/api/matters/${encodeURIComponent(id)}`, {
       method: "PUT",
@@ -1904,6 +1945,43 @@ async function loadProcessorInfo() {
 /** Whether the configured processor can actually move money, so the panel offers "charge" only when it would work. */
 let processorCanCharge = false;
 
+/** The accounts-receivable view: unpaid issued invoices, most overdue first. */
+async function loadOutstanding() {
+  const list = document.getElementById("outstandingList");
+  const summary = document.getElementById("outstandingSummary");
+  try {
+    const rows = await api("/api/invoices/outstanding");
+    list.innerHTML = "";
+    const totalCents = rows.reduce((sum, r) => sum + r.totals.balanceCents, 0);
+    const overdue = rows.filter((r) => r.daysOverdue > 0);
+    summary.textContent = rows.length
+      ? `${centsToDollars(totalCents)} outstanding across ${rows.length} invoice${rows.length === 1 ? "" : "s"}` +
+        (overdue.length ? ` — ${overdue.length} overdue.` : ".")
+      : "";
+
+    for (const row of rows) {
+      const li = document.createElement("li");
+      li.innerHTML = `<strong>${escapeHtml(row.number)}</strong>
+        <span class="badge ${row.daysOverdue > 0 ? "rejected" : "pending_review"}">${escapeHtml(centsToDollars(row.totals.balanceCents))} due</span>
+        ${row.daysOverdue > 0 ? `<span class="badge rejected">${row.daysOverdue} day${row.daysOverdue === 1 ? "" : "s"} overdue</span>` : ""}
+        <div class="meta-tight">${escapeHtml(row.clientName || "client not on record")} · ${escapeHtml(row.matterTitle || row.matterId)}${row.dueDate ? ` · due ${escapeHtml(row.dueDate)}` : " · no due date set"}</div>`;
+      // Clicking one jumps straight to it, rather than making someone
+      // retype the matter id they just read.
+      li.addEventListener("click", async () => {
+        document.getElementById("invoiceMatterId").value = row.matterId;
+        await loadInvoices();
+        await showInvoice(row.matterId, row.id);
+      });
+      list.appendChild(li);
+    }
+    if (rows.length === 0) list.innerHTML = '<li class="static empty">Nothing outstanding — every issued invoice is paid.</li>';
+  } catch (err) {
+    list.innerHTML = "";
+    summary.textContent = "";
+    void err;
+  }
+}
+
 async function loadInvoices() {
   showError("");
   loadProcessorInfo();
@@ -2060,6 +2138,7 @@ async function showInvoice(matterId, invoiceId) {
           body: JSON.stringify(body || {}),
         });
         await loadInvoices();
+        await loadOutstanding();
         await showInvoice(matterId, invoiceId);
       } catch (err) { showError(err.message); }
     };
@@ -2181,7 +2260,11 @@ async function showInvoice(matterId, invoiceId) {
 }
 
 document.getElementById("loadInvoices").addEventListener("click", loadInvoices);
-document.getElementById("navInvoices").addEventListener("click", loadInvoices);
+document.getElementById("refreshOutstanding").addEventListener("click", loadOutstanding);
+document.getElementById("navInvoices").addEventListener("click", () => {
+  loadOutstanding();
+  loadInvoices();
+});
 document.getElementById("newInvoice").addEventListener("click", async () => {
   showError("");
   try {

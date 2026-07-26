@@ -297,11 +297,24 @@ const invoicing = new InvoicingService({
   // auth service turns a timekeeper's actorId into a name on the bill.
   matters: state.matters,
   auth: state.auth,
+  // Letterhead comes from FIRM_CONFIG_FILE, with the env vars as a
+  // fallback for a deployment that has no config file at all. The
+  // billing address falls back to the SMTP sender, since a client
+  // replying to the bill would reach that mailbox anyway.
   firm: {
     name: firmConfig?.firmName ?? "This Firm",
-    ...(SMTP_FROM ? { email: SMTP_FROM } : {}),
-    ...(process.env["FIRM_PAYMENT_INSTRUCTIONS"]
-      ? { paymentInstructions: process.env["FIRM_PAYMENT_INSTRUCTIONS"] }
+    ...(firmConfig?.letterhead?.addressLines?.length
+      ? { addressLines: firmConfig.letterhead.addressLines }
+      : {}),
+    ...(firmConfig?.letterhead?.phone ? { phone: firmConfig.letterhead.phone } : {}),
+    ...(firmConfig?.letterhead?.billingEmail ?? SMTP_FROM
+      ? { email: firmConfig?.letterhead?.billingEmail ?? SMTP_FROM! }
+      : {}),
+    ...(firmConfig?.letterhead?.paymentInstructions ?? process.env["FIRM_PAYMENT_INSTRUCTIONS"]
+      ? {
+          paymentInstructions:
+            firmConfig?.letterhead?.paymentInstructions ?? process.env["FIRM_PAYMENT_INSTRUCTIONS"]!,
+        }
       : {}),
   },
 });

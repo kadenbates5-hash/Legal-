@@ -30,6 +30,19 @@ export interface InvoiceView extends Invoice {
   payments: Payment[];
 }
 
+/** An unpaid invoice, with the context needed to chase it without opening the matter. */
+export interface OutstandingInvoice extends InvoiceView {
+  /** 0 when not yet due, or when the invoice carries no due date at all. */
+  daysOverdue: number;
+  matterTitle: string | undefined;
+  clientName: string | undefined;
+}
+
+/** Whole days between two ISO dates, using UTC so a timezone can't produce an off-by-one. */
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+}
+
 /**
  * Backs the "Invoices" panel.
  *
@@ -96,6 +109,50 @@ export class InvoicingService {
   processorInfo(actor: Actor): { name: string; canCharge: boolean } {
     requireLegalStaff(actor);
     return { name: this.#processor.name, canCharge: this.#processor.canCharge };
+  }
+
+  /**
+   * Every unpaid issued invoice the caller is allowed to see, most
+   * overdue first — the accounts-receivable view.
+   *
+   * Deliberately cross-matter, because "who owes us money" is a
+   * question about the firm, not about one file, and answering it by
+   * opening matters one at a time is how a receivable quietly ages past
+   * collectability. Access is still per-matter: each invoice's matter
+   * goes through the same `authorize()` check as everywhere else, and
+   * one that fails is silently omitted rather than raising — a
+   * paralegal scoped to a single matter gets that matter's receivables
+   * and no hint that others exist.
+   *
+   * Drafts are excluded: a draft is not money anyone owes yet. So are
+   * voided invoices, for the same reason.
+   */
+  listOutstanding(actor: Actor, asOf: Date = new Date()): OutstandingInvoice[] {
+    requireLegalStaff(actor);
+    const today = asOf.toISOString().slice(0, 10);
+    const rows: OutstandingInvoice[] = [];
+
+    for (const invoice of this.#store.listAll()) {
+      if (invoice.status !== "sent" && invoice.status !== "partially_paid") continue;
+      const totals = this.#store.totals(invoice.id);
+      if (totals.balanceCents <= 0) continue;
+      try {
+        this.#accessControl.authorize({ actor, matterId: invoice.matterId, category: "billing_internal" });
+      } catch {
+        continue;
+      }
+      const daysOverdue = invoice.dueDate && invoice.dueDate < today ? daysBetween(invoice.dueDate, today) : 0;
+      rows.push({
+        ...this.#view(invoice),
+        daysOverdue,
+        matterTitle: this.#matters?.get(invoice.matterId)?.title,
+        clientName: this.#matters?.get(invoice.matterId)?.parties.find((p) => p.role === "client")?.name,
+      });
+    }
+
+    // Most overdue first, then largest balance — the order someone
+    // chasing payment would work through them in.
+    return rows.sort((a, b) => b.daysOverdue - a.daysOverdue || b.totals.balanceCents - a.totals.balanceCents);
   }
 
   listForMatter(actor: Actor, matterId: string): InvoiceView[] {

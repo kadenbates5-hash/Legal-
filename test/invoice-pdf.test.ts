@@ -194,6 +194,10 @@ describe("PdfLibInvoicePdfRenderer", () => {
     );
     expect(text).toContain("FIXED FEES");
     expect(text).toContain("$2,500.00");
+    // A flat fee has no date or timekeeper, so those column headers are
+    // omitted rather than printed over blank space on a client's bill.
+    expect(text).not.toContain("Date");
+    expect(text).not.toContain("By ");
     // Falls back to the matter id when there's no caption.
     expect(text).toContain("m-9");
   });

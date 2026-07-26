@@ -1204,6 +1204,11 @@ async function handleInvoicingRequest(
     return;
   }
 
+  if (url.pathname === "/api/invoices/outstanding" && req.method === "GET") {
+    sendJson(res, 200, invoicing.listOutstanding(actor));
+    return;
+  }
+
   if (url.pathname === "/api/invoices/email-transport" && req.method === "GET") {
     sendJson(res, 200, invoicing.emailInfo(actor));
     return;

@@ -278,9 +278,12 @@
           </label>
         </div>
         <div class="field-row">
-          <label class="field grow">Client name(s), one per line <textarea id="matterClients" rows="2"></textarea></label>
-          <label class="field grow">Adverse party name(s), one per line <textarea id="matterAdverse" rows="2"></textarea></label>
+          <label class="field grow">Client name(s), one per line
+            <textarea id="matterClients" rows="2" placeholder="Maria Ruiz &lt;maria@example.com&gt;"></textarea></label>
+          <label class="field grow">Adverse party name(s), one per line
+            <textarea id="matterAdverse" rows="2" placeholder="The State"></textarea></label>
         </div>
+        <p class="meta-tight">Add a client's email as <code>Name &lt;email@example.com&gt;</code> — that's the address the Invoices panel bills to. Adverse parties are never emailed.</p>
         <div class="field-row">
           <button class="btn primary" id="saveMatterRecord">Save matter record</button>
         </div>
@@ -500,6 +503,14 @@
           <button class="btn primary" id="newInvoice">New draft</button>
           <div class="field"><div class="k">Payments</div><div id="processorInfo" class="meta-tight">—</div></div>
         </div>
+      </div>
+      <div class="card">
+        <div class="field-row">
+          <h3 class="row-title">Outstanding across all your matters</h3>
+          <button class="btn" id="refreshOutstanding">Refresh</button>
+        </div>
+        <p class="subtitle-inline" id="outstandingSummary"></p>
+        <ul id="outstandingList" class="list"></ul>
       </div>
       <div class="card">
         <h3>Invoices on this matter</h3>

@@ -4,7 +4,7 @@ import { AuditLog } from "../src/core/audit.js";
 import { AuthService } from "../src/core/auth.js";
 import { BillingHoursStore } from "../src/core/billing-hours.js";
 import { InvoiceStore } from "../src/core/invoicing.js";
-import { MatterStore } from "../src/core/matters.js";
+import { MatterStore, billingEmailFor } from "../src/core/matters.js";
 import { TrustLedger } from "../src/core/trust-ledger.js";
 import { InvoicingService } from "../src/review-ui/invoicing-service.js";
 import { ManualPaymentProcessor } from "../src/integrations/payment-processor.js";
@@ -430,5 +430,137 @@ describe("InvoicingService — the PDF invoice", () => {
     ctx.matters.upsert("m-2", { title: "Other matter" });
     const invoice = ctx.service.createDraft(attorney, "m-2", {});
     await expect(ctx.service.renderPdf(paralegal, "m-2", invoice.id)).rejects.toThrow(AccessDeniedError);
+  });
+});
+
+describe("billingEmailFor", () => {
+  it("returns the first client party with an address", () => {
+    const matters = new MatterStore();
+    matters.upsert("m-1", {
+      parties: [
+        { name: "No Email Co", role: "client", note: undefined, email: undefined },
+        { name: "Maria Ruiz", role: "client", note: undefined, email: "maria@example.com" },
+      ],
+    });
+    expect(billingEmailFor(matters.get("m-1"))).toBe("maria@example.com");
+  });
+
+  it("never returns an adverse or related party's address", () => {
+    const matters = new MatterStore();
+    matters.upsert("m-1", {
+      parties: [
+        { name: "The State", role: "adverse", note: undefined, email: "prosecutor@example.gov" },
+        { name: "A Witness", role: "related", note: undefined, email: "witness@example.com" },
+      ],
+    });
+    expect(billingEmailFor(matters.get("m-1"))).toBeUndefined();
+  });
+
+  it("ignores a blank address and an unknown matter", () => {
+    const matters = new MatterStore();
+    matters.upsert("m-1", { parties: [{ name: "Maria Ruiz", role: "client", note: undefined, email: "   " }] });
+    expect(billingEmailFor(matters.get("m-1"))).toBeUndefined();
+    expect(billingEmailFor(matters.get("nope"))).toBeUndefined();
+  });
+
+  it("survives a snapshot round trip, so a restart can't lose where bills go", () => {
+    const matters = new MatterStore();
+    matters.upsert("m-1", {
+      parties: [{ name: "Maria Ruiz", role: "client", note: undefined, email: "maria@example.com" }],
+    });
+    const restored = MatterStore.fromSnapshot(matters.toSnapshot());
+    expect(billingEmailFor(restored.get("m-1"))).toBe("maria@example.com");
+  });
+});
+
+describe("InvoicingService — outstanding receivables", () => {
+  /** An issued invoice on `matterId` for `amountCents`, optionally with a due date. */
+  function issued(ctx: ReturnType<typeof setup>, matterId: string, amountCents: number, dueDate?: string) {
+    const invoice = ctx.service.createDraft(attorney, matterId, dueDate ? { dueDate } : {});
+    ctx.service.addLineItem(attorney, matterId, invoice.id, {
+      description: "Work",
+      source: "flat",
+      quantityMilli: 1_000,
+      unitAmountCents: amountCents,
+    });
+    ctx.service.send(attorney, matterId, invoice.id);
+    return invoice;
+  }
+
+  const asOf = new Date("2026-08-15T12:00:00Z");
+
+  it("lists only issued, unpaid invoices", () => {
+    const ctx = setup();
+    const unpaid = issued(ctx, "m-1", 500_00);
+    // A draft isn't money anyone owes yet.
+    draftWithALine(ctx);
+    // A fully paid one drops off.
+    const paid = issued(ctx, "m-1", 200_00);
+    ctx.service.recordPayment(attorney, "m-1", paid.id, { amountCents: 200_00, method: "check" });
+    // So does a voided one.
+    const voided = issued(ctx, "m-1", 300_00);
+    ctx.service.void(attorney, "m-1", voided.id, "duplicate");
+
+    const rows = ctx.service.listOutstanding(attorney, asOf);
+    expect(rows.map((r) => r.id)).toEqual([unpaid.id]);
+    expect(rows[0]!.totals.balanceCents).toBe(500_00);
+  });
+
+  it("counts a partly paid invoice at its remaining balance", () => {
+    const ctx = setup();
+    const invoice = issued(ctx, "m-1", 1_000_00);
+    ctx.service.recordPayment(attorney, "m-1", invoice.id, { amountCents: 400_00, method: "check" });
+    const rows = ctx.service.listOutstanding(attorney, asOf);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.totals.balanceCents).toBe(600_00);
+    expect(rows[0]!.status).toBe("partially_paid");
+  });
+
+  it("computes days overdue from the due date, and treats a future date as not overdue", () => {
+    const ctx = setup();
+    issued(ctx, "m-1", 100_00, "2026-08-01"); // 14 days past
+    issued(ctx, "m-1", 200_00, "2026-09-01"); // not yet due
+    issued(ctx, "m-1", 300_00); // no due date at all
+
+    const byNumber = Object.fromEntries(ctx.service.listOutstanding(attorney, asOf).map((r) => [r.dueDate ?? "none", r.daysOverdue]));
+    expect(byNumber["2026-08-01"]).toBe(14);
+    expect(byNumber["2026-09-01"]).toBe(0);
+    expect(byNumber["none"]).toBe(0);
+  });
+
+  it("sorts most overdue first, then by largest balance", () => {
+    const ctx = setup();
+    issued(ctx, "m-1", 100_00, "2026-08-10"); // 5 days
+    issued(ctx, "m-1", 900_00, "2026-07-01"); // 45 days
+    issued(ctx, "m-1", 500_00); // not overdue
+    issued(ctx, "m-1", 800_00); // not overdue, bigger
+
+    const rows = ctx.service.listOutstanding(attorney, asOf);
+    expect(rows.map((r) => r.totals.balanceCents)).toEqual([900_00, 100_00, 800_00, 500_00]);
+  });
+
+  it("shows a paralegal only their own matter's receivables, without erroring on the rest", () => {
+    const ctx = setup();
+    ctx.matters.upsert("m-2", { title: "Someone else's case" });
+    const mine = issued(ctx, "m-1", 100_00);
+    issued(ctx, "m-2", 999_00);
+
+    // The attorney sees both; the paralegal is assigned only to m-1.
+    expect(ctx.service.listOutstanding(attorney, asOf)).toHaveLength(2);
+    const theirs = ctx.service.listOutstanding(paralegal, asOf);
+    expect(theirs.map((r) => r.id)).toEqual([mine.id]);
+  });
+
+  it("carries the client and matter title so a receivable can be chased without opening the matter", () => {
+    const ctx = setup();
+    issued(ctx, "m-1", 100_00);
+    const row = ctx.service.listOutstanding(attorney, asOf)[0]!;
+    expect(row.clientName).toBe("Maria Ruiz");
+    expect(row.matterTitle).toBe("State v. Ruiz");
+  });
+
+  it("is closed to a receptionist", () => {
+    const ctx = setup();
+    expect(() => ctx.service.listOutstanding({ id: "r1", role: "receptionist" }, asOf)).toThrow(AccessDeniedError);
   });
 });
