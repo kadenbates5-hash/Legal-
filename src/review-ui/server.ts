@@ -246,6 +246,29 @@ function sendJson(res: ServerResponse, status: number, body: unknown, extraHeade
   res.end(payload);
 }
 
+/**
+ * A binary download. Kept separate from `sendJson` because an invoice
+ * PDF is the one response in this API that isn't JSON — and because
+ * `Content-Disposition` has to carry a filename that came from a matter
+ * title, so it is quoted and stripped of anything that could terminate
+ * the header.
+ */
+function sendBinary(
+  res: ServerResponse,
+  contentType: string,
+  filename: string,
+  data: Buffer,
+): void {
+  const safe = filename.replace(/[\r\n"\\]/g, "").slice(0, 120) || "download";
+  res.writeHead(200, {
+    "Content-Type": contentType,
+    "Content-Length": String(data.byteLength),
+    "Content-Disposition": `attachment; filename="${safe}"`,
+    ...SECURITY_HEADERS,
+  });
+  res.end(data);
+}
+
 function errorStatus(err: unknown): number {
   if (err instanceof RequestBodyTooLargeError) return 413;
   if (err instanceof AuthError) {
@@ -1273,6 +1296,12 @@ async function handleInvoicingRequest(
     }
     sendJson(res, 200, result);
     onMutated?.();
+    return;
+  }
+
+  if (segments.length === 4 && segments[3] === "pdf" && req.method === "GET") {
+    const { filename, data } = await invoicing.renderPdf(actor, matterId, invoiceId);
+    sendBinary(res, "application/pdf", filename, data);
     return;
   }
 

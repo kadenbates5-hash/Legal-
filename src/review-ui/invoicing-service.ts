@@ -14,7 +14,8 @@ import {
 } from "../core/invoicing.js";
 import type { PaymentProcessor } from "../integrations/payment-processor.js";
 import { assertSafeEmailAddress, type EmailSender } from "../integrations/email-sender.js";
-import { renderInvoice, type RenderableFirm, type RenderedInvoice } from "../core/invoice-render.js";
+import { renderInvoice, type RenderInvoiceParams, type RenderableFirm, type RenderedInvoice } from "../core/invoice-render.js";
+import { invoicePdfFilename, type InvoicePdfRenderer } from "../integrations/invoice-pdf.js";
 import { billingEmailFor, type MatterStore } from "../core/matters.js";
 import type { AuthService } from "../core/auth.js";
 
@@ -56,6 +57,7 @@ export class InvoicingService {
   #billingHours: BillingHoursStore;
   #processor: PaymentProcessor;
   #email: EmailSender | undefined;
+  #pdf: InvoicePdfRenderer | undefined;
   #matters: MatterStore | undefined;
   #auth: AuthService | undefined;
   #firm: RenderableFirm;
@@ -69,6 +71,8 @@ export class InvoicingService {
     processor: PaymentProcessor;
     /** Absent means the Invoices panel offers download-and-send-yourself instead of an Email button. */
     email?: EmailSender;
+    /** Absent means no PDF download and an email carrying only the message body. */
+    pdf?: InvoicePdfRenderer;
     /** Supplies the matter caption and the client's address; absent means the caller must pass `to` explicitly. */
     matters?: MatterStore;
     /** Turns a timekeeper's actorId into a name on the invoice. */
@@ -82,6 +86,7 @@ export class InvoicingService {
     this.#billingHours = params.billingHours;
     this.#processor = params.processor;
     this.#email = params.email;
+    this.#pdf = params.pdf;
     this.#matters = params.matters;
     this.#auth = params.auth;
     this.#firm = params.firm ?? { name: "This Firm" };
@@ -402,14 +407,30 @@ export class InvoicingService {
     // below: the copy in the client's inbox must not say "draft — not
     // yet issued". Only the date is printed, so the sub-second gap
     // between this stamp and the one `send()` records is invisible.
-    const rendered = this.#render(
-      invoice.sentAt ? invoice : { ...invoice, sentAt: new Date().toISOString() },
-    );
+    const asIssued = invoice.sentAt ? invoice : { ...invoice, sentAt: new Date().toISOString() };
+    const params = this.#renderParams(asIssued);
+    const rendered = renderInvoice(params);
+
+    // The PDF is the copy the client files or forwards to their
+    // accountant, so it is attached whenever a renderer is configured.
+    // A failure to produce it aborts the send rather than quietly
+    // mailing a bill without the document the message body refers to.
+    const attachments = this.#pdf
+      ? [
+          {
+            filename: invoicePdfFilename(invoice.number, params.matterTitle ?? invoice.matterId),
+            contentType: "application/pdf",
+            content: await this.#pdf.render(params),
+          },
+        ]
+      : [];
+
     const result = await this.#email.send({
       to: recipient,
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
+      ...(attachments.length ? { attachments } : {}),
     });
 
     // Only now is the invoice committed as issued.
@@ -430,11 +451,38 @@ export class InvoicingService {
     return this.#view(invoice);
   }
 
+  /**
+   * The invoice as a PDF, for download or attachment. Same access shape
+   * as `preview` — a paralegal preparing the bill needs to be able to
+   * look at it; only an attorney can send it.
+   */
+  async renderPdf(
+    actor: Actor,
+    matterId: string,
+    invoiceId: string,
+  ): Promise<{ filename: string; data: Buffer }> {
+    requireLegalStaff(actor);
+    this.#accessControl.authorize({ actor, matterId, category: "billing_internal" });
+    if (!this.#pdf) throw new InvoicingError("PDF rendering is not configured on this server");
+    const invoice = this.#requireOnMatter(matterId, invoiceId);
+    const params = this.#renderParams(invoice);
+    return {
+      filename: invoicePdfFilename(invoice.number, params.matterTitle ?? invoice.matterId),
+      data: await this.#pdf.render(params),
+    };
+  }
+
   #clientEmail(matterId: string): string | undefined {
     return billingEmailFor(this.#matters?.get(matterId));
   }
 
-  #render(invoice: Invoice): RenderedInvoice {
+  /**
+   * Everything both renderers need. Shared deliberately: the plain-text
+   * body, the HTML alternative and the PDF must agree to the cent, and
+   * the only way to guarantee that is for them to be three views of one
+   * set of numbers.
+   */
+  #renderParams(invoice: Invoice): RenderInvoiceParams {
     const matter = this.#matters?.get(invoice.matterId);
     const names: Record<string, string> = {};
     for (const line of invoice.lineItems) {
@@ -442,17 +490,20 @@ export class InvoicingService {
       const user = this.#auth?.listUsers().find((u) => u.actorId === line.timekeeperId);
       if (user) names[line.timekeeperId] = user.displayName;
     }
-    return renderInvoice({
+    const clientName = matter?.parties.find((party) => party.role === "client")?.name;
+    return {
       invoice,
       totals: this.#store.totals(invoice.id),
       payments: this.#store.paymentsFor(invoice.id),
       firm: this.#firm,
       timekeeperNames: names,
       ...(matter?.title ? { matterTitle: matter.title } : {}),
-      ...(matter?.parties.find((party) => party.role === "client")?.name
-        ? { clientName: matter.parties.find((party) => party.role === "client")!.name }
-        : {}),
-    });
+      ...(clientName ? { clientName } : {}),
+    };
+  }
+
+  #render(invoice: Invoice): RenderedInvoice {
+    return renderInvoice(this.#renderParams(invoice));
   }
 
   #view(invoice: Invoice): InvoiceView {

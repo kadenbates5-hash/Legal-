@@ -39,6 +39,7 @@ import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
 import { UnconfiguredEmailSender, type EmailSender } from "../integrations/email-sender.js";
 import { SmtpEmailSender } from "../integrations/smtp-email.js";
+import { PdfLibInvoicePdfRenderer } from "../integrations/invoice-pdf.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -289,6 +290,9 @@ const invoicing = new InvoicingService({
   billingHours: state.billingHours,
   processor: new ManualPaymentProcessor(),
   email: emailSender,
+  // Always on: PDF rendering needs no configuration and no vendor, and
+  // the PDF is the form most clients mean by "the invoice".
+  pdf: new PdfLibInvoicePdfRenderer(),
   // The matter record supplies the caption and the client's address; the
   // auth service turns a timekeeper's actorId into a name on the bill.
   matters: state.matters,

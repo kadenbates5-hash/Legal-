@@ -199,3 +199,75 @@ describe("buildMimeMessage", () => {
     expect(message).not.toContain("multipart/alternative");
   });
 });
+
+describe("buildMimeMessage — attachments", () => {
+  const pdf = Buffer.from("%PDF-1.7\nfake invoice bytes\n%%EOF\n");
+
+  it("nests the readable body and the file in a multipart/mixed", () => {
+    const message = buildMimeMessage(
+      {
+        to: "maria@example.com",
+        subject: "Invoice INV-00001",
+        text: "BALANCE DUE: $800.00",
+        html: "<p>BALANCE DUE: $800.00</p>",
+        attachments: [{ filename: "INV-00001.pdf", contentType: "application/pdf", content: pdf }],
+      },
+      { from: "billing@firm.example" },
+      "<id@firm.example>",
+    );
+
+    expect(message).toContain("Content-Type: multipart/mixed;");
+    expect(message).toContain("Content-Type: multipart/alternative;");
+    expect(message).toContain('Content-Type: application/pdf; name="INV-00001.pdf"');
+    expect(message).toContain("Content-Transfer-Encoding: base64");
+    expect(message).toContain('Content-Disposition: attachment; filename="INV-00001.pdf"');
+    // The bytes survive the round trip.
+    const encoded = message.split("Content-Disposition: attachment;")[1]!.split("\r\n\r\n")[1]!.split("\r\n--")[0]!;
+    expect(Buffer.from(encoded.replace(/\r\n/g, ""), "base64").equals(pdf)).toBe(true);
+  });
+
+  it("wraps base64 at 76 characters, as RFC 2045 requires", () => {
+    const big = Buffer.alloc(4000, 0x41);
+    const message = buildMimeMessage(
+      {
+        to: "maria@example.com",
+        subject: "Invoice",
+        text: "See attached",
+        attachments: [{ filename: "big.pdf", contentType: "application/pdf", content: big }],
+      },
+      { from: "billing@firm.example" },
+      "<id@firm.example>",
+    );
+    const encoded = message.split("Content-Disposition: attachment;")[1]!.split("\r\n\r\n")[1]!;
+    for (const line of encoded.split("\r\n")) expect(line.length).toBeLessThanOrEqual(76);
+  });
+
+  it("strips a filename that could terminate the header", () => {
+    const message = buildMimeMessage(
+      {
+        to: "maria@example.com",
+        subject: "Invoice",
+        text: "See attached",
+        attachments: [
+          { filename: 'evil".pdf\r\nBcc: leak@evil.example', contentType: "application/pdf", content: pdf },
+        ],
+      },
+      { from: "billing@firm.example" },
+      "<id@firm.example>",
+    );
+    // The point isn't that the text disappears — it's that it can never
+    // begin a line, which is the only way it would be read as a header.
+    for (const line of message.split("\r\n")) expect(line.startsWith("Bcc:")).toBe(false);
+    expect(message).toContain('filename="evil.pdf Bcc: leak@evil.example"');
+  });
+
+  it("stays a plain multipart/alternative when there is nothing attached", () => {
+    const message = buildMimeMessage(
+      { to: "maria@example.com", subject: "Invoice", text: "Hi", html: "<p>Hi</p>" },
+      { from: "billing@firm.example" },
+      "<id@firm.example>",
+    );
+    expect(message).not.toContain("multipart/mixed");
+    expect(message).toContain("multipart/alternative");
+  });
+});

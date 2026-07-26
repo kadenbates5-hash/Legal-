@@ -914,6 +914,39 @@ Calendar JWT flow. Two properties worth naming:
   itemised bill to an outsider. Header values are newline-stripped and
   the body is dot-stuffed for the same class of reason.
 
+`integrations/invoice-pdf.ts` — the invoice as a **PDF**, the form a
+client files, prints, or forwards to their accountant. Over the
+`pdf-lib` this project already uses for condensing, behind the same
+vendor-agnostic interface shape as `PdfCondenser`/`PdfTextExtractor`. It
+lays the page out directly rather than converting the HTML, because
+there is no HTML-to-PDF path here that wouldn't mean shipping a headless
+browser; it shares its *data* and its `formatCents`/`formatQuantity`
+helpers with `invoice-render.ts`, so the three renderings can't disagree
+about a figure. Three things it gets right that a naive layout doesn't:
+a description too long for its column **wraps** (and a single
+unbreakable token breaks by character) rather than being clipped; a
+table running past the page bottom **continues with its header
+repeated**, and the pages are numbered "1 of N", because a second page
+of unlabelled numbers is what a client disputes; and text is coerced to
+WinAnsi (`toWinAnsi`) before it reaches pdf-lib's standard fonts, since
+a smart quote pasted from a word processor would otherwise turn
+generating a bill into a 500.
+
+`InvoicingService.renderPdf()` backs `GET /api/invoices/matters/
+:matterId/:invoiceId/pdf` (the panel's "Download PDF"), served through
+`server.ts`'s `sendBinary` — the one non-JSON response in this API,
+with the filename quoted and stripped so a matter title can't terminate
+the `Content-Disposition` header. Access matches `preview`: a paralegal
+preparing the bill can read it, only an attorney can send it. The PDF
+renderer needs no configuration and no vendor, so it is always on.
+
+`EmailMessage.attachments` and `smtp-email.ts`'s `multipart/mixed`
+nesting carry that PDF with the outgoing mail (base64 wrapped at 76
+columns per RFC 2045; an attachment filename is newline- and
+quote-stripped for the same reason an address is). If the PDF fails to
+render, the send **aborts** rather than quietly mailing a bill without
+the document its body refers to.
+
 `InvoicingService.emailInvoice()` is attorney-only (it *is* sending a
 bill, the act `send()` is already gated on) and **mails the invoice
 before committing the send transition** — so a transport failure leaves
@@ -941,9 +974,11 @@ styles itself with inline attributes because that is all mail clients
 honour, and this app's CSP blocks inline styles on purpose — not a rule
 worth an exception for a preview.
 
-What this doesn't do: attach a PDF (the invoice travels as the message
-body), sign with DKIM (the firm's provider does that server-side), pool
-connections, or retry a failed send.
+What this doesn't do: sign with DKIM (the firm's provider does that
+server-side), pool connections, or retry a failed send. The PDF is
+generated fresh on every request rather than stored — it is a view of
+the invoice, and a stored copy could fall out of step with the record
+it claims to represent.
 
 What none of this does: accounting, tax withholding, overtime rules,
 benefits, dunning, or filing anything with a tax authority. Payroll

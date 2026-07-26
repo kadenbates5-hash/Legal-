@@ -28,11 +28,11 @@ import {
  *   `allowInsecurePlaintext` exists for a loopback relay and is off by
  *   default — it has to be asked for, deliberately, in writing.
  *
- * Not implemented, deliberately: connection pooling, retry/backoff,
- * DKIM signing, and attachments. A firm sending through its own
- * provider already has DKIM/SPF applied server-side, and a run of
- * invoices is a handful of messages, not a campaign — this is
- * transactional mail, not a mailing list.
+ * Not implemented, deliberately: connection pooling, retry/backoff, and
+ * DKIM signing. A firm sending through its own provider already has
+ * DKIM/SPF applied server-side, and a run of invoices is a handful of
+ * messages, not a campaign — this is transactional mail, not a mailing
+ * list.
  */
 export interface SmtpConfig {
   host: string;
@@ -299,12 +299,26 @@ function dotStuff(body: string): string {
   return body.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n").replace(/\r\n\./g, "\r\n..");
 }
 
+/**
+ * Base64 for a message body has to be wrapped at 76 characters — RFC
+ * 2045 caps an encoded line there, and servers are entitled to reject
+ * or mangle anything longer. A multi-page PDF is one very long base64
+ * string without this.
+ */
+function base64Lines(data: Buffer): string {
+  return (data.toString("base64").match(/.{1,76}/g) ?? []).join("\r\n");
+}
+
+/** A filename is a header parameter, so quotes and newlines have to go. */
+function attachmentFilename(name: string): string {
+  return headerSafe(name).replace(/["\\]/g, "").slice(0, 120) || "attachment";
+}
+
 export function buildMimeMessage(
   message: EmailMessage,
   config: { from: string; fromName?: string },
   messageId: string,
 ): string {
-  const boundary = `docket-${randomUUID()}`;
   const headers = [
     `From: ${config.fromName ? `${encodeHeader(config.fromName)} <${config.from}>` : config.from}`,
     `To: ${headerSafe(message.to)}`,
@@ -314,24 +328,52 @@ export function buildMimeMessage(
     "MIME-Version: 1.0",
     ...(message.replyTo ? [`Reply-To: ${headerSafe(message.replyTo)}`] : []),
   ];
+  const attachments = message.attachments ?? [];
 
-  if (!message.html) {
-    return [...headers, 'Content-Type: text/plain; charset="utf-8"', "", message.text].join("\r\n");
+  /* The readable body: one text/plain part, or a text+html alternative. */
+  const altBoundary = `docket-alt-${randomUUID()}`;
+  const bodyParts = message.html
+    ? [
+        `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+        "",
+        `--${altBoundary}`,
+        'Content-Type: text/plain; charset="utf-8"',
+        "",
+        message.text,
+        `--${altBoundary}`,
+        'Content-Type: text/html; charset="utf-8"',
+        "",
+        message.html,
+        `--${altBoundary}--`,
+      ]
+    : ['Content-Type: text/plain; charset="utf-8"', "", message.text];
+
+  if (attachments.length === 0) {
+    return [...headers, ...bodyParts].join("\r\n");
   }
 
-  return [
+  // With attachments the whole readable body becomes the first part of a
+  // multipart/mixed, which is the nesting mail clients expect: they show
+  // the alternative inline and the files alongside it.
+  const mixedBoundary = `docket-mixed-${randomUUID()}`;
+  const lines = [
     ...headers,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
     "",
-    `--${boundary}`,
-    'Content-Type: text/plain; charset="utf-8"',
-    "",
-    message.text,
-    `--${boundary}`,
-    'Content-Type: text/html; charset="utf-8"',
-    "",
-    message.html,
-    `--${boundary}--`,
-    "",
-  ].join("\r\n");
+    `--${mixedBoundary}`,
+    ...bodyParts,
+  ];
+  for (const attachment of attachments) {
+    const filename = attachmentFilename(attachment.filename);
+    lines.push(
+      `--${mixedBoundary}`,
+      `Content-Type: ${headerSafe(attachment.contentType)}; name="${filename}"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; filename="${filename}"`,
+      "",
+      base64Lines(attachment.content),
+    );
+  }
+  lines.push(`--${mixedBoundary}--`, "");
+  return lines.join("\r\n");
 }

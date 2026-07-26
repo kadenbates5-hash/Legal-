@@ -1990,6 +1990,7 @@ async function showInvoice(matterId, invoiceId) {
         <div class="field-row">
           <h3 class="row-title">Client copy</h3>
           <button class="btn" id="previewInvoice">Preview the client's copy</button>
+          <button class="btn" id="downloadInvoicePdf">Download PDF</button>
           ${currentRole === "attorney" && inv.status !== "void" ? `
             <label class="field grow">Email to <input id="invoiceEmailTo" placeholder="loading…" /></label>
             <button class="btn primary" id="emailInvoice">Email invoice</button>` : ""}
@@ -2125,6 +2126,28 @@ async function showInvoice(matterId, invoiceId) {
       } catch (err) { showError(err.message); }
     });
 
+    // The PDF comes back as binary, so it's fetched as a blob and handed
+    // to an object URL rather than going through api(), which parses JSON.
+    document.getElementById("downloadInvoicePdf")?.addEventListener("click", async () => {
+      showError("");
+      try {
+        const res = await fetch(
+          `/api/invoices/matters/${encodeURIComponent(matterId)}/${invoiceId}/pdf`,
+          { credentials: "same-origin" },
+        );
+        if (res.status === 401) { window.location.href = "/login.html"; return; }
+        if (!res.ok) { showError((await res.json()).error || res.statusText); return; }
+        const disposition = res.headers.get("content-disposition") || "";
+        const name = /filename="([^"]+)"/.exec(disposition)?.[1] || `${inv.number}.pdf`;
+        const url = URL.createObjectURL(await res.blob());
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = name;
+        link.click();
+        URL.revokeObjectURL(url);
+      } catch (err) { showError(err.message); }
+    });
+
     const emailBtn = document.getElementById("emailInvoice");
     if (emailBtn) {
       const note = document.getElementById("emailTransportNote");
@@ -2137,7 +2160,7 @@ async function showInvoice(matterId, invoiceId) {
           toField.value = preview.suggestedTo || "";
           toField.placeholder = preview.suggestedTo ? "" : "no client email on this matter — type one";
           if (transport.canSend) {
-            note.textContent = `Sends from ${transport.fromAddress} via ${transport.name}. A draft is issued only once the email is accepted.`;
+            note.textContent = `Sends from ${transport.fromAddress} via ${transport.name}, with the invoice attached as a PDF. A draft is issued only once the email is accepted.`;
           } else {
             note.textContent = "Email isn't configured on this server — use Preview and send the invoice from your own mail client.";
             emailBtn.disabled = true;

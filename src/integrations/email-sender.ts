@@ -15,6 +15,12 @@
  * surprising answer, because it puts invoices on exactly the same
  * footing as every other email the firm already sends.
  */
+export interface EmailAttachment {
+  filename: string;
+  contentType: string;
+  content: Buffer;
+}
+
 export interface EmailMessage {
   to: string;
   subject: string;
@@ -23,6 +29,12 @@ export interface EmailMessage {
   /** Optional richer alternative, sent as a multipart/alternative sibling of `text`. */
   html?: string;
   replyTo?: string;
+  /**
+   * Files travelling with the message. Kept small on purpose — an
+   * invoice PDF is a few kilobytes, and this transport has no chunking
+   * or resumption, so it is not the place for a scanned exhibit.
+   */
+  attachments?: EmailAttachment[];
 }
 
 export interface EmailResult {

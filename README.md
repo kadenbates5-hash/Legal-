@@ -77,7 +77,8 @@ so the two can never disagree, behind a vendor-agnostic payment-processor
 seam that works manually until a processor is chosen — and that emails a
 client their bill as a **fully itemised invoice** (every time line
 carrying the date, the timekeeper, the task, the hours and the rate,
-split into services / expenses / fixed fees), previewable on screen
+split into services / expenses / fixed fees) — attached as a **PDF** and
+downloadable from the panel, previewable on screen
 before it goes, refusing to send in the clear over SMTP, and skipping
 hours already billed so pressing the button twice can't double-bill;
 a **Time Clock** panel to punch in and out with daily, weekly and

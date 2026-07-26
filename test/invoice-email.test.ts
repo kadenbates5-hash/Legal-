@@ -8,6 +8,7 @@ import { MatterStore } from "../src/core/matters.js";
 import { TrustLedger } from "../src/core/trust-ledger.js";
 import { InvoicingService } from "../src/review-ui/invoicing-service.js";
 import { ManualPaymentProcessor } from "../src/integrations/payment-processor.js";
+import { PdfLibInvoicePdfRenderer } from "../src/integrations/invoice-pdf.js";
 import {
   UnconfiguredEmailSender,
   assertSafeEmailAddress,
@@ -35,7 +36,7 @@ class FakeEmailSender implements EmailSender {
   }
 }
 
-function setup(options: { email?: EmailSender } = {}) {
+function setup(options: { email?: EmailSender; pdf?: boolean } = {}) {
   const auditLog = new AuditLog();
   const accessControl = new AccessControl(auditLog);
   accessControl.assignParalegal("p1", "m-1");
@@ -60,6 +61,7 @@ function setup(options: { email?: EmailSender } = {}) {
     billingHours,
     processor: new ManualPaymentProcessor(),
     email,
+    ...(options.pdf === false ? {} : { pdf: new PdfLibInvoicePdfRenderer() }),
     matters,
     auth,
     firm: { name: "Reyes & Okafor LLP" },
@@ -358,6 +360,24 @@ describe("invoice email/preview HTTP API", () => {
     }
   });
 
+  it("serves the PDF as a real binary download with a filename", async () => {
+    const ctx = await start();
+    try {
+      const invoice = draftWithALine(ctx);
+      const res = await get(cookies["attorney1"]!, `/api/invoices/matters/m-1/${invoice.id}/pdf`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/pdf");
+      expect(res.headers.get("content-disposition")).toBe(
+        `attachment; filename="${invoice.number} State v. Ruiz.pdf"`,
+      );
+      const body = Buffer.from(await res.arrayBuffer());
+      expect(body.subarray(0, 5).toString()).toBe("%PDF-");
+      expect(Number(res.headers.get("content-length"))).toBe(body.byteLength);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("403s a paralegal emailing, and 400s a malformed address", async () => {
     const ctx = await start();
     try {
@@ -371,5 +391,44 @@ describe("invoice email/preview HTTP API", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+describe("InvoicingService — the PDF invoice", () => {
+  it("attaches the invoice as a PDF to the outgoing email", async () => {
+    const ctx = setup();
+    const invoice = draftWithALine(ctx);
+    await ctx.service.emailInvoice(attorney, "m-1", invoice.id);
+
+    const sent = (ctx.email as FakeEmailSender).sent[0]!;
+    expect(sent.attachments).toHaveLength(1);
+    const attachment = sent.attachments![0]!;
+    expect(attachment.contentType).toBe("application/pdf");
+    expect(attachment.filename).toBe(`${invoice.number} State v. Ruiz.pdf`);
+    expect(attachment.content.subarray(0, 5).toString()).toBe("%PDF-");
+  });
+
+  it("sends no attachment when no PDF renderer is configured", async () => {
+    const ctx = setup({ pdf: false });
+    const invoice = draftWithALine(ctx);
+    await ctx.service.emailInvoice(attorney, "m-1", invoice.id);
+    expect((ctx.email as FakeEmailSender).sent[0]!.attachments).toBeUndefined();
+  });
+
+  it("downloads the PDF for an attorney or the paralegal preparing it", async () => {
+    const ctx = setup();
+    const invoice = draftWithALine(ctx);
+    for (const actor of [attorney, paralegal]) {
+      const { filename, data } = await ctx.service.renderPdf(actor, "m-1", invoice.id);
+      expect(filename).toBe(`${invoice.number} State v. Ruiz.pdf`);
+      expect(data.subarray(0, 5).toString()).toBe("%PDF-");
+    }
+  });
+
+  it("refuses a PDF for a matter the caller isn't on", async () => {
+    const ctx = setup();
+    ctx.matters.upsert("m-2", { title: "Other matter" });
+    const invoice = ctx.service.createDraft(attorney, "m-2", {});
+    await expect(ctx.service.renderPdf(paralegal, "m-2", invoice.id)).rejects.toThrow(AccessDeniedError);
   });
 });
