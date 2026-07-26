@@ -44,6 +44,23 @@ export interface InvoiceLineItem {
   readonly unitAmountCents: number;
   /** quantityMilli * unitAmountCents / 1000, rounded once, at creation. */
   readonly amountCents: number;
+  /**
+   * The three fields below exist so a rendered invoice can itemise *what
+   * was worked on*: the date the work was performed, who performed it,
+   * and which timekeeping entry it came from. A client reading "8.5
+   * hours — $2,975" has no way to check it; a client reading a dated,
+   * attributed line per task does. `workedOn` is deliberately separate
+   * from anything on the invoice itself, since an invoice issued in
+   * August bills work done in July.
+   */
+  readonly workedOn: string | undefined;
+  readonly timekeeperId: string | undefined;
+  /**
+   * The `BillingHoursEntry` this line was generated from, if any. Kept
+   * so the same logged hour can't be pulled onto a second invoice —
+   * double-billing a client is not a mistake to leave to vigilance.
+   */
+  readonly sourceEntryId: string | undefined;
 }
 
 /**
@@ -65,6 +82,15 @@ export interface Payment {
   readonly recordedAt: string;
 }
 
+/** One record of the invoice actually leaving the building. */
+export interface InvoiceDelivery {
+  readonly to: string;
+  readonly at: string;
+  readonly by: string;
+  /** The mail transport's own id, so a "did they get it?" question has an answer. */
+  readonly messageId: string | undefined;
+}
+
 export interface Invoice {
   readonly id: string;
   readonly number: string;
@@ -78,6 +104,12 @@ export interface Invoice {
   voidedAt: string | undefined;
   voidReason: string | undefined;
   note: string | undefined;
+  /**
+   * Where copies of this invoice have been emailed. Append-only, like
+   * the audit log and for the same reason: "we sent it on the 3rd" is a
+   * claim a firm needs to be able to substantiate.
+   */
+  deliveries: InvoiceDelivery[];
 }
 
 export interface InvoiceSnapshot {
@@ -120,6 +152,7 @@ export class InvoiceStore {
       voidedAt: undefined,
       voidReason: undefined,
       note: params.note,
+      deliveries: [],
     };
     this.#invoices.set(invoice.id, invoice);
     return invoice;
@@ -132,7 +165,15 @@ export class InvoiceStore {
    */
   addLineItem(
     invoiceId: string,
-    params: { description: string; source: LineItemSource; quantityMilli: number; unitAmountCents: number },
+    params: {
+      description: string;
+      source: LineItemSource;
+      quantityMilli: number;
+      unitAmountCents: number;
+      workedOn?: string;
+      timekeeperId?: string;
+      sourceEntryId?: string;
+    },
   ): InvoiceLineItem {
     const invoice = this.#require(invoiceId);
     if (invoice.status !== "draft") {
@@ -155,6 +196,9 @@ export class InvoiceStore {
       // Rounded exactly once, here, so a total is always the sum of what's
       // printed rather than a re-derivation that can drift by a cent.
       amountCents: Math.round((params.quantityMilli * params.unitAmountCents) / 1000),
+      workedOn: params.workedOn,
+      timekeeperId: params.timekeeperId,
+      sourceEntryId: params.sourceEntryId,
     });
     invoice.lineItems.push(item);
     return item;
@@ -237,6 +281,36 @@ export class InvoiceStore {
     return payment;
   }
 
+  /**
+   * Every billing-hours entry id already billed on this matter, across
+   * all its invoices except voided ones. A void invoice releases its
+   * hours back for re-billing, which is exactly what voiding-and-
+   * reissuing is for.
+   */
+  billedEntryIds(matterId: string): Set<string> {
+    const billed = new Set<string>();
+    for (const invoice of this.listByMatter(matterId)) {
+      if (invoice.status === "void") continue;
+      for (const line of invoice.lineItems) {
+        if (line.sourceEntryId) billed.add(line.sourceEntryId);
+      }
+    }
+    return billed;
+  }
+
+  /** Records that a copy went out. Never gated on status — a receipt for a paid invoice is a legitimate thing to resend. */
+  recordDelivery(invoiceId: string, params: { to: string; by: string; messageId?: string }): InvoiceDelivery {
+    const invoice = this.#require(invoiceId);
+    const delivery: InvoiceDelivery = Object.freeze({
+      to: params.to,
+      at: new Date().toISOString(),
+      by: params.by,
+      messageId: params.messageId,
+    });
+    invoice.deliveries.push(delivery);
+    return delivery;
+  }
+
   subtotal(invoiceId: string): number {
     return this.#require(invoiceId).lineItems.reduce((sum, l) => sum + l.amountCents, 0);
   }
@@ -271,7 +345,11 @@ export class InvoiceStore {
 
   toSnapshot(): InvoiceSnapshot {
     return {
-      invoices: this.listAll().map((i) => ({ ...i, lineItems: i.lineItems.map((l) => ({ ...l })) })),
+      invoices: this.listAll().map((i) => ({
+        ...i,
+        lineItems: i.lineItems.map((l) => ({ ...l })),
+        deliveries: i.deliveries.map((d) => ({ ...d })),
+      })),
       payments: this.#payments.map((p) => ({ ...p })),
       nextInvoiceNumber: this.#nextInvoiceNumber,
       nextId: this.#nextId,
@@ -284,6 +362,8 @@ export class InvoiceStore {
       store.#invoices.set(invoice.id, {
         ...invoice,
         lineItems: (invoice.lineItems ?? []).map((l) => Object.freeze({ ...l })),
+        // Older snapshots predate delivery tracking; an absent list is empty, not broken.
+        deliveries: (invoice.deliveries ?? []).map((d) => Object.freeze({ ...d })),
       });
     }
     store.#payments = (snapshot.payments ?? []).map((p) => Object.freeze({ ...p }));

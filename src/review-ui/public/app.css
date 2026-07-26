@@ -302,3 +302,18 @@
 .clock-state.stale { color: var(--warn); }
 .clock-state.stale .pulse { background: var(--warn); }
 .clock-state .elapsed { color: var(--text-muted); font-weight: 400; font-size: 0.85rem; }
+
+/* ---------- Invoice preview ---------- */
+/* The client's copy, verbatim. Monospaced so the itemised columns line
+   up exactly as they will in the plain-text email. */
+.preview {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}

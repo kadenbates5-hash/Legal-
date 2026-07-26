@@ -37,6 +37,8 @@ import { InvoicingService } from "./invoicing-service.js";
 import { PayrollService } from "./payroll-service.js";
 import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
+import { UnconfiguredEmailSender, type EmailSender } from "../integrations/email-sender.js";
+import { SmtpEmailSender } from "../integrations/smtp-email.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -251,6 +253,34 @@ const clientFile = new ClientFileService({
  * later, the thing to verify is that its fees are routed to the
  * operating account and never netted out of trust deposits.
  */
+/**
+ * Mail. Configured only when `SMTP_HOST` and `SMTP_FROM` are both set;
+ * otherwise the Invoices panel offers preview-and-send-yourself rather
+ * than an Email button that would fail — the same "absent config means
+ * the surface doesn't exist" pattern as every other optional piece.
+ *
+ * An invoice names the matter in its subject line and itemises the work
+ * in its body, so whoever carries it is subject to §5's vendor
+ * due-diligence questions in full. Pointing this at the firm's own mail
+ * server is usually the least surprising answer.
+ */
+const SMTP_HOST = process.env["SMTP_HOST"];
+const SMTP_FROM = process.env["SMTP_FROM"];
+const emailSender: EmailSender =
+  SMTP_HOST && SMTP_FROM
+    ? new SmtpEmailSender({
+        host: SMTP_HOST,
+        from: SMTP_FROM,
+        ...(process.env["SMTP_PORT"] ? { port: Number(process.env["SMTP_PORT"]) } : {}),
+        ...(process.env["SMTP_USER"] ? { user: process.env["SMTP_USER"] } : {}),
+        ...(process.env["SMTP_PASSWORD"] ? { password: process.env["SMTP_PASSWORD"] } : {}),
+        ...(firmConfig?.firmName ? { fromName: firmConfig.firmName } : {}),
+        // Only for a relay on loopback or a trusted private network —
+        // see `smtp-email.ts` for why this is off unless asked for.
+        ...(process.env["SMTP_ALLOW_INSECURE"] === "true" ? { allowInsecurePlaintext: true } : {}),
+      })
+    : new UnconfiguredEmailSender();
+
 const invoicing = new InvoicingService({
   store: state.invoices,
   accessControl: state.accessControl,
@@ -258,6 +288,18 @@ const invoicing = new InvoicingService({
   trust: state.trustLedger,
   billingHours: state.billingHours,
   processor: new ManualPaymentProcessor(),
+  email: emailSender,
+  // The matter record supplies the caption and the client's address; the
+  // auth service turns a timekeeper's actorId into a name on the bill.
+  matters: state.matters,
+  auth: state.auth,
+  firm: {
+    name: firmConfig?.firmName ?? "This Firm",
+    ...(SMTP_FROM ? { email: SMTP_FROM } : {}),
+    ...(process.env["FIRM_PAYMENT_INSTRUCTIONS"]
+      ? { paymentInstructions: process.env["FIRM_PAYMENT_INSTRUCTIONS"] }
+      : {}),
+  },
 });
 
 /** Backs the "Payroll" panel — what the firm pays its people, deliberately unconnected to client matters or trust. */

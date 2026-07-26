@@ -267,7 +267,7 @@ function errorStatus(err: unknown): number {
     if (err.message.startsWith("no invoice")) return 404;
     // "can't edit a sent invoice", "exceeds the balance", "already sent" are all
     // conflicts with the invoice's current state rather than malformed input.
-    return /must be|is required|needs a/.test(err.message) ? 400 : 409;
+    return /must be|is required|needs a|does not look like/.test(err.message) ? 400 : 409;
   }
   if (err instanceof PayrollError) return 400;
   if (err instanceof TimeClockError) {
@@ -1181,6 +1181,11 @@ async function handleInvoicingRequest(
     return;
   }
 
+  if (url.pathname === "/api/invoices/email-transport" && req.method === "GET") {
+    sendJson(res, 200, invoicing.emailInfo(actor));
+    return;
+  }
+
   const segments = url.pathname.replace(/^\/api\/invoices\/?/, "").split("/").filter(Boolean);
   if (segments[0] !== "matters" || !segments[1]) {
     sendJson(res, 404, { error: "not found" });
@@ -1254,12 +1259,25 @@ async function handleInvoicingRequest(
       case "pay-from-trust":
         result = invoicing.payFromTrust(actor, matterId, invoiceId, Number(body["amountCents"]));
         break;
+      case "email":
+        result = await invoicing.emailInvoice(
+          actor,
+          matterId,
+          invoiceId,
+          typeof body["to"] === "string" && body["to"] ? body["to"] : undefined,
+        );
+        break;
       default:
         sendJson(res, 404, { error: "not found" });
         return;
     }
     sendJson(res, 200, result);
     onMutated?.();
+    return;
+  }
+
+  if (segments.length === 4 && segments[3] === "preview" && req.method === "GET") {
+    sendJson(res, 200, invoicing.preview(actor, matterId, invoiceId));
     return;
   }
 
@@ -1533,6 +1551,7 @@ async function handleMattersRequest(
             name: String(party["name"] ?? ""),
             role: (party["role"] as PartyRole) ?? "related",
             note: typeof party["note"] === "string" && party["note"] ? party["note"] : undefined,
+            email: typeof party["email"] === "string" && party["email"] ? party["email"] : undefined,
           };
         })
       : undefined;

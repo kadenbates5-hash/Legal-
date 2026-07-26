@@ -31,6 +31,23 @@ export interface MatterParty {
   role: PartyRole;
   /** Free text — "co-defendant", "opposing counsel", "witness", "parent company". */
   note: string | undefined;
+  /**
+   * Where to reach them. Only ever used for the *client* party, to email
+   * an invoice — this system has no reason to contact an adverse party,
+   * and doing so would be a serious mistake, so `billingEmailFor()`
+   * below will only ever return a client's.
+   */
+  email: string | undefined;
+}
+
+/**
+ * The address an invoice for this matter should go to: the first client
+ * party with one on record. Returns undefined rather than falling back
+ * to any other party — mailing a bill to the opposing side would be far
+ * worse than not mailing it at all.
+ */
+export function billingEmailFor(matter: Matter | undefined): string | undefined {
+  return matter?.parties.find((p) => p.role === "client" && p.email?.trim())?.email?.trim();
 }
 
 export interface Matter {

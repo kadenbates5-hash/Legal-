@@ -74,7 +74,16 @@ clients (pulling logged time onto a draft), locks an invoice's lines once
 it's sent, records payments, and can apply a client's trust funds to a
 bill — writing both the invoice payment and the matching trust withdrawal
 so the two can never disagree, behind a vendor-agnostic payment-processor
-seam that works manually until a processor is chosen; and a **Payroll**
+seam that works manually until a processor is chosen — and that emails a
+client their bill as a **fully itemised invoice** (every time line
+carrying the date, the timekeeper, the task, the hours and the rate,
+split into services / expenses / fixed fees), previewable on screen
+before it goes, refusing to send in the clear over SMTP, and skipping
+hours already billed so pressing the button twice can't double-bill;
+a **Time Clock** panel to punch in and out with daily, weekly and
+monthly totals counted in the firm's own timezone, where open shifts
+never inflate a total and corrections are attorney-only and keep the
+original on the record; and a **Payroll**
 panel for what the firm pays its staff, with historical rates so a raise
 never restates an already-paid period. Docket opens on a
 role-aware **Home** panel showing what

@@ -1892,6 +1892,7 @@ let selectedInvoiceId = null;
 async function loadProcessorInfo() {
   try {
     const info = await api("/api/invoices/processor");
+    processorCanCharge = info.canCharge;
     document.getElementById("processorInfo").textContent = info.canCharge
       ? `card charging via ${info.name}`
       : "record manually (no processor configured)";
@@ -1899,6 +1900,9 @@ async function loadProcessorInfo() {
     /* Panel is role-gated; silence is correct for a role that can't see it. */
   }
 }
+
+/** Whether the configured processor can actually move money, so the panel offers "charge" only when it would work. */
+let processorCanCharge = false;
 
 async function loadInvoices() {
   showError("");
@@ -1973,15 +1977,51 @@ async function showInvoice(matterId, invoiceId) {
           <button class="btn" id="applyTrust">Apply trust funds</button>
         </div>
       </div>` : ""}
+      ${payable && processorCanCharge ? `<div class="card">
+        <h3>Charge a card</h3>
+        <p class="subtitle-inline">Card details never reach this server — paste the token your processor's own form produced. Charges go to the operating account, never to trust.</p>
+        <div class="field-row">
+          <label class="field">Amount <input id="chargeAmount" type="number" step="0.01" min="0.01" placeholder="0.00" /></label>
+          <label class="field grow">Payment token <input id="chargeToken" placeholder="tok_..." /></label>
+          <button class="btn primary" id="chargeCard">Charge</button>
+        </div>
+      </div>` : ""}
+      <div class="card">
+        <div class="field-row">
+          <h3 class="row-title">Client copy</h3>
+          <button class="btn" id="previewInvoice">Preview the client's copy</button>
+          ${currentRole === "attorney" && inv.status !== "void" ? `
+            <label class="field grow">Email to <input id="invoiceEmailTo" placeholder="loading…" /></label>
+            <button class="btn primary" id="emailInvoice">Email invoice</button>` : ""}
+        </div>
+        <p class="subtitle-inline" id="emailTransportNote"></p>
+        <pre id="invoicePreview" class="preview hidden"></pre>
+        <ul id="invoiceDeliveries" class="list"></ul>
+      </div>
       <div class="card"><h3>Payments</h3><ul id="invoicePayments" class="list"></ul></div>
     `;
+
+    const deliveries = document.getElementById("invoiceDeliveries");
+    for (const d of inv.deliveries || []) {
+      deliveries.appendChild(
+        listRow(`<strong>Emailed to ${escapeHtml(d.to)}</strong>
+          <div class="meta-tight">${new Date(d.at).toLocaleString()} by ${escapeHtml(d.by)}${d.messageId ? ` · ${escapeHtml(d.messageId)}` : ""}</div>`),
+      );
+    }
+    if (!(inv.deliveries || []).length) {
+      deliveries.innerHTML = '<li class="static empty">No copy has been emailed from Docket yet.</li>';
+    }
 
     const lines = document.getElementById("invoiceLines");
     for (const l of inv.lineItems) {
       const li = document.createElement("li");
       li.classList.add("static");
+      const provenance = [l.workedOn, l.timekeeperId && (knownStaff.find((m) => m.actorId === l.timekeeperId)?.displayName || l.timekeeperId)]
+        .filter(Boolean)
+        .join(" · ");
       li.innerHTML = `<strong>${escapeHtml(centsToDollars(l.amountCents))}</strong>
         <span class="badge">${escapeHtml(l.source)}</span>
+        ${provenance ? `<span class="badge">${escapeHtml(provenance)}</span>` : ""}
         <div class="mt-xs">${escapeHtml(l.description)}</div>
         <div class="meta-tight">${(l.quantityMilli / 1000).toFixed(2)} × ${escapeHtml(centsToDollars(l.unitAmountCents))}</div>`;
       if (isDraft) {
@@ -2057,6 +2097,61 @@ async function showInvoice(matterId, invoiceId) {
     document.getElementById("applyTrust")?.addEventListener("click", () =>
       act("pay-from-trust", { amountCents: dollarsToCents(document.getElementById("trustApplyAmount").value) }),
     );
+    document.getElementById("chargeCard")?.addEventListener("click", () =>
+      act("charge", {
+        amountCents: dollarsToCents(document.getElementById("chargeAmount").value),
+        instrumentToken: document.getElementById("chargeToken").value.trim(),
+      }),
+    );
+
+    /* --- Preview / email --- */
+    // The preview shows the plain-text alternative rather than the HTML
+    // one. Both carry the same itemisation, and the HTML version styles
+    // itself with inline attributes for mail clients — which this app's
+    // CSP blocks on purpose, and which isn't worth an exception.
+    let previewed = null;
+    const loadPreview = async () => {
+      if (!previewed) {
+        previewed = await api(`/api/invoices/matters/${encodeURIComponent(matterId)}/${invoiceId}/preview`);
+      }
+      return previewed;
+    };
+    document.getElementById("previewInvoice")?.addEventListener("click", async () => {
+      showError("");
+      const pre = document.getElementById("invoicePreview");
+      try {
+        pre.textContent = (await loadPreview()).text;
+        pre.classList.remove("hidden");
+      } catch (err) { showError(err.message); }
+    });
+
+    const emailBtn = document.getElementById("emailInvoice");
+    if (emailBtn) {
+      const note = document.getElementById("emailTransportNote");
+      const toField = document.getElementById("invoiceEmailTo");
+      // Prefill from the matter's client party, and say up front if mail
+      // isn't configured rather than failing at the click.
+      (async () => {
+        try {
+          const [transport, preview] = await Promise.all([api("/api/invoices/email-transport"), loadPreview()]);
+          toField.value = preview.suggestedTo || "";
+          toField.placeholder = preview.suggestedTo ? "" : "no client email on this matter — type one";
+          if (transport.canSend) {
+            note.textContent = `Sends from ${transport.fromAddress} via ${transport.name}. A draft is issued only once the email is accepted.`;
+          } else {
+            note.textContent = "Email isn't configured on this server — use Preview and send the invoice from your own mail client.";
+            emailBtn.disabled = true;
+          }
+        } catch {
+          note.textContent = "";
+        }
+      })();
+      emailBtn.addEventListener("click", () => {
+        const to = toField.value.trim();
+        if (!confirm(`Email ${inv.number} to ${to || "the client"}? This issues the invoice and locks its lines.`)) return;
+        return act("email", to ? { to } : {});
+      });
+    }
   } catch (err) {
     showError(err.message);
   }

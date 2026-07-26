@@ -875,10 +875,131 @@ payroll to trust.
   without its service). An invoice-state violation is **409**, malformed
   input is 400.
 
+### The itemised invoice, and emailing it
+
+`core/invoice-render.ts` — the document a client actually receives,
+rendered as plain text and HTML from the same data. The point of the
+file is the **itemisation**: a bill reading "professional services —
+$4,250" is the classic source of fee disputes, and in many jurisdictions
+an unitemised bill isn't collectable. Every time line therefore carries
+five things — the date the work was done, who did it, what it was, how
+long it took, and at what rate — split into **services / expenses /
+fixed fees**, because a client asking "why is this so much" is looking
+for one of the three and merging them hides which. Rendering is pure: no
+store, no access control, no transport, so the same output backs the
+on-screen preview and the emailed copy and what an attorney approves is
+character-for-character what the client gets.
+
+`InvoiceLineItem` gained `workedOn` / `timekeeperId` / `sourceEntryId`
+to make that possible. `sourceEntryId` also closes a real hole:
+`addTimeFromBillingHours` now **skips hours already billed on a live
+invoice** (`InvoiceStore.billedEntryIds()`), so pressing "add logged
+time" twice can't double-bill a client. Voiding an invoice releases its
+hours back for re-billing, which is what void-and-reissue is for.
+
+`integrations/email-sender.ts` / `integrations/smtp-email.ts` — the
+vendor-agnostic `EmailSender` seam and a real SMTP client hand-rolled
+over `node:net`/`node:tls`, same dependency-light call as the Google
+Calendar JWT flow. Two properties worth naming:
+
+- **It will not send in the clear.** On the STARTTLS path it aborts if
+  the server doesn't advertise the upgrade, rather than falling back —
+  the credential is the firm's mail password and the payload is a
+  privileged client document. `allowInsecurePlaintext`
+  (`SMTP_ALLOW_INSECURE=true`) exists only for a loopback relay and is
+  off unless asked for.
+- **Addresses are validated before they reach the wire**
+  (`assertSafeEmailAddress`), because a newline in an address is a new
+  SMTP command — an injected `Bcc` would silently copy a client's
+  itemised bill to an outsider. Header values are newline-stripped and
+  the body is dot-stuffed for the same class of reason.
+
+`InvoicingService.emailInvoice()` is attorney-only (it *is* sending a
+bill, the act `send()` is already gated on) and **mails the invoice
+before committing the send transition** — so a transport failure leaves
+an editable draft rather than an invoice permanently marked as issued
+that the client never received, the same ordering reasoning as
+`payFromTrust` attempting the trust side first. The outgoing copy is
+rendered as issued so the client's copy never reads "draft — not yet
+issued". Deliveries are appended to `Invoice.deliveries` (recipient,
+time, who sent it, the transport's message id): "we sent it on the 3rd"
+is a claim a firm needs to be able to substantiate. The recipient comes
+from the matter's **client** party via `billingEmailFor()`, which
+deliberately never falls back to another party — mailing a bill to the
+opposing side is far worse than not mailing it.
+
+`server.ts` adds `GET /api/invoices/email-transport`,
+`GET /api/invoices/matters/:matterId/:invoiceId/preview` and
+`POST /api/invoices/matters/:matterId/:invoiceId/email`. Configured via
+`SMTP_HOST`/`SMTP_FROM` (plus optional `SMTP_PORT`/`SMTP_USER`/
+`SMTP_PASSWORD`/`FIRM_PAYMENT_INSTRUCTIONS`); absent, the panel offers
+preview-and-send-yourself instead of an Email button that would fail.
+
+The Invoices panel's preview shows the **plain-text** alternative rather
+than the HTML one. Both carry the same itemisation; the HTML version
+styles itself with inline attributes because that is all mail clients
+honour, and this app's CSP blocks inline styles on purpose — not a rule
+worth an exception for a preview.
+
+What this doesn't do: attach a PDF (the invoice travels as the message
+body), sign with DKIM (the firm's provider does that server-side), pool
+connections, or retry a failed send.
+
 What none of this does: accounting, tax withholding, overtime rules,
 benefits, dunning, or filing anything with a tax authority. Payroll
 answers "how many hours, at what rate, so what is gross pay" — the input
 a bookkeeper or payroll provider needs, not a replacement for one.
+
+## Time clock
+
+`core/time-clock.ts` / `review-ui/time-clock-service.ts` — clock in,
+clock out, and daily / weekly / monthly totals, backing the "Time Clock"
+panel. This is the *capture* side of `payroll.ts`: a punch is a fact
+about the clock, a payroll entry is a fact about money, and correcting
+one must not silently rewrite the other.
+
+Two things real timeclocks routinely get wrong, both handled here:
+
+- **Day boundaries are local, not UTC.** Clocking in at 9pm in New York
+  is already "tomorrow" in UTC, so UTC bucketing puts those hours in the
+  wrong day — and therefore the wrong week and the wrong pay period.
+  Every aggregation takes an IANA timezone and derives the local date
+  through `Intl`; the firm's zone comes from `FIRM_TIME_ZONE`.
+  `TimeClock.today()` exists so nothing computes "which bucket is
+  today's" from a second, different notion of now.
+- **People forget to clock out.** Open shifts are never counted in a
+  total — a total that changes every time you look at it isn't a total —
+  and one running past `STALE_OPEN_SHIFT_HOURS` (16) is reported as
+  `likelyForgotten` so it gets corrected rather than paid. Overnight
+  shifts are attributed to the day they *started*, the usual payroll
+  convention, so one shift never splits across two pay periods.
+
+Access mirrors payroll: **you punch your own clock** (the routes take no
+actor id at all) and read your own timesheet; an attorney can read
+anyone's, and `whoIsOnTheClock` is attorney-only. **Corrections are
+attorney-only even for your own shifts** — a timesheet you can quietly
+rewrite isn't a record, the same reasoning that makes the audit log and
+trust ledger append-only — and they keep the previous values, who
+changed them and why. `postToPayroll` creates the payroll entry *first*
+and only then marks the shift posted, so a failure can't mark hours paid
+that aren't; once posted the shift locks against correction, so the two
+records can't disagree.
+
+`TimeClockError` carries an explicit `kind`
+(`invalid`/`not_found`/`conflict`) rather than leaving `server.ts` to
+match HTTP status codes against error prose — that approach broke the
+first time a message was reworded.
+
+`server.ts` wires `POST /api/time-clock/clock-in|clock-out`,
+`GET /api/time-clock/on-the-clock`,
+`POST /api/time-clock/shifts/:id/adjust|post-to-payroll`, and
+`GET /api/time-clock/actor/:actorId/summary|shifts|totals?kind=day|week|month`
+(all accepting `?tz=`); 404 without a `TimeClockService`. The Home panel
+shows this week's total and a one-click punch button.
+
+What this doesn't do: overtime rules, breaks, geofencing, or scheduled
+shifts to punch against — it records when someone was working and rolls
+it up.
 
 ## Transport & session security
 
@@ -1027,9 +1148,9 @@ distinct trust levels:
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over nineteen panels — Home, Review Queue, Deadlines,
+between sections) over twenty panels — Home, Review Queue, Deadlines,
 Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Trust, Invoices,
-Payroll, Research, Assistant,
+Time Clock, Payroll, Research, Assistant,
 Staff, Messages, Schedule, Billing, Accounts, and Audit Log (Drafting/
 Cases/Research/Assistant/Billing and Accounts/Audit Log hidden from the
 nav for roles that can't use them; Staff/Messages/Schedule are open to
@@ -1268,6 +1389,9 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
 # ANTHROPIC_API_KEY=sk-ant-...  ANTHROPIC_MODEL=claude-sonnet-5  npm run start:review-ui  # enable the Assistant panel; ANTHROPIC_MODEL/ANTHROPIC_BASE_URL are optional overrides
+# FIRM_TIME_ZONE=America/New_York npm run start:review-ui                 # optional — where the Time Clock's day starts; defaults to the host's zone
+# SMTP_HOST=smtp.example.com SMTP_FROM=billing@firm.example SMTP_USER=... SMTP_PASSWORD=... npm run start:review-ui  # enable emailing invoices (SMTP_PORT defaults to 587/STARTTLS; SMTP_ALLOW_INSECURE=true only for a loopback relay)
+# FIRM_PAYMENT_INSTRUCTIONS="Payable within 30 days."                     # optional — printed under the invoice total
 # MAX_DOCUMENT_UPLOAD_BYTES=52428800 npm run start:review-ui               # optional — override the 25 MB default per-file cap on Cases-panel uploads (see "PDF intake..." above for why this cap exists)
 ```
 
