@@ -1083,12 +1083,11 @@ matter, and two of them are new:
     the right access could edit directly. Without the chain,
     "we never delete audit entries" is a promise about *code* that has
     nothing to do with the file on disk.
-  - **It detects tampering; it does not prevent it.** Someone who can
-    rewrite the state file can recompute every subsequent hash. Real
-    tamper-*proofing* needs the chain anchored where that same person
-    can't reach — an append-only external store, or publishing the head
-    hash somewhere. That is a genuine remaining gap and the panel says
-    so in as many words rather than implying an immutable log.
+  - On its own the chain catches an entry edited **in place**. It does
+    not catch a log **rebuilt from scratch** — a rebuilt chain is a
+    perfectly valid chain — nor entries **truncated off the end**, since
+    a shorter chain is still internally consistent. That is what
+    anchoring below is for.
   - Entries written before chaining existed verify as
     `unchainedEntries` rather than as a break — an old snapshot isn't
     evidence of tampering.
@@ -1113,6 +1112,67 @@ matter, and two of them are new:
   unassignment, and every money movement (trust, invoices, payroll,
   time clock). Passwords never appear, and a refused action logs the
   denial rather than a phantom success.
+
+### Anchoring — the part the chain can't do alone
+
+`core/audit-anchor.ts` / `integrations/audit-anchor-targets.ts` /
+`integrations/anchor-audit.ts`. An **anchor** is one value — the hash of
+the most recent entry, which by the chaining commits to every entry
+before it — published somewhere the person who controls the database
+does not. Later the chain is re-derived and compared. If they disagree,
+the log was rewritten, however tidy it now looks.
+
+Verified against a real deployment: a log rebuilt from scratch with an
+entry erased (every hash recomputed, so `verifyIntegrity()` reports
+"intact") is caught by the anchor comparison, which reports the exact
+sequence and both hashes.
+
+**The destination is the whole security property**, and it is an
+operational choice this code deliberately does not make:
+
+- A file on the same disk under the same account is close to worthless —
+  the same person edits both.
+- `FileAnchorTarget` becomes real on an append-only mount, or a path a
+  log shipper drains off the machine. JSON Lines, appended never
+  rewritten, so a shortened file shows as missing sequences.
+- `EmailAnchorTarget` mails the head hash to the firm's partners — for a
+  small firm usually the most genuinely independent option available,
+  since those mailboxes are hosted elsewhere. It is **write-only on
+  purpose**: this app can send mail but cannot read a mailbox, and
+  pretending to verify against something it can't see would be worse
+  than being explicit. Verification falls back to the local record, and
+  a real investigation compares that against the emails by hand.
+- `MultiAnchorTarget` fans out, because a single destination is a single
+  point of collusion. One failing destination doesn't stop the others —
+  a partial anchor beats none — and the failure is written into the
+  receipt rather than swallowed.
+
+Two behaviours worth naming:
+
+- **Anchoring writes its own audit entry**, which changes the head hash.
+  So "has anything happened since the last anchor?" can't be answered by
+  comparing head hashes — the answer would always be yes, and a nightly
+  job would anchor forever on an idle system, burying the anchors that
+  attest to real work. `countSince(sequence, ignoring)` excludes
+  `audit_anchored`, so seven nightly runs on a firm that did nothing
+  produce exactly one anchor.
+- **Publishing happens before the local record is written.** A local
+  record of an anchor that never left the building is a false assurance,
+  worse than no record.
+
+`npm run anchor:audit` is the standalone runner (cron/systemd timer),
+deliberately outside the app process — same reasoning as
+`sync:calendar`, plus two of its own: anchoring shouldn't depend on
+someone remembering to click a button (an anchor bounds the window in
+which a rewrite goes undetected), and running it from a machine the
+database administrator doesn't control makes the *schedule* independent
+too. It **refuses to anchor** a log that is already broken or already
+disagrees with a published anchor, since doing so would publish a hash
+vouching for damage.
+
+Configured via `AUDIT_ANCHOR_FILE` and/or `AUDIT_ANCHOR_EMAILS` (the
+latter needs `SMTP_HOST`/`SMTP_FROM`). Absent, the panel says outright
+that a rebuilt log would still verify, rather than implying safety.
 
 `AuditService.list()` takes a filter object (`matterId`, `actorId`,
 `action` substring, `from`/`to` dates) — the Audit Log panel exposes all
@@ -1509,6 +1569,8 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
 # ANTHROPIC_API_KEY=sk-ant-...  ANTHROPIC_MODEL=claude-sonnet-5  npm run start:review-ui  # enable the Assistant panel; ANTHROPIC_MODEL/ANTHROPIC_BASE_URL are optional overrides
+# AUDIT_ANCHOR_FILE=/mnt/append-only/anchors.jsonl AUDIT_ANCHOR_EMAILS=partner@firm.example npm run start:review-ui  # publish the audit head hash outside this database (see "Anchoring")
+# ... && npm run anchor:audit                                             # one-shot anchor, meant for cron — refuses if the chain is already broken
 # FIRM_TIME_ZONE=America/New_York npm run start:review-ui                 # optional — where the Time Clock's day starts; defaults to the host's zone
 # SMTP_HOST=smtp.example.com SMTP_FROM=billing@firm.example SMTP_USER=... SMTP_PASSWORD=... npm run start:review-ui  # enable emailing invoices (SMTP_PORT defaults to 587/STARTTLS; SMTP_ALLOW_INSECURE=true only for a loopback relay)
 # FIRM_PAYMENT_INSTRUCTIONS="Payable within 30 days."                     # optional — printed under the invoice total

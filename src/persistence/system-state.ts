@@ -1,4 +1,4 @@
-import { AuditLog, type AuditEntry } from "../core/audit.js";
+import { AuditLog, type AuditAnchorRecord, type AuditEntry } from "../core/audit.js";
 import { UtilizationTracker, type UtilizationSnapshot } from "../core/utilization.js";
 import { WorkProductStore } from "../core/work-product-store.js";
 import type { WorkProductSnapshot } from "../core/review-gate.js";
@@ -33,6 +33,13 @@ import { fileStateStore, type StateStore } from "./state-store.js";
 export interface SystemStateSnapshot {
   version: 1;
   auditLog: AuditEntry[];
+  /**
+   * Locally recorded audit anchors. Deliberately *also* published
+   * externally — a copy kept beside the log it vouches for proves
+   * nothing on its own (see `core/audit-anchor.ts`); this copy exists so
+   * the UI can show what was anchored and when.
+   */
+  auditAnchors?: AuditAnchorRecord[];
   utilization: UtilizationSnapshot;
   workProducts: WorkProductSnapshot[];
   /** Optional so state files saved before these fields existed still load. */
@@ -68,6 +75,7 @@ export interface SystemStateSnapshot {
 
 export interface SystemState {
   auditLog: AuditLog;
+  auditAnchors: AuditAnchorRecord[];
   utilization: UtilizationTracker;
   workProductStore: WorkProductStore;
   deadlineTracker: DeadlineTracker;
@@ -97,6 +105,7 @@ function emptySnapshot(): SystemStateSnapshot {
   return {
     version: 1,
     auditLog: [],
+    auditAnchors: [],
     utilization: { entries: [], nextId: 1 },
     workProducts: [],
     deadlines: [],
@@ -145,6 +154,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const timeClock = TimeClock.fromSnapshot(snapshot.timeClock ?? { shifts: [], nextId: 1 });
   return {
     auditLog,
+    auditAnchors: (snapshot.auditAnchors ?? []).map((a) => ({ ...a })),
     utilization,
     workProductStore,
     deadlineTracker,
@@ -169,6 +179,7 @@ export async function saveSystemState(source: string | StateStore, state: System
   const snapshot: SystemStateSnapshot = {
     version: 1,
     auditLog: state.auditLog.toSnapshot(),
+    auditAnchors: state.auditAnchors.map((a) => ({ ...a })),
     utilization: state.utilization.toSnapshot(),
     workProducts: state.workProductStore.toSnapshot(),
     deadlines: state.deadlineTracker.toSnapshot(),

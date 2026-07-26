@@ -201,22 +201,22 @@ describe("diffFields / auditValue", () => {
 });
 
 describe("AuditService", () => {
-  it("keeps reading and verifying attorney-only", () => {
+  it("keeps reading and verifying attorney-only", async () => {
     const service = new AuditService(logWith(2));
     expect(() => service.list(paralegal)).toThrow(AccessDeniedError);
-    expect(() => service.verifyIntegrity(paralegal)).toThrow(AccessDeniedError);
+    await expect(service.verifyIntegrity(paralegal)).rejects.toThrow(AccessDeniedError);
     expect(service.list(attorney)).toHaveLength(2);
-    expect(service.verifyIntegrity(attorney).ok).toBe(true);
+    expect((await service.verifyIntegrity(attorney)).ok).toBe(true);
   });
 
-  it("reports a broken chain to the attorney rather than hiding or repairing it", () => {
+  it("reports a broken chain to the attorney rather than hiding or repairing it", async () => {
     const snapshot = logWith(4).toSnapshot();
     snapshot[1] = { ...snapshot[1]!, action: "quietly_changed" };
     const service = new AuditService(AuditLog.fromSnapshot(snapshot));
-    const report = service.verifyIntegrity(attorney);
+    const report = await service.verifyIntegrity(attorney);
     expect(report.ok).toBe(false);
     expect(report.brokenAtSequence).toBe(1);
     // Verifying again gives the same answer — nothing was "fixed" in passing.
-    expect(service.verifyIntegrity(attorney).brokenAtSequence).toBe(1);
+    expect((await service.verifyIntegrity(attorney)).brokenAtSequence).toBe(1);
   });
 });

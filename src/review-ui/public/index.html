@@ -656,8 +656,9 @@
         <div class="field-row">
           <h3 class="row-title">Record integrity</h3>
           <button class="btn" id="verifyAudit">Verify the chain</button>
+          <button class="btn" id="anchorAudit">Anchor now</button>
         </div>
-        <p class="subtitle-inline">Each entry is hashed together with the one before it, so a deleted or altered entry breaks the chain and can be detected after the fact. This detects tampering; it can't prevent someone with direct database access from recomputing the chain.</p>
+        <p class="subtitle-inline">Each entry is hashed together with the one before it, so altering or deleting one breaks the chain. On its own that catches an edit made in place — but not a log rebuilt from scratch, since a rebuilt chain is still a valid chain. <strong>Anchoring</strong> closes that: it publishes the current head hash somewhere outside this database, so the record can later be checked against a copy whoever administers the database could not have changed.</p>
         <div id="auditIntegrity"></div>
       </div>
       <div class="card">

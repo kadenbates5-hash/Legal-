@@ -13,6 +13,7 @@
     "start": "node dist/review-ui/start.js",
     "start:review-ui": "npm run build && node dist/review-ui/start.js",
     "sync:calendar": "npm run build && node dist/integrations/sync-calendar-deadlines.js",
+    "anchor:audit": "npm run build && node dist/integrations/anchor-audit.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

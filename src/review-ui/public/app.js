@@ -1459,6 +1459,58 @@ function renderChanges(changes) {
   return `<table class="diff"><thead><tr><th>Field</th><th>Was</th><th>Became</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+/**
+ * The anchoring half of the report. Kept visually distinct from the
+ * chain result because it answers a different question: the chain says
+ * "was this edited in place", anchoring says "is this the same log we
+ * published a fingerprint of".
+ */
+function renderAnchoring(anchoring) {
+  if (!anchoring || !anchoring.configured) {
+    return `<p class="meta-tight mt-md">No external anchor is configured, so a log rebuilt wholesale would still verify.
+      Set <code>AUDIT_ANCHOR_FILE</code> or <code>AUDIT_ANCHOR_EMAILS</code> to publish the head hash somewhere outside this database.</p>`;
+  }
+  const last = anchoring.lastAnchor;
+  const when = last
+    ? `Last anchored to <strong>${escapeHtml(anchoring.target)}</strong> at entry #${last.sequence}, ${new Date(last.anchoredAt).toLocaleString()}.`
+    : `Anchoring to <strong>${escapeHtml(anchoring.target)}</strong> is configured, but nothing has been published yet.`;
+
+  if (anchoring.ok) {
+    return `<p class="${last ? "integrity-ok" : "meta-tight"} mt-md">${when}
+      ${last ? `Checked against ${anchoring.anchorsChecked} published anchor${anchoring.anchorsChecked === 1 ? "" : "s"} — all match.` : ""}</p>`;
+  }
+  const rows = anchoring.mismatches
+    .map(
+      (m) =>
+        `<li>Entry #${m.sequence}: ${
+          m.kind === "missing"
+            ? "the log is now shorter than this published anchor — entries were removed from the end"
+            : "the entry at this position no longer hashes to what was published — history was rewritten"
+        }<div class="meta-xs">published ${escapeHtml(m.expectedHash.slice(0, 24))}… · now ${escapeHtml((m.actualHash || "absent").slice(0, 24))}…</div></li>`,
+    )
+    .join("");
+  return `<div class="flags mt-md"><strong>The log disagrees with what was published externally.</strong>
+    <ul class="mt-xs">${rows}</ul>
+    <div class="mt-xs">This is the stronger finding: the internal chain can be rebuilt by anyone with database access, but the published copy could not be. Preserve the current state and the anchor destination before doing anything else.</div></div>`;
+}
+
+async function anchorAuditNow() {
+  showError("");
+  const out = document.getElementById("auditIntegrity");
+  out.innerHTML = "Publishing…";
+  try {
+    const result = await api("/api/audit/anchor", { method: "POST", body: "{}" });
+    if (!result.anchored) {
+      out.innerHTML = `<p class="meta-tight">Nothing anchored — ${escapeHtml(result.reason || "")}</p>`;
+      return;
+    }
+    await verifyAuditIntegrity();
+  } catch (err) {
+    out.innerHTML = "";
+    showError(err.message);
+  }
+}
+
 async function verifyAuditIntegrity() {
   showError("");
   const out = document.getElementById("auditIntegrity");
@@ -1468,11 +1520,12 @@ async function verifyAuditIntegrity() {
     const unchained = report.unchainedEntries
       ? ` ${report.unchainedEntries} older entr${report.unchainedEntries === 1 ? "y predates" : "ies predate"} hashing and can't be checked.`
       : "";
-    out.innerHTML = report.ok
+    const chain = report.ok
       ? `<p class="integrity-ok">Chain intact across ${report.entriesChecked} entries.${escapeHtml(unchained)}</p>`
       : `<div class="flags"><strong>The audit chain is broken at entry #${report.brokenAtSequence}.</strong>
            <div class="mt-xs">${escapeHtml(report.reason || "")}</div>
            <div class="mt-xs">Entries after this point can no longer be relied on as a complete record. Preserve the current state file before doing anything else.</div></div>`;
+    out.innerHTML = chain + renderAnchoring(report.anchoring);
   } catch (err) {
     out.innerHTML = "";
     showError(err.message);
@@ -1481,6 +1534,7 @@ async function verifyAuditIntegrity() {
 
 document.getElementById("refreshAudit").addEventListener("click", loadAudit);
 document.getElementById("verifyAudit").addEventListener("click", verifyAuditIntegrity);
+document.getElementById("anchorAudit").addEventListener("click", anchorAuditNow);
 document.getElementById("clearAuditFilters").addEventListener("click", () => {
   for (const id of ["auditMatterId", "auditAction", "auditFrom", "auditTo"]) document.getElementById(id).value = "";
   document.getElementById("auditActorId").value = "";

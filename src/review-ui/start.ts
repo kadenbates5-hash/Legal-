@@ -40,6 +40,8 @@ import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
 import { UnconfiguredEmailSender, type EmailSender } from "../integrations/email-sender.js";
 import { SmtpEmailSender } from "../integrations/smtp-email.js";
 import { PdfLibInvoicePdfRenderer } from "../integrations/invoice-pdf.js";
+import { MultiAnchorTarget, type AuditAnchorTarget } from "../core/audit-anchor.js";
+import { EmailAnchorTarget, FileAnchorTarget } from "../integrations/audit-anchor-targets.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -338,7 +340,46 @@ const timeClock = new TimeClockService({
 });
 
 /** Backs the attorney-only "Audit Log" panel — see audit-service.ts. */
-const audit = new AuditService(state.auditLog);
+/**
+ * Where audit anchors go. The hash chain detects an entry altered in
+ * place; only an anchor published somewhere the database administrator
+ * can't reach detects a log rebuilt wholesale, or truncated. Both
+ * destinations are optional and independent — see `core/audit-anchor.ts`
+ * for why the choice of destination *is* the security property.
+ *
+ * `AUDIT_ANCHOR_FILE` should point somewhere this process can append to
+ * but not rewrite (an append-only mount, or a path a log shipper drains
+ * off the machine). A path on the same disk under the same account is
+ * close to worthless and is not the default for that reason.
+ *
+ * `AUDIT_ANCHOR_EMAILS` mails the head hash to the firm's partners,
+ * which for a small firm is usually the most genuinely independent
+ * option available: it lands in mailboxes hosted elsewhere.
+ */
+const anchorTargets: AuditAnchorTarget[] = [];
+if (process.env["AUDIT_ANCHOR_FILE"]) {
+  anchorTargets.push(new FileAnchorTarget(process.env["AUDIT_ANCHOR_FILE"]));
+}
+const anchorEmails = (process.env["AUDIT_ANCHOR_EMAILS"] ?? "")
+  .split(",")
+  .map((a) => a.trim())
+  .filter(Boolean);
+if (anchorEmails.length > 0 && emailSender.canSend) {
+  anchorTargets.push(
+    new EmailAnchorTarget({
+      sender: emailSender,
+      recipients: anchorEmails,
+      ...(firmConfig?.firmName ? { firmName: firmConfig.firmName } : {}),
+    }),
+  );
+}
+
+const audit = new AuditService(state.auditLog, {
+  ...(anchorTargets.length
+    ? { anchorTarget: anchorTargets.length === 1 ? anchorTargets[0]! : new MultiAnchorTarget(anchorTargets) }
+    : {}),
+  anchors: state.auditAnchors,
+});
 
 /**
  * Backs the "Research" panel: general case-law search against

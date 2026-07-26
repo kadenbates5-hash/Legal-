@@ -230,6 +230,76 @@ export class AuditLog {
   }
 
   /**
+   * The hash of the most recent entry — the single value that commits to
+   * the entire log. Publishing this somewhere out of reach is what turns
+   * tamper-*detection* into tamper-*evidence*: see `audit-anchor.ts`.
+   */
+  headHash(): string | undefined {
+    return this.#entries.at(-1)?.hash;
+  }
+
+  /**
+   * Entries after `sequence` whose action isn't in `ignoring`.
+   *
+   * Exists for one specific problem: anchoring writes its own audit
+   * entry, which changes the head hash, so "has anything happened since
+   * the last anchor?" can never be answered by comparing head hashes —
+   * the answer would always be yes, and a nightly job would anchor
+   * forever on a completely idle system.
+   */
+  countSince(sequence: number, ignoring: readonly string[] = []): number {
+    return this.#entries.filter((e) => e.sequence > sequence && !ignoring.includes(e.action)).length;
+  }
+
+  /** The hash recorded at a given sequence, for checking an anchor against the current chain. */
+  hashAt(sequence: number): string | undefined {
+    return this.#entries.find((e) => e.sequence === sequence)?.hash;
+  }
+
+  /**
+   * Checks the chain against previously published anchors.
+   *
+   * This is the check the internal chain alone cannot make. Someone who
+   * rewrites the state file can recompute every hash, so
+   * `verifyIntegrity()` will happily pass on a log that was rebuilt from
+   * scratch. An anchor is a copy of the head hash written somewhere that
+   * person doesn't control; if the chain no longer produces that hash at
+   * that sequence, the log has been rewritten regardless of how
+   * internally consistent it now looks.
+   *
+   * Two distinct failures, reported separately because they mean
+   * different things:
+   * - **mismatch** — the entry at that sequence exists but hashes
+   *   differently. History was rewritten.
+   * - **missing** — the log is now shorter than an anchor it already
+   *   published. Entries were truncated off the end, which the internal
+   *   chain cannot see at all, since a truncated chain is still a valid
+   *   chain.
+   */
+  verifyAgainstAnchors(anchors: readonly AuditAnchorRecord[]): AnchorVerification {
+    const mismatches: AnchorMismatch[] = [];
+    for (const anchor of anchors) {
+      const actual = this.hashAt(anchor.sequence);
+      if (actual === undefined) {
+        mismatches.push({
+          sequence: anchor.sequence,
+          expectedHash: anchor.headHash,
+          actualHash: undefined,
+          kind: "missing",
+        });
+      } else if (actual !== anchor.headHash) {
+        mismatches.push({
+          sequence: anchor.sequence,
+          expectedHash: anchor.headHash,
+          actualHash: actual,
+          kind: "mismatch",
+        });
+      }
+    }
+    return { ok: mismatches.length === 0, anchorsChecked: anchors.length, mismatches };
+  }
+
+  /**
    * Plain-data snapshot for persistence. Unlike `read()`, this returns
    * unredacted entries regardless of caller — it's meant for a trusted
    * persistence layer restoring the log itself, not for a UI/reporting
@@ -247,6 +317,36 @@ export class AuditLog {
     );
     return log;
   }
+}
+
+/**
+ * A published commitment to the log's state at a point in time. The
+ * `headHash` is the hash of entry `sequence`; because each hash covers
+ * every entry before it, that one value commits to the whole log up to
+ * that point.
+ */
+export interface AuditAnchorRecord {
+  sequence: number;
+  headHash: string;
+  anchoredAt: string;
+  /** Where it went — the name of the target that accepted it. */
+  destination: string;
+  /** Whatever the target gives back as proof it stored the value (a message id, an offset, a receipt). */
+  receipt: string | undefined;
+}
+
+export interface AnchorMismatch {
+  sequence: number;
+  expectedHash: string;
+  actualHash: string | undefined;
+  /** `missing` means the log is now shorter than an anchor it already published. */
+  kind: "mismatch" | "missing";
+}
+
+export interface AnchorVerification {
+  ok: boolean;
+  anchorsChecked: number;
+  mismatches: AnchorMismatch[];
 }
 
 export interface AuditFilter {

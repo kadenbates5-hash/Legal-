@@ -636,7 +636,17 @@ async function handleRequest(
         sendJson(res, 404, { error: "the audit log is not configured on this server" });
         return;
       }
-      sendJson(res, 200, audit.verifyIntegrity(actor));
+      sendJson(res, 200, await audit.verifyIntegrity(actor));
+      return;
+    }
+
+    if (url.pathname === "/api/audit/anchor" && req.method === "POST") {
+      if (!audit) {
+        sendJson(res, 404, { error: "the audit log is not configured on this server" });
+        return;
+      }
+      sendJson(res, 200, await audit.anchorNow(actor));
+      onMutated?.();
       return;
     }
 

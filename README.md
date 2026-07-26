@@ -99,8 +99,12 @@ MIME-sniffing defenses, and a hard request-body ceiling. The **audit
 log** records who did what across the whole app — including field-level
 before/after for record edits — and is **hash-chained**, so an entry
 deleted or altered straight in the database breaks the chain and is
-reported by the panel's "Verify the chain" button (detection, not
-prevention: see CLAUDE.md for the limits). See CLAUDE.md's
+reported by the panel's "Verify the chain" button. Because a chain can be
+rebuilt by anyone with database access, the head hash can also be
+**anchored** — published to an append-only file or emailed to the
+partners — so a log quietly rebuilt from scratch is caught by comparison
+against a copy that whoever administers the database could not have
+altered. `npm run anchor:audit` runs it on a schedule. See CLAUDE.md's
 "Transport & session security" for the details, and its "Not yet built"
 section for what's still ahead
 (the one-time Twilio console step of pointing a real phone number at
