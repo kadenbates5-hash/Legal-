@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 
 /**
@@ -25,7 +26,12 @@ export async function readJsonFile<T>(filePath: string, defaultValue: T): Promis
 
 export async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  // Random suffix, not pid+timestamp. Two saves in the same millisecond
+  // from the same process produced the *same* temp path: the first
+  // renamed it into place, the second's rename then failed with ENOENT
+  // and — as a floating promise — took the whole server down. Observed,
+  // not theoretical.
+  const tempPath = `${filePath}.${randomBytes(8).toString("hex")}.tmp`;
   await writeFile(tempPath, JSON.stringify(data, null, 2), "utf8");
   await rename(tempPath, filePath);
 }

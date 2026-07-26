@@ -37,6 +37,29 @@ export interface DeadlineConflict {
   calculations: DeadlineCalculation[];
 }
 
+export interface UpcomingDeadline {
+  matterId: string;
+  type: DeadlineType;
+  /** The soonest date any source has proposed. */
+  date: string;
+  /** Negative once the date has passed. */
+  daysAway: number;
+  confirmationState: DeadlineStatus["state"];
+  calculations: DeadlineCalculation[];
+  overdue: boolean;
+}
+
+/** Whole days between two ISO dates, in UTC so a timezone can't produce an off-by-one. */
+export function daysBetweenDates(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+}
+
+function addDays(isoDate: string, days: number): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 export type DeadlineStatus =
   | { state: "unconfirmed"; calculations: DeadlineCalculation[] }
   | { state: "confirmed"; date: string; calculations: DeadlineCalculation[] }
@@ -92,6 +115,59 @@ export class DeadlineTracker {
 
   isConfirmed(matterId: string, type: DeadlineType): boolean {
     return this.status(matterId, type).state === "confirmed";
+  }
+
+  /**
+   * Deadlines falling within the next `withinDays`, soonest first.
+   *
+   * The field that earns its place here is `confirmationState`. A
+   * deadline three days away that is still **single-sourced** is the
+   * most dangerous item a firm can be holding: the date came from one
+   * place, nobody has checked it, and there is no longer time to
+   * discover it was wrong. A list of dates alone would hide exactly that
+   * — so the state travels with every row and `mostUrgent()` ranks by
+   * it, not only by date.
+   *
+   * A `conflict` is included regardless of how its dates sort, because
+   * two sources disagreeing about a date days away is worse than either
+   * date being correct.
+   *
+   * Dates are compared as ISO strings against a caller-supplied "today",
+   * so the firm's own notion of the current day governs — the same
+   * reasoning as `time-clock.ts` refusing to bucket by UTC.
+   */
+  listUpcoming(params: { today: string; withinDays: number }): UpcomingDeadline[] {
+    const horizon = addDays(params.today, params.withinDays);
+    const upcoming: UpcomingDeadline[] = [];
+
+    for (const [k] of this.#calculationsByKey) {
+      const [matterId, type] = k.split("::") as [string, DeadlineType];
+      const status = this.status(matterId, type);
+      // The earliest date any source proposed. For a conflict that is
+      // deliberately the *soonest* of the disagreeing dates: if one
+      // source says Friday and another says next Tuesday, the firm has
+      // until Friday to find out which is right.
+      const dates = status.calculations.map((c) => c.date).sort();
+      const date = dates[0];
+      if (!date) continue;
+      if (date > horizon) continue;
+
+      upcoming.push({
+        matterId,
+        type,
+        date,
+        daysAway: daysBetweenDates(params.today, date),
+        confirmationState: status.state,
+        calculations: status.calculations,
+        // Past due is reported, not filtered out. A deadline that has
+        // slipped is the most important thing on the list, and dropping
+        // it once the date passes is how it stops being anybody's
+        // problem.
+        overdue: date < params.today,
+      });
+    }
+
+    return upcoming.sort((a, b) => a.date.localeCompare(b.date) || a.matterId.localeCompare(b.matterId));
   }
 
   /** Every matter/type pair currently in a conflicting state — for a dashboard to surface immediately. */

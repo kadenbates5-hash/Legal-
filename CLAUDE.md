@@ -217,6 +217,47 @@ confirmation requires the calendar integration's own credential — an
 attorney cannot self-report as the calendar system. The dashboard's
 "Deadlines" panel exposes both the status check and the confirm action.
 
+### What's coming due
+
+`DeadlineTracker.listUpcoming()` / `ReviewGateService.listUpcomingDeadlines()`
+back the Deadlines panel's "Coming due" card and a Home tile. Missing a
+deadline is the most common malpractice claim there is, and a system
+that tracked dates without ever surfacing one was only half the feature.
+
+**Ordered by risk, not by date.** A deadline eight days out that two
+sources disagree about — or that only one source has ever seen — is a
+worse position than a confirmed deadline tomorrow: the confirmed one is
+a task, the unverified one is a question nobody has asked yet, and the
+window to ask it is what's closing. `deadlineUrgency()` combines time
+pressure with a verification penalty, so ranking by date alone can't
+bury exactly the rows that need attention. Verified live:
+
+```
+ 168  m-overdue      2026-07-22   -4d  unconfirmed (OVERDUE)
+ 111  m-conflict     2026-08-02    7d  conflict
+  79  m-confirmed    2026-07-29    3d  confirmed
+  70  m-unverified   2026-08-05   10d  unconfirmed
+```
+
+Three further behaviours worth naming:
+
+- **A passed deadline keeps appearing.** Filtering by `date >= today`
+  would make a missed deadline vanish at exactly the moment it starts
+  mattering most; `overdue` is reported instead.
+- **A conflict is listed at the *soonest* of its disagreeing dates.** If
+  one source says Friday and another says next Tuesday, the firm has
+  until Friday to find out which is right.
+- **Reading the list writes nothing to the audit log**, so a dashboard
+  polling it doesn't grow the log it might later be used to review.
+
+Deadlines only appear once someone records one. The only write path is
+`POST /api/deadlines/confirm` (attorney for `human`, the system
+credential for `calendar_system`) plus agent calculations that
+`ParalegalDraftingSession` records when a draft carries a
+`deadlineDate` — there is deliberately no route for recording an
+`agent`-sourced date over HTTP, since that source exists to be the one
+that needs checking.
+
 ## Google Calendar integration (§7 item #1's remaining piece — resolved)
 
 `src/integrations/` — the real vendor behind the `calendar_system`
@@ -1596,7 +1637,18 @@ behind the attorney-only service. It still requires a logged-in session
 ## Persistence
 
 `src/persistence/` — real durability behind a storage-agnostic seam, not
-an in-memory-only demo. §8's "not yet built — persistence" is resolved
+an in-memory-only demo.
+
+**Two robustness bugs found by running it, both fixed and pinned by
+tests:** the atomic-write temp path was `${file}.${pid}.${Date.now()}.tmp`,
+so two saves inside one millisecond from one process produced the *same*
+temp file — the first renamed it into place and the second's rename hit
+`ENOENT`. Worse, `onMutated` fired the save as a floating promise, so
+that rejection crashed the whole server and took every logged-in user
+with it. The temp suffix is now random, and saves are chained through
+one promise (so two writers are never in flight) and never fatal: a
+failed save logs loudly and the next mutation retries.
+ §8's "not yet built — persistence" is resolved
 two ways now: file-backed by default, or a real Postgres database when
 `DATABASE_URL` is set.
 

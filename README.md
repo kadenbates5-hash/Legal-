@@ -93,7 +93,11 @@ monthly totals counted in the firm's own timezone, where open shifts
 never inflate a total and corrections are attorney-only and keep the
 original on the record; and a **Payroll**
 panel for what the firm pays its staff, with historical rates so a raise
-never restates an already-paid period. There's a **search** box in the top bar covering matter records, drafted
+never restates an already-paid period. The Deadlines panel shows what's **coming due**, ordered by risk rather
+than by date — a date only one source has seen, or that two sources
+disagree about, outranks a confirmed one slightly closer, and a deadline
+that has already passed keeps appearing instead of quietly vanishing.
+There's a **search** box in the top bar covering matter records, drafted
 work product, uploaded file names, saved research and logged time —
 scoped so a matter you aren't assigned to never appears in results, and
 explicit that file *contents* aren't indexed. Docket opens on a

@@ -963,6 +963,19 @@ async function handleDeadlineRequest(
     return;
   }
 
+  if (url.pathname === "/api/deadlines/upcoming" && req.method === "GET") {
+    const withinDays = Number(url.searchParams.get("withinDays"));
+    sendJson(
+      res,
+      200,
+      service.listUpcomingDeadlines(actor, {
+        ...(Number.isFinite(withinDays) && withinDays > 0 ? { withinDays } : {}),
+        ...(url.searchParams.get("today") ? { today: url.searchParams.get("today")! } : {}),
+      }),
+    );
+    return;
+  }
+
   if (url.pathname === "/api/deadlines" && req.method === "GET") {
     const matterId = url.searchParams.get("matterId");
     const type = url.searchParams.get("type") as DeadlineType | null;

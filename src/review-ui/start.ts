@@ -505,10 +505,37 @@ const voiceOptions: Pick<ReviewServerOptions, "voiceCalls" | "audioClips" | "twi
       }
     : {};
 
+/**
+ * Persisting after a mutation, serialized and non-fatal.
+ *
+ * Two things this must not do, both of which it previously did:
+ *
+ * - **Run concurrently with itself.** Every mutating request fires a
+ *   save; two overlapping writes race each other through the
+ *   temp-file-and-rename dance. Chaining them means the last write still
+ *   wins (which is correct — it holds the newest state) without two
+ *   writers ever being in flight at once.
+ * - **Crash the process on failure.** A rejected save used to be a
+ *   floating promise, so a transient disk or database error took the
+ *   whole server down and every logged-in user with it. A failed save is
+ *   serious and is logged as such, but the right response is to keep
+ *   serving and let the next mutation retry, not to die.
+ */
+let pendingSave: Promise<void> = Promise.resolve();
+function persist(): void {
+  pendingSave = pendingSave
+    .then(() => saveSystemState(store, state))
+    .catch((err: unknown) => {
+      console.error(
+        `[docket] FAILED TO PERSIST STATE — the change is live in memory but not saved, and will be lost on restart: ${
+          (err as Error).message
+        }`,
+      );
+    });
+}
+
 const server = createReviewServer(service, state.auth, {
-  onMutated: () => {
-    void saveSystemState(store, state);
-  },
+  onMutated: persist,
   scheduling: state.scheduling,
   intake,
   accounts,

@@ -6,6 +6,7 @@ import {
   type DeadlineConflict,
   type DeadlineStatus,
   type DeadlineTracker,
+  type UpcomingDeadline,
   type DeadlineType,
 } from "../core/deadline.js";
 
@@ -45,6 +46,24 @@ function summarize(wp: WorkProduct): WorkProductSummary {
 
 function detail(wp: WorkProduct): WorkProductDetail {
   return { ...summarize(wp), content: wp.content, history: wp.history };
+}
+
+/** Two weeks: far enough to act on a court date, close enough that the list stays short enough to read. */
+export const DEFAULT_DEADLINE_HORIZON_DAYS = 14;
+
+/**
+ * Higher is more urgent. Time pressure dominates, but an unverified date
+ * carries its own weight that grows as the date approaches — because the
+ * window in which the verification could still change anything is what's
+ * actually closing.
+ */
+function deadlineUrgency(deadline: UpcomingDeadline): number {
+  // 0 days away scores 100, 14 days away scores ~0; already overdue
+  // scores above 100 and keeps climbing.
+  const timePressure = 100 - deadline.daysAway * 7;
+  const verificationRisk =
+    deadline.confirmationState === "conflict" ? 60 : deadline.confirmationState === "unconfirmed" ? 40 : 0;
+  return timePressure + verificationRisk;
 }
 
 export class ReviewGateService {
@@ -161,6 +180,34 @@ export class ReviewGateService {
   listDeadlineConflicts(actor: Actor): DeadlineConflict[] {
     requireAttorney(actor);
     return this.#deadlineTracker?.listConflicts() ?? [];
+  }
+
+  /**
+   * What is coming due, with the risk ranking that makes the list worth
+   * looking at.
+   *
+   * Sorted by **urgency, not date**. A deadline eight days out that two
+   * sources disagree about, or that only one source has ever seen, is a
+   * worse position to be in than a confirmed deadline tomorrow: the
+   * confirmed one is a task, the unconfirmed one is a question nobody
+   * has asked yet, and the time left to ask it is running out. Ranking
+   * purely by date would bury exactly the rows that need attention.
+   *
+   * `today` is a parameter so a caller can pass the firm's own local
+   * date rather than the server's — same reasoning as the time clock.
+   */
+  listUpcomingDeadlines(
+    actor: Actor,
+    options: { withinDays?: number; today?: string } = {},
+  ): (UpcomingDeadline & { urgency: number })[] {
+    requireAttorney(actor);
+    const today = options.today ?? new Date().toISOString().slice(0, 10);
+    const withinDays = options.withinDays ?? DEFAULT_DEADLINE_HORIZON_DAYS;
+    const upcoming = this.#deadlineTracker?.listUpcoming({ today, withinDays }) ?? [];
+
+    return upcoming
+      .map((d) => ({ ...d, urgency: deadlineUrgency(d) }))
+      .sort((a, b) => b.urgency - a.urgency || a.date.localeCompare(b.date));
   }
 
   #requireWorkProduct(id: string): WorkProduct {

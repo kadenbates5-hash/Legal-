@@ -87,6 +87,7 @@ async function loadWhoami() {
     if (me.role === "attorney") {
       loadQueue();
       loadConflicts();
+      loadUpcomingDeadlines();
     } else {
       renderAttorneyOnly("queue", "Review Queue is attorney-only.");
       renderAttorneyOnly("conflictList", "Deadlines are attorney-only.");
@@ -98,6 +99,57 @@ async function loadWhoami() {
     loadHome();
   } catch (err) {
     // api() already redirects to /login.html on 401.
+  }
+}
+
+const DEADLINE_TYPE_LABEL = {
+  speedy_trial: "speedy trial",
+  arraignment: "arraignment",
+  bail_hearing: "bail hearing",
+  discovery_response: "discovery response",
+  other: "deadline",
+};
+
+/** One row of the coming-due list, shared by the Deadlines panel and Home. */
+function deadlineRowHtml(d) {
+  const when = d.overdue
+    ? `<span class="badge rejected">${Math.abs(d.daysAway)} day${Math.abs(d.daysAway) === 1 ? "" : "s"} overdue</span>`
+    : d.daysAway === 0
+      ? '<span class="badge rejected">due today</span>'
+      : `<span class="badge ${d.daysAway <= 3 ? "rejected" : "pending_review"}">in ${d.daysAway} day${d.daysAway === 1 ? "" : "s"}</span>`;
+  // The verification state is the point of the list, so it's never
+  // omitted — a confirmed deadline says so as loudly as an unverified one.
+  const state =
+    d.confirmationState === "confirmed"
+      ? '<span class="badge approved">confirmed by two sources</span>'
+      : d.confirmationState === "conflict"
+        ? '<span class="badge rejected">sources disagree</span>'
+        : '<span class="badge pending_review">only one source — not verified</span>';
+  return `<strong>${escapeHtml(DEADLINE_TYPE_LABEL[d.type] || d.type)}</strong>
+    <span class="badge">${escapeHtml(d.matterId)}</span> ${when} ${state}
+    <div class="meta-tight">${escapeHtml(d.date)}${
+      d.confirmationState === "conflict"
+        ? ` · proposed ${escapeHtml([...new Set(d.calculations.map((c) => c.date))].join(" and "))}`
+        : ` · from ${escapeHtml([...new Set(d.calculations.map((c) => c.source))].join(", "))}`
+    }</div>`;
+}
+
+async function loadUpcomingDeadlines() {
+  const list = document.getElementById("upcomingList");
+  if (currentRole && currentRole !== "attorney") {
+    renderAttorneyOnly("upcomingList", "Deadlines are attorney-only.");
+    return;
+  }
+  try {
+    const withinDays = Number(document.getElementById("deadlineHorizon").value) || 14;
+    const due = await api(`/api/deadlines/upcoming?withinDays=${withinDays}`);
+    list.innerHTML = "";
+    for (const d of due) list.appendChild(listRow(deadlineRowHtml(d)));
+    if (due.length === 0) {
+      list.innerHTML = `<li class="static empty">Nothing due in the next ${withinDays} days. Deadlines only appear here once someone has recorded one.</li>`;
+    }
+  } catch (err) {
+    showError(err.message);
   }
 }
 
@@ -389,6 +441,7 @@ async function loadConflicts() {
 }
 
 document.getElementById("checkDeadline").addEventListener("click", checkDeadline);
+document.getElementById("loadUpcoming").addEventListener("click", loadUpcomingDeadlines);
 document.getElementById("confirmDeadline").addEventListener("click", confirmDeadline);
 
 /* ===== Scheduling ===== */
@@ -1618,9 +1671,10 @@ async function loadHome() {
   const isAttorney = currentRole === "attorney";
   const canDraft = isAttorney || currentRole === "paralegal";
 
-  const [pending, conflicts, cases, myHours, announcements, schedule, clock, outstanding] = await Promise.all([
+  const [pending, conflicts, upcoming, cases, myHours, announcements, schedule, clock, outstanding] = await Promise.all([
     isAttorney ? tryApi("/api/work-products?status=pending_review") : null,
     isAttorney ? tryApi("/api/deadlines/conflicts") : null,
+    isAttorney ? tryApi("/api/deadlines/upcoming?withinDays=14") : null,
     canDraft ? tryApi("/api/cases") : null,
     canDraft ? tryApi("/api/billing-hours/mine") : null,
     tryApi("/api/messages/announcements"),
@@ -1630,6 +1684,17 @@ async function loadHome() {
   ]);
 
   if (pending) stats.appendChild(statTile(pending.length, "awaiting your review", { tone: pending.length ? "alert" : "ok", panel: "queue" }));
+  if (upcoming) {
+    // Counts what's actually at risk, not everything on the calendar: a
+    // confirmed date next week doesn't need a red number against it.
+    const atRisk = upcoming.filter((d) => d.confirmationState !== "confirmed" || d.daysAway <= 3 || d.overdue).length;
+    stats.appendChild(
+      statTile(upcoming.length, atRisk ? `due in 14 days — ${atRisk} need attention` : "due in 14 days", {
+        tone: atRisk ? "alert" : "ok",
+        panel: "deadlines",
+      }),
+    );
+  }
   if (conflicts) stats.appendChild(statTile(conflicts.length, "deadline conflicts", { tone: conflicts.length ? "alert" : "ok", panel: "deadlines" }));
   if (cases) stats.appendChild(statTile(cases.length, "active matters", { panel: "cases" }));
   if (myHours) {
@@ -1662,6 +1727,16 @@ async function loadHome() {
 
   /* --- Needs your attention --- */
   attention.innerHTML = "";
+  // Deadlines lead. A missed deadline is the most common malpractice
+  // claim there is, and it outranks anything else competing for the top
+  // of this list.
+  for (const d of (upcoming || []).filter((x) => x.overdue || x.daysAway <= 7 || x.confirmationState !== "confirmed").slice(0, 4)) {
+    const row = listRow(deadlineRowHtml(d));
+    const open = mkButton("Open in Deadlines", () => goToPanel("deadlines"));
+    row.appendChild(document.createElement("br"));
+    row.appendChild(open);
+    attention.appendChild(row);
+  }
   for (const wp of (pending || []).slice(0, 5)) {
     const row = listRow(
       `<strong>${escapeHtml(wp.kind)}</strong> — matter ${escapeHtml(wp.matterId)}
