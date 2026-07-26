@@ -1409,29 +1409,98 @@ document.getElementById("navAccounts").addEventListener("click", loadAccounts);
 async function loadAudit() {
   showError("");
   try {
+    const query = new URLSearchParams();
     const matterId = document.getElementById("auditMatterId").value.trim();
-    const path = matterId ? `/api/audit?matterId=${encodeURIComponent(matterId)}` : "/api/audit";
-    const entries = await api(path);
+    const actorId = document.getElementById("auditActorId").value;
+    const action = document.getElementById("auditAction").value.trim();
+    const from = document.getElementById("auditFrom").value;
+    const to = document.getElementById("auditTo").value;
+    if (matterId) query.set("matterId", matterId);
+    if (actorId) query.set("actorId", actorId);
+    if (action) query.set("action", action);
+    if (from) query.set("from", from);
+    if (to) query.set("to", to);
+
+    const entries = await api(`/api/audit${query.toString() ? `?${query}` : ""}`);
     const list = document.getElementById("auditList");
+    document.getElementById("auditCount").textContent =
+      `${entries.length} entr${entries.length === 1 ? "y" : "ies"}${query.toString() ? " matching" : ""}`;
     list.innerHTML = "";
     for (const entry of [...entries].reverse()) {
       const li = document.createElement("li");
       li.classList.add("static");
+      const who = knownStaff.find((m) => m.actorId === entry.actor.id)?.displayName || entry.actor.id;
       li.innerHTML = `<strong>${escapeHtml(entry.action)}</strong>
-        <span class="badge">${escapeHtml(entry.actor.role)} ${escapeHtml(entry.actor.id)}</span>
+        <span class="badge">${escapeHtml(who)} (${escapeHtml(entry.actor.role)})</span>
         ${entry.matterId ? `<span class="badge">matter ${escapeHtml(entry.matterId)}</span>` : ""}
-        <div class="meta">${new Date(entry.timestamp).toLocaleString()}</div>
-        ${entry.detail ? `<div class="body-sm">${escapeHtml(entry.detail)}</div>` : ""}`;
+        <div class="meta">${new Date(entry.timestamp).toLocaleString()} · #${entry.sequence}</div>
+        ${entry.detail ? `<div class="body-sm">${escapeHtml(entry.detail)}</div>` : ""}
+        ${renderChanges(entry.changes)}`;
       list.appendChild(li);
     }
-    if (entries.length === 0) list.innerHTML = '<li class="static empty">No audit entries.</li>';
+    if (entries.length === 0) list.innerHTML = '<li class="static empty">No audit entries match.</li>';
   } catch (err) {
     showError(err.message);
   }
 }
 
+/** Field-level before/after, so an edit shows what actually changed. */
+function renderChanges(changes) {
+  if (!changes || changes.length === 0) return "";
+  const rows = changes
+    .map(
+      (c) => `<tr>
+        <td class="diff-field">${escapeHtml(c.field)}</td>
+        <td class="diff-from">${c.from === undefined || c.from === null ? "<em>not set</em>" : escapeHtml(c.from)}</td>
+        <td class="diff-to">${c.to === undefined || c.to === null ? "<em>cleared</em>" : escapeHtml(c.to)}</td>
+      </tr>`,
+    )
+    .join("");
+  return `<table class="diff"><thead><tr><th>Field</th><th>Was</th><th>Became</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function verifyAuditIntegrity() {
+  showError("");
+  const out = document.getElementById("auditIntegrity");
+  out.innerHTML = "Checking…";
+  try {
+    const report = await api("/api/audit/verify");
+    const unchained = report.unchainedEntries
+      ? ` ${report.unchainedEntries} older entr${report.unchainedEntries === 1 ? "y predates" : "ies predate"} hashing and can't be checked.`
+      : "";
+    out.innerHTML = report.ok
+      ? `<p class="integrity-ok">Chain intact across ${report.entriesChecked} entries.${escapeHtml(unchained)}</p>`
+      : `<div class="flags"><strong>The audit chain is broken at entry #${report.brokenAtSequence}.</strong>
+           <div class="mt-xs">${escapeHtml(report.reason || "")}</div>
+           <div class="mt-xs">Entries after this point can no longer be relied on as a complete record. Preserve the current state file before doing anything else.</div></div>`;
+  } catch (err) {
+    out.innerHTML = "";
+    showError(err.message);
+  }
+}
+
 document.getElementById("refreshAudit").addEventListener("click", loadAudit);
-document.getElementById("navAudit").addEventListener("click", loadAudit);
+document.getElementById("verifyAudit").addEventListener("click", verifyAuditIntegrity);
+document.getElementById("clearAuditFilters").addEventListener("click", () => {
+  for (const id of ["auditMatterId", "auditAction", "auditFrom", "auditTo"]) document.getElementById(id).value = "";
+  document.getElementById("auditActorId").value = "";
+  loadAudit();
+});
+document.getElementById("navAudit").addEventListener("click", () => {
+  // "Everyone" has to be an explicit option — an empty <select> would
+  // default to the first person and quietly filter the whole log.
+  const picker = document.getElementById("auditActorId");
+  const previous = picker.value;
+  picker.innerHTML = '<option value="">everyone</option>';
+  for (const m of knownStaff) {
+    const opt = document.createElement("option");
+    opt.value = m.actorId;
+    opt.textContent = `${m.displayName} (${m.role})`;
+    picker.appendChild(opt);
+  }
+  picker.value = previous;
+  loadAudit();
+});
 
 
 /* ===== Home =====

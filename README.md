@@ -95,7 +95,12 @@ typed from memory. Security-wise it ships **login brute-force
 throttling** (per-username and per-IP, audited, time-boxed so it can't
 be used to lock a real attorney out permanently), a strict
 **Content-Security-Policy** with no inline script, clickjacking and
-MIME-sniffing defenses, and a hard request-body ceiling. See CLAUDE.md's
+MIME-sniffing defenses, and a hard request-body ceiling. The **audit
+log** records who did what across the whole app — including field-level
+before/after for record edits — and is **hash-chained**, so an entry
+deleted or altered straight in the database breaks the chain and is
+reported by the panel's "Verify the chain" button (detection, not
+prevention: see CLAUDE.md for the limits). See CLAUDE.md's
 "Transport & session security" for the details, and its "Not yet built"
 section for what's still ahead
 (the one-time Twilio console step of pointing a real phone number at

@@ -1,5 +1,6 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AccessControl } from "../core/access-control.js";
+import type { AuditLog } from "../core/audit.js";
 import type { CaseDocument } from "../core/document-store.js";
 import { DocumentStore } from "../core/document-store.js";
 
@@ -61,11 +62,19 @@ function summarize(doc: CaseDocument): DocumentSummary {
 export class DocumentsService {
   #accessControl: AccessControl;
   #store: DocumentStore;
+  #auditLog: AuditLog | undefined;
   #maxUploadBytes: number;
 
-  constructor(params: { accessControl: AccessControl; store: DocumentStore; maxUploadBytes?: number }) {
+  constructor(params: {
+    accessControl: AccessControl;
+    store: DocumentStore;
+    maxUploadBytes?: number;
+    /** Optional so existing call sites keep working; wired in production so file movements are on the record. */
+    auditLog?: AuditLog;
+  }) {
     this.#accessControl = params.accessControl;
     this.#store = params.store;
+    this.#auditLog = params.auditLog;
     this.#maxUploadBytes = params.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
   }
 
@@ -95,6 +104,15 @@ export class DocumentsService {
       content: params.content,
       uploadedBy: actor.id,
     });
+    // `AccessControl.authorize` already logs that this actor reached the
+    // matter; this records the specific file, because "who put this in
+    // the case file, and when" is a question a firm gets asked.
+    this.#auditLog?.append({
+      actor,
+      matterId,
+      action: "document_uploaded",
+      detail: `document=${doc.id} name=${doc.fileName} bytes=${size} contentType=${doc.contentType}`,
+    });
     return summarize(doc);
   }
 
@@ -109,8 +127,16 @@ export class DocumentsService {
   delete(actor: Actor, matterId: string, id: string): void {
     requireCaseFileRole(actor);
     this.#accessControl.authorize({ actor, matterId, category: "case_file" });
-    this.#requireMatterDocument(matterId, id);
+    const doc = this.#requireMatterDocument(matterId, id);
     this.#store.delete(id);
+    // A deletion is the one document event with nothing left behind to
+    // inspect afterwards, so the entry carries what the file *was*.
+    this.#auditLog?.append({
+      actor,
+      matterId,
+      action: "document_deleted",
+      detail: `document=${id} name=${doc.fileName} uploadedBy=${doc.uploadedBy} uploadedAt=${doc.uploadedAt}`,
+    });
   }
 
   #requireMatterDocument(matterId: string, id: string): CaseDocument {

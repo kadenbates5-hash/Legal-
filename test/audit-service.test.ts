@@ -27,7 +27,7 @@ describe("AuditService (attorney-only surface)", () => {
     auditLog.append({ actor: paralegal, matterId: "m1", action: "access_granted", detail: undefined });
     auditLog.append({ actor: paralegal, matterId: "m2", action: "access_granted", detail: undefined });
     const audit = new AuditService(auditLog);
-    const entries = audit.list(attorney, "m1");
+    const entries = audit.list(attorney, { matterId: "m1" });
     expect(entries).toHaveLength(1);
     expect(entries[0]?.matterId).toBe("m1");
   });

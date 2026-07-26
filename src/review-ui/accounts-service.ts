@@ -2,6 +2,7 @@ import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AccessControl, ParalegalAssignment } from "../core/access-control.js";
 import type { AuthService, User, UserRole } from "../core/auth.js";
 import { LoginThrottle } from "../core/login-throttle.js";
+import type { AuditLog } from "../core/audit.js";
 
 /**
  * Attorney-facing account management. Adding/disabling users after the
@@ -47,11 +48,28 @@ export class AccountsService {
   #auth: AuthService;
   #accessControl: AccessControl;
   #loginThrottle: LoginThrottle | undefined;
+  #auditLog: AuditLog | undefined;
 
-  constructor(auth: AuthService, accessControl: AccessControl, loginThrottle?: LoginThrottle) {
+  constructor(
+    auth: AuthService,
+    accessControl: AccessControl,
+    loginThrottle?: LoginThrottle,
+    /** Optional so existing call sites keep working; wired in production. */
+    auditLog?: AuditLog,
+  ) {
     this.#auth = auth;
     this.#accessControl = accessControl;
     this.#loginThrottle = loginThrottle;
+    this.#auditLog = auditLog;
+  }
+
+  /**
+   * Account changes are firm-level, not matter-level, so they carry no
+   * matterId — except matter assignment, which is exactly a grant of
+   * access to one matter and is filed under it.
+   */
+  #audit(actor: Actor, action: string, detail: string, matterId?: string): void {
+    this.#auditLog?.append({ actor, matterId, action, detail });
   }
 
   /**
@@ -67,6 +85,7 @@ export class AccountsService {
     requireAttorney(actor);
     if (!this.#loginThrottle) return { cleared: false };
     this.#loginThrottle.recordSuccess([LoginThrottle.usernameKey(username)]);
+    this.#audit(actor, "login_lockout_cleared", `username=${username}`);
     return { cleared: true };
   }
 
@@ -92,37 +111,57 @@ export class AccountsService {
 
   create(actor: Actor, params: { username: string; password: string; role: UserRole; actorId?: string; displayName?: string }): AccountSummary {
     requireAttorney(actor);
-    return this.#summarize(this.#auth.createUser(params));
+    const user = this.#auth.createUser(params);
+    // Never the password, obviously — but who granted whom what role, and
+    // when, is the first thing anyone reconstructing an incident wants.
+    this.#audit(actor, "account_created", `user=${user.id} username=${user.username} role=${user.role} actorId=${user.actorId}`);
+    return this.#summarize(user);
   }
 
   disable(actor: Actor, userId: string): AccountSummary {
     requireAttorney(actor);
-    return this.#summarize(this.#auth.setDisabled(userId, true));
+    const user = this.#auth.setDisabled(userId, true);
+    this.#audit(actor, "account_disabled", `user=${user.id} username=${user.username}`);
+    return this.#summarize(user);
   }
 
   enable(actor: Actor, userId: string): AccountSummary {
     requireAttorney(actor);
-    return this.#summarize(this.#auth.setDisabled(userId, false));
+    const user = this.#auth.setDisabled(userId, false);
+    this.#audit(actor, "account_enabled", `user=${user.id} username=${user.username}`);
+    return this.#summarize(user);
   }
 
   /** Attorney sets a new password for a user who's lost theirs — see `AuthService.resetPassword` for what this actually does (marks mustChangePassword, revokes every live session). */
   resetPassword(actor: Actor, userId: string, newPassword: string): AccountSummary {
     requireAttorney(actor);
-    return this.#summarize(this.#auth.resetPassword(userId, newPassword));
+    const user = this.#auth.resetPassword(userId, newPassword);
+    this.#audit(actor, "account_password_reset", `user=${user.id} username=${user.username}`);
+    return this.#summarize(user);
   }
 
   /** Assigns (or re-assigns) a paralegal account to exactly one matter — see access-control.ts's "one matter at a time." */
   assignMatter(actor: Actor, userId: string, matterId: string, highSensitivityGranted?: boolean): AccountSummary {
     requireAttorney(actor);
     const user = this.#requireParalegal(userId);
+    const previous = this.#accessControl.getParalegalAssignment(user.actorId);
     this.#accessControl.assignParalegal(user.actorId, matterId, { highSensitivityGranted: highSensitivityGranted ?? false });
+    this.#audit(
+      actor,
+      "matter_assigned",
+      `user=${user.id} username=${user.username} highSensitivity=${highSensitivityGranted ?? false}` +
+        (previous?.matterId && previous.matterId !== matterId ? ` replacedMatter=${previous.matterId}` : ""),
+      matterId,
+    );
     return this.#summarize(user);
   }
 
   unassignMatter(actor: Actor, userId: string): AccountSummary {
     requireAttorney(actor);
     const user = this.#requireParalegal(userId);
+    const previous = this.#accessControl.getParalegalAssignment(user.actorId);
     this.#accessControl.revokeParalegalAssignment(user.actorId);
+    this.#audit(actor, "matter_unassigned", `user=${user.id} username=${user.username}`, previous?.matterId);
     return this.#summarize(user);
   }
 

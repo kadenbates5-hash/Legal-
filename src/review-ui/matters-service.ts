@@ -1,6 +1,6 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AccessControl } from "../core/access-control.js";
-import type { AuditLog } from "../core/audit.js";
+import { diffFields, type AuditLog } from "../core/audit.js";
 import type { Matter, MatterInput, MatterStore } from "../core/matters.js";
 import type { ConflictCheckResult, ConflictChecker } from "../core/conflicts.js";
 import type { PartyRole } from "../core/matters.js";
@@ -39,6 +39,33 @@ export interface ConflictCheckInput {
   names: string[];
   roleByName?: Record<string, PartyRole>;
   excludeMatterId?: string;
+}
+
+/**
+ * A matter as flat, comparable fields. Parties are grouped by role and
+ * joined into one string per role, so an audit entry reads "adverseParties:
+ * 'The State' → 'The State, Acme Inc.'" rather than a JSON blob nobody
+ * will read.
+ */
+function flattenMatter(matter: Matter): Record<string, unknown> {
+  // Returns undefined rather than "" when a role has no parties, so the
+  // audit diff reads "cleared" instead of showing an empty cell that
+  // could equally mean "unchanged" or "set to blank".
+  const named = (role: string) =>
+    matter.parties
+      .filter((p) => p.role === role)
+      .map((p) => (p.email ? `${p.name} <${p.email}>` : p.name))
+      .join(", ") || undefined;
+  return {
+    title: matter.title,
+    status: matter.status,
+    practiceAreaId: matter.practiceAreaId,
+    responsibleAttorneyId: matter.responsibleAttorneyId,
+    description: matter.description,
+    clients: named("client"),
+    adverseParties: named("adverse"),
+    relatedParties: named("related"),
+  };
 }
 
 export class MattersService {
@@ -81,12 +108,24 @@ export class MattersService {
    */
   upsert(actor: Actor, matterId: string, input: MatterInput): Matter {
     requireAttorney(actor, "editing a matter record");
+    // Read the record *before* the write, so the audit entry can say what
+    // actually changed rather than only that something did. Party lists
+    // matter most here: they are the input to every future conflicts
+    // check, and "who quietly removed the adverse party" is precisely
+    // the question this log has to be able to answer.
+    const before = this.#store.get(matterId);
     const record = this.#store.upsert(matterId, input);
+    const changes = diffFields(
+      before ? flattenMatter(before) : undefined,
+      flattenMatter(record),
+      ["title", "status", "practiceAreaId", "responsibleAttorneyId", "description", "clients", "adverseParties", "relatedParties"],
+    );
     this.#auditLog.append({
       actor,
       matterId: record.matterId,
-      action: "matter_record_updated",
+      action: before ? "matter_record_updated" : "matter_record_created",
       detail: `status=${record.status} parties=${record.parties.length}`,
+      ...(changes.length ? { changes } : {}),
     });
     return record;
   }

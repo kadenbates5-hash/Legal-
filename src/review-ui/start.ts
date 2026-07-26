@@ -150,7 +150,7 @@ const intake = new IntakeDemoSessions({
  * panel (enforcing matter scoping on every draft/revise/submit) and the
  * Accounts panel (the only place assignments are made/changed).
  */
-const accounts = new AccountsService(state.auth, state.accessControl, state.loginThrottle);
+const accounts = new AccountsService(state.auth, state.accessControl, state.loginThrottle, state.auditLog);
 
 const drafting = new DraftingService({
   accessControl: state.accessControl,
@@ -172,6 +172,7 @@ const MAX_DOCUMENT_UPLOAD_BYTES = process.env["MAX_DOCUMENT_UPLOAD_BYTES"];
 const documents = new DocumentsService({
   accessControl: state.accessControl,
   store: state.documentStore,
+  auditLog: state.auditLog,
   ...(MAX_DOCUMENT_UPLOAD_BYTES ? { maxUploadBytes: Number(MAX_DOCUMENT_UPLOAD_BYTES) } : {}),
 });
 

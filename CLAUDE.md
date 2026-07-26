@@ -60,7 +60,7 @@ actual code path, not a prompt instruction:
 | `core/router.ts` | Intake sequencing: interpreter-first, consent disclosure, conflict check before substantive info, emergency preemption |
 | `core/access-control.ts` | Technically enforced scoping (§5) |
 | `core/review-gate.ts` | Human-in-the-loop work-product state machine (§1, §3) |
-| `core/audit.ts` | Append-only, privilege-sensitive audit trail, counsel-restricted read (§5) |
+| `core/audit.ts` | Append-only, privilege-sensitive audit trail, counsel-restricted read, hash-chained and field-level diffs (§5) |
 | `core/confidentiality.ts` | Third-party disclosure default ("I can't share case details, but I can pass along a message") |
 | `core/utilization.ts` | Internal AI utilization telemetry, explicitly walled off from client billing (§4) |
 | `core/deadline.ts` | Redundant deadline confirmation — never single-sourced to the agent (§3, §7 item #1) |
@@ -1064,6 +1064,62 @@ shows this week's total and a one-click punch button.
 What this doesn't do: overtime rules, breaks, geofencing, or scheduled
 shifts to punch against — it records when someone was working and rolls
 it up.
+
+## The activity record — who did what, and proof it wasn't edited
+
+`core/audit.ts` is where accountability actually lives. Three properties
+matter, and two of them are new:
+
+- **Every entry is hash-chained.** Each carries a SHA-256 over its own
+  contents *plus the previous entry's hash*, so the log is a chain:
+  altering an entry, deleting one, or splicing one in changes that
+  entry's hash and breaks every link after it.
+  `AuditLog.verifyIntegrity()` walks the chain and reports the first
+  sequence where it breaks; the Audit Log panel's "Verify the chain"
+  button exposes it to attorneys, because the people who have to be able
+  to say "this record is intact" are the ones answerable for it.
+  - This matters because the log doesn't only live in memory — it is
+    persisted as JSON in a file or a Postgres column that someone with
+    the right access could edit directly. Without the chain,
+    "we never delete audit entries" is a promise about *code* that has
+    nothing to do with the file on disk.
+  - **It detects tampering; it does not prevent it.** Someone who can
+    rewrite the state file can recompute every subsequent hash. Real
+    tamper-*proofing* needs the chain anchored where that same person
+    can't reach — an append-only external store, or publishing the head
+    hash somewhere. That is a genuine remaining gap and the panel says
+    so in as many words rather than implying an immutable log.
+  - Entries written before chaining existed verify as
+    `unchainedEntries` rather than as a break — an old snapshot isn't
+    evidence of tampering.
+  - `verifyIntegrity()` is a *report*, never a repair. There is
+    deliberately no code path that rewrites a broken chain to make it
+    verify again, since that is indistinguishable from covering up
+    whatever broke it.
+- **Edits record what changed.** `AuditEntry.changes` carries
+  field-level before/after, built by `diffFields()`. "matter_updated"
+  tells you something happened; this tells you *what*. It matters most
+  on matter parties, because those drive every future conflicts check
+  and "who quietly removed the adverse party" is precisely the question
+  this log has to answer — `MattersService.upsert()` reads the record
+  before writing so it can say. Only fields that actually differ are
+  recorded, and an emptied party list reads as *cleared* rather than as
+  a blank cell that could equally mean "unchanged".
+- **Coverage.** Beyond the access grants/denials, escalations and
+  work-product transitions already logged: matter-record creation and
+  edits (with diffs), document uploads and deletions (a deletion keeps
+  what the file *was*, since nothing else survives it), account
+  creation/disable/enable/password-reset, matter assignment and
+  unassignment, and every money movement (trust, invoices, payroll,
+  time clock). Passwords never appear, and a refused action logs the
+  denial rather than a phantom success.
+
+`AuditService.list()` takes a filter object (`matterId`, `actorId`,
+`action` substring, `from`/`to` dates) — the Audit Log panel exposes all
+five, since a log you can only read start-to-finish isn't one anyone
+uses. Redaction for `system_admin_no_content` drops `changes` too:
+before/after values are exactly the privileged content that role is
+walled off from.
 
 ## Transport & session security
 

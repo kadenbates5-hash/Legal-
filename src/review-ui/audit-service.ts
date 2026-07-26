@@ -1,5 +1,5 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
-import type { AuditEntry, AuditLog } from "../core/audit.js";
+import type { AuditEntry, AuditFilter, AuditLog, IntegrityReport } from "../core/audit.js";
 
 /**
  * Backs Docket's "Audit Log" panel. `AuditLog.read()` already requires an
@@ -23,8 +23,25 @@ export class AuditService {
     this.#auditLog = auditLog;
   }
 
-  list(actor: Actor, matterId?: string): AuditEntry[] {
+  list(actor: Actor, filter?: { matterId?: string } & AuditFilter): AuditEntry[] {
     requireAttorney(actor);
-    return this.#auditLog.read("attorney", matterId ? { matterId } : undefined);
+    return this.#auditLog.read("attorney", filter);
+  }
+
+  /**
+   * Checks the hash chain and reports where, if anywhere, it breaks.
+   *
+   * Exposed to attorneys rather than kept as an internal ops check
+   * because the people who need to be able to say "this record is
+   * intact" are the ones answerable for it. It is deliberately a
+   * *report*, not a repair: there is no code path that rewrites a
+   * broken chain to make it verify again, since that is
+   * indistinguishable from covering up whatever broke it.
+   */
+  verifyIntegrity(actor: Actor): IntegrityReport {
+    requireAttorney(actor);
+    // Not itself audited: verification is a read, and logging every
+    // check would grow the log it is checking on every page load.
+    return this.#auditLog.verifyIntegrity();
   }
 }

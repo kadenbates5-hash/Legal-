@@ -640,12 +640,28 @@
 
     <!-- ===== Audit Log (attorney-only) ===== -->
     <section class="panel" id="panel-audit">
-      <p class="subtitle">Attorney-only. Every access grant/denial, escalation, and work-product transition, append-only and privilege-sensitive — nothing here is ever edited or deleted.</p>
+      <p class="subtitle">Attorney-only, append-only and privilege-sensitive: every access grant and denial, escalation, work-product transition, matter-record edit, document upload or deletion, account change, and money movement — who did it, when, and for record edits, exactly what changed. There is no code path that edits or removes an entry, and the hash chain below makes that checkable rather than something you have to take on trust.</p>
       <div class="card">
         <div class="field-row">
-          <label class="field">Matter ID (optional) <input id="auditMatterId" list="matterOptions" autocomplete="off" placeholder="leave blank for all" /></label>
-          <button class="btn" id="refreshAudit">Refresh</button>
+          <label class="field">Matter ID <input id="auditMatterId" list="matterOptions" autocomplete="off" placeholder="all matters" /></label>
+          <label class="field">Person <select id="auditActorId"></select></label>
+          <label class="field">Action contains <input id="auditAction" placeholder="e.g. document, invoice" /></label>
+          <label class="field">From <input id="auditFrom" type="date" /></label>
+          <label class="field">To <input id="auditTo" type="date" /></label>
+          <button class="btn" id="refreshAudit">Apply</button>
+          <button class="btn" id="clearAuditFilters">Clear</button>
         </div>
+      </div>
+      <div class="card">
+        <div class="field-row">
+          <h3 class="row-title">Record integrity</h3>
+          <button class="btn" id="verifyAudit">Verify the chain</button>
+        </div>
+        <p class="subtitle-inline">Each entry is hashed together with the one before it, so a deleted or altered entry breaks the chain and can be detected after the fact. This detects tampering; it can't prevent someone with direct database access from recomputing the chain.</p>
+        <div id="auditIntegrity"></div>
+      </div>
+      <div class="card">
+        <div class="field-row"><h3 class="row-title">Entries</h3><span class="meta-tight" id="auditCount"></span></div>
         <ul id="auditList" class="list"></ul>
       </div>
     </section>

@@ -631,12 +631,32 @@ async function handleRequest(
       return;
     }
 
+    if (url.pathname === "/api/audit/verify" && req.method === "GET") {
+      if (!audit) {
+        sendJson(res, 404, { error: "the audit log is not configured on this server" });
+        return;
+      }
+      sendJson(res, 200, audit.verifyIntegrity(actor));
+      return;
+    }
+
     if (url.pathname.startsWith("/api/audit")) {
       if (!audit) {
         sendJson(res, 404, { error: "the audit log is not configured on this server" });
         return;
       }
-      sendJson(res, 200, audit.list(actor, url.searchParams.get("matterId") ?? undefined));
+      const q = url.searchParams;
+      sendJson(
+        res,
+        200,
+        audit.list(actor, {
+          ...(q.get("matterId") ? { matterId: q.get("matterId")! } : {}),
+          ...(q.get("actorId") ? { actorId: q.get("actorId")! } : {}),
+          ...(q.get("action") ? { action: q.get("action")! } : {}),
+          ...(q.get("from") ? { from: q.get("from")! } : {}),
+          ...(q.get("to") ? { to: q.get("to")! } : {}),
+        }),
+      );
       return;
     }
 
