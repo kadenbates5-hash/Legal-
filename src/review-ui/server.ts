@@ -28,6 +28,8 @@ import type { TrustService } from "./trust-service.js";
 import type { ClientFileService } from "./client-file-service.js";
 import type { InvoicingService } from "./invoicing-service.js";
 import type { PayrollService } from "./payroll-service.js";
+import type { TimeClockService } from "./time-clock-service.js";
+import { TimeClockError, type BucketKind } from "../core/time-clock.js";
 import { InvoicingError, type LineItemSource, type PaymentMethod } from "../core/invoicing.js";
 import { PayrollError } from "../core/payroll.js";
 import { TrustAccountingError, type TrustEntryType } from "../core/trust-ledger.js";
@@ -268,6 +270,11 @@ function errorStatus(err: unknown): number {
     return /must be|is required|needs a/.test(err.message) ? 400 : 409;
   }
   if (err instanceof PayrollError) return 400;
+  if (err instanceof TimeClockError) {
+    // The error says which it is; "already clocked in" / "already posted"
+    // are conflicts with the clock's current state, not malformed input.
+    return { invalid: 400, not_found: 404, conflict: 409 }[err.kind];
+  }
   if (err instanceof TrustAccountingError) {
     return err.message.startsWith("no trust entry") ? 404 : 409;
   }
@@ -396,6 +403,7 @@ export interface ReviewServerOptions {
   clientFile?: ClientFileService;
   invoicing?: InvoicingService;
   payroll?: PayrollService;
+  timeClock?: TimeClockService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
   /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
@@ -455,6 +463,7 @@ async function handleRequest(
     clientFile,
     invoicing,
     payroll,
+    timeClock,
     voiceCalls,
     audioClips,
     twilio,
@@ -688,6 +697,15 @@ async function handleRequest(
         return;
       }
       await handleInvoicingRequest(invoicing, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/time-clock")) {
+      if (!timeClock) {
+        sendJson(res, 404, { error: "the time clock is not configured on this server" });
+        return;
+      }
+      await handleTimeClockRequest(timeClock, req, res, actor, url, onMutated);
       return;
     }
 
@@ -1248,6 +1266,81 @@ async function handleInvoicingRequest(
   if (segments.length === 5 && segments[3] === "lines" && req.method === "DELETE") {
     sendJson(res, 200, invoicing.removeLineItem(actor, matterId, invoiceId, segments[4]!));
     onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleTimeClockRequest(
+  timeClock: TimeClockService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  const tz = url.searchParams.get("tz") ?? undefined;
+  const segments = url.pathname.replace(/^\/api\/time-clock\/?/, "").split("/").filter(Boolean);
+
+  // Punching is always self-service, so these take no actor id.
+  if (segments.length === 1 && (segments[0] === "clock-in" || segments[0] === "clock-out") && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const note = typeof body["note"] === "string" && body["note"] ? body["note"] : undefined;
+    const shift = segments[0] === "clock-in" ? timeClock.clockIn(actor, note) : timeClock.clockOut(actor, note);
+    sendJson(res, 200, shift);
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 1 && segments[0] === "on-the-clock" && req.method === "GET") {
+    sendJson(res, 200, timeClock.whoIsOnTheClock(actor, tz));
+    return;
+  }
+
+  if (segments.length === 3 && segments[0] === "shifts" && segments[2] === "adjust" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const shift = timeClock.adjust(actor, segments[1]!, {
+      ...(typeof body["clockInAt"] === "string" && body["clockInAt"] ? { clockInAt: body["clockInAt"] } : {}),
+      ...(typeof body["clockOutAt"] === "string" && body["clockOutAt"] ? { clockOutAt: body["clockOutAt"] } : {}),
+      reason: String(body["reason"] ?? ""),
+    });
+    sendJson(res, 200, shift);
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 3 && segments[0] === "shifts" && segments[2] === "post-to-payroll" && req.method === "POST") {
+    sendJson(res, 200, timeClock.postToPayroll(actor, segments[1]!));
+    onMutated?.();
+    return;
+  }
+
+  if (segments[0] !== "actor" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const actorId = decodeURIComponent(segments[1]!);
+  const from = url.searchParams.get("from") ?? undefined;
+  const to = url.searchParams.get("to") ?? undefined;
+
+  if (segments.length === 3 && segments[2] === "summary" && req.method === "GET") {
+    sendJson(res, 200, timeClock.summary(actor, actorId, tz));
+    return;
+  }
+
+  if (segments.length === 3 && segments[2] === "shifts" && req.method === "GET") {
+    sendJson(res, 200, timeClock.listShifts(actor, actorId, tz, from, to));
+    return;
+  }
+
+  if (segments.length === 3 && segments[2] === "totals" && req.method === "GET") {
+    const kind = (url.searchParams.get("kind") ?? "day") as BucketKind;
+    if (!["day", "week", "month"].includes(kind)) {
+      sendJson(res, 400, { error: "kind must be day, week or month" });
+      return;
+    }
+    sendJson(res, 200, timeClock.totals(actor, actorId, kind, tz, from, to));
     return;
   }
 

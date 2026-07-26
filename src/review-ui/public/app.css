@@ -277,3 +277,28 @@
 .stat.ok .n { color: var(--ok); }
 .stat.clickable { cursor: pointer; }
 .stat.clickable:hover { border-color: var(--accent); }
+
+/* ---------- Time Clock ---------- */
+/* The punch buttons are the whole point of the panel, so they're sized
+   to be found and hit without hunting for them. */
+.btn.big { font-size: 0.95rem; padding: 0.6rem 1.4rem; }
+.clock-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-bottom: 0.9rem;
+}
+.clock-state .pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+.clock-state.on { color: var(--ok); }
+.clock-state.on .pulse { background: var(--ok); }
+.clock-state.stale { color: var(--warn); }
+.clock-state.stale .pulse { background: var(--warn); }
+.clock-state .elapsed { color: var(--text-muted); font-weight: 400; font-size: 0.85rem; }

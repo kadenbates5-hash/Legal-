@@ -15,6 +15,7 @@ const PANEL_TITLES = {
   billing: "Billing",
   trust: "Trust",
   invoices: "Invoices",
+  "time-clock": "Time Clock",
   payroll: "Payroll",
   accounts: "Accounts",
   audit: "Audit Log",
@@ -1492,13 +1493,14 @@ async function loadHome() {
   const isAttorney = currentRole === "attorney";
   const canDraft = isAttorney || currentRole === "paralegal";
 
-  const [pending, conflicts, cases, myHours, announcements, schedule] = await Promise.all([
+  const [pending, conflicts, cases, myHours, announcements, schedule, clock] = await Promise.all([
     isAttorney ? tryApi("/api/work-products?status=pending_review") : null,
     isAttorney ? tryApi("/api/deadlines/conflicts") : null,
     canDraft ? tryApi("/api/cases") : null,
     canDraft ? tryApi("/api/billing-hours/mine") : null,
     tryApi("/api/messages/announcements"),
     tryApi(`/api/staff-schedule/date/${todayIso()}`),
+    currentActorId ? tryApi(`/api/time-clock/actor/${encodeURIComponent(currentActorId)}/summary`) : null,
   ]);
 
   if (pending) stats.appendChild(statTile(pending.length, "awaiting your review", { tone: pending.length ? "alert" : "ok", panel: "queue" }));
@@ -1507,6 +1509,14 @@ async function loadHome() {
   if (myHours) {
     const total = myHours.reduce((sum, e) => sum + e.hours, 0);
     stats.appendChild(statTile(`${total.toFixed(1)}h`, "hours you've logged", { panel: "billing" }));
+  }
+  if (clock) {
+    stats.appendChild(
+      statTile(formatMs(clock.thisWeek ? clock.thisWeek.totalMs : 0), "clocked this week", {
+        tone: clock.openShift ? "ok" : "",
+        panel: "time-clock",
+      }),
+    );
   }
   if (schedule) {
     const inOffice = schedule.filter((e) => e.status === "in_office").length;
@@ -1549,6 +1559,25 @@ async function loadHome() {
   } else {
     today.appendChild(listRow(`<strong>You today</strong> <span class="badge">not set</span>
       <div class="meta-tight">Set it on the Schedule panel so colleagues know where you are.</div>`));
+  }
+  if (clock) {
+    const row = listRow(
+      clock.openShift
+        ? `<strong>On the clock</strong> <span class="badge approved">${escapeHtml(formatMs(Date.now() - Date.parse(clock.openShift.clockInAt)))}</span>
+           <div class="meta-tight">Since ${escapeHtml(formatTimeOfDay(clock.openShift.clockInAt))}${
+             clock.openShift.likelyForgotten ? " — that's over 16 hours; did you forget to clock out?" : ""
+           }</div>`
+        : `<strong>Not clocked in</strong>
+           <div class="meta-tight">${escapeHtml(formatMs(clock.today ? clock.today.totalMs : 0))} recorded today.</div>`,
+    );
+    const punchNow = mkButton(clock.openShift ? "Clock out" : "Clock in", async () => {
+      await punch(clock.openShift ? "clock-out" : "clock-in");
+      loadHome();
+    });
+    punchNow.classList.add(clock.openShift ? "danger" : "primary");
+    row.appendChild(document.createElement("br"));
+    row.appendChild(punchNow);
+    today.appendChild(row);
   }
   const latest = (announcements || []).slice(-2).reverse();
   for (const a of latest) {
@@ -2174,3 +2203,257 @@ document.getElementById("navPayroll").addEventListener("click", () => {
   if (el && currentActorId) el.value = currentActorId;
   loadWorkedHours();
 });
+
+/* ===== Time Clock ===== */
+/**
+ * The elapsed time on an open shift is recomputed client-side once a
+ * second so the number on screen doesn't quietly go stale — but only
+ * while the panel is actually visible, and it's never what gets stored:
+ * a shift's duration always comes from its two server-side timestamps.
+ */
+let clockTickTimer = null;
+let openShiftStartedAt = null;
+let openShiftForgotten = false;
+
+function timeClockActor() {
+  const el = document.getElementById("timeClockActorId");
+  return (el && el.value) || currentActorId;
+}
+
+function formatMs(ms) {
+  const minutes = Math.round(ms / 60000);
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+function formatTimeOfDay(iso) {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function renderClockState() {
+  const el = document.getElementById("clockState");
+  if (!el) return;
+  if (!openShiftStartedAt) {
+    el.className = "clock-state";
+    el.innerHTML = '<span class="pulse"></span>Not clocked in';
+    return;
+  }
+  const elapsed = Date.now() - Date.parse(openShiftStartedAt);
+  el.className = `clock-state ${openShiftForgotten ? "stale" : "on"}`;
+  el.innerHTML = `<span class="pulse"></span>On the clock — ${escapeHtml(formatMs(elapsed))}
+    <span class="elapsed">since ${escapeHtml(formatTimeOfDay(openShiftStartedAt))}</span>
+    ${openShiftForgotten ? '<span class="badge rejected">looks like a missed clock-out</span>' : ""}`;
+}
+
+function startClockTicking() {
+  stopClockTicking();
+  clockTickTimer = setInterval(renderClockState, 1000);
+}
+
+function stopClockTicking() {
+  if (clockTickTimer) clearInterval(clockTickTimer);
+  clockTickTimer = null;
+}
+
+async function loadClockSummary() {
+  const totals = document.getElementById("clockTotals");
+  try {
+    const s = await api(`/api/time-clock/actor/${encodeURIComponent(currentActorId)}/summary`);
+    openShiftStartedAt = s.openShift ? s.openShift.clockInAt : null;
+    openShiftForgotten = Boolean(s.openShift && s.openShift.likelyForgotten);
+    document.getElementById("clockInBtn").hidden = Boolean(s.openShift);
+    document.getElementById("clockOutBtn").hidden = !s.openShift;
+    renderClockState();
+    if (s.openShift) startClockTicking();
+    else stopClockTicking();
+
+    totals.innerHTML = "";
+    totals.appendChild(statTile(formatMs(s.today ? s.today.totalMs : 0), "today"));
+    totals.appendChild(statTile(formatMs(s.thisWeek ? s.thisWeek.totalMs : 0), "this week"));
+    totals.appendChild(statTile(formatMs(s.thisMonth ? s.thisMonth.totalMs : 0), "this month"));
+    totals.appendChild(statTile(s.timeZone, "firm timezone"));
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadTimesheet() {
+  showError("");
+  const buckets = document.getElementById("timeBucketList");
+  const shifts = document.getElementById("shiftList");
+  const actorId = timeClockActor();
+  const kind = document.getElementById("timeClockBucket").value;
+  const from = document.getElementById("timeClockFrom").value;
+  const to = document.getElementById("timeClockTo").value;
+  const range = new URLSearchParams();
+  if (from) range.set("from", from);
+  if (to) range.set("to", to);
+  const base = `/api/time-clock/actor/${encodeURIComponent(actorId)}`;
+  try {
+    const [totals, list] = await Promise.all([
+      api(`${base}/totals?${new URLSearchParams({ kind, ...Object.fromEntries(range) })}`),
+      api(`${base}/shifts?${range}`),
+    ]);
+
+    buckets.innerHTML = "";
+    let grandTotalMs = 0;
+    for (const b of totals) {
+      grandTotalMs += b.totalMs;
+      const label = kind === "week" ? `Week of ${b.startDate}` : b.key;
+      buckets.appendChild(
+        listRow(`<strong>${escapeHtml(label)}</strong>
+          <span class="badge approved">${escapeHtml(formatMs(b.totalMs))}</span>
+          <span class="badge">${b.shiftCount} shift${b.shiftCount === 1 ? "" : "s"}</span>`),
+      );
+    }
+    if (totals.length === 0) buckets.innerHTML = '<li class="static empty">No completed shifts in this range.</li>';
+    else buckets.appendChild(listRow(`<strong>Total: ${escapeHtml(formatMs(grandTotalMs))}</strong>`));
+
+    shifts.innerHTML = "";
+    for (const s of list) shifts.appendChild(shiftRow(s));
+    if (list.length === 0) shifts.innerHTML = '<li class="static empty">No shifts in this range.</li>';
+  } catch (err) {
+    showError(err.message);
+    buckets.innerHTML = "";
+    shifts.innerHTML = "";
+  }
+}
+
+function shiftRow(s) {
+  const li = document.createElement("li");
+  li.classList.add("static");
+  const posted = Boolean(s.postedPayrollEntryId);
+  li.innerHTML = `<span class="badge">${escapeHtml(s.localDate)}</span>
+    <strong>${escapeHtml(formatTimeOfDay(s.clockInAt))} → ${s.clockOutAt ? escapeHtml(formatTimeOfDay(s.clockOutAt)) : "still open"}</strong>
+    <span class="badge ${s.open ? "pending_review" : "approved"}">${escapeHtml(formatMs(s.durationMs))}${s.open ? " so far" : ""}</span>
+    ${posted ? '<span class="badge released">posted to payroll</span>' : ""}
+    ${s.likelyForgotten ? '<div class="flags">Open for more than 16 hours — almost certainly a missed clock-out. An attorney can correct it below.</div>' : ""}
+    ${s.note ? `<div class="meta-tight">${escapeHtml(s.note)}</div>` : ""}
+    ${s.corrections
+      .map(
+        (c) =>
+          `<div class="meta-xs">Corrected ${escapeHtml(formatTimeOfDay(c.at))} by ${escapeHtml(c.by)} — ${escapeHtml(c.reason)}
+           (was ${escapeHtml(formatTimeOfDay(c.previousClockInAt))} → ${c.previousClockOutAt ? escapeHtml(formatTimeOfDay(c.previousClockOutAt)) : "open"})</div>`,
+      )
+      .join("")}`;
+
+  // Corrections and payroll posting are attorney-only server-side; don't
+  // offer buttons to a role that would only get a 403 back.
+  if (currentRole === "attorney" && !posted) {
+    const actions = document.createElement("div");
+    actions.className = "mt-md";
+    actions.appendChild(mkButton("Correct punch", () => correctShift(s)));
+    if (!s.open) {
+      const post = mkButton("Post to payroll", () => postShiftToPayroll(s));
+      post.classList.add("primary");
+      actions.appendChild(post);
+    }
+    li.appendChild(actions);
+  }
+  return li;
+}
+
+/**
+ * Corrections take full ISO timestamps because a punch is an instant,
+ * not a date — and the firm's day boundary is a timezone away from UTC.
+ * Prefilling with the current values means the common case (fixing only
+ * the clock-out) is a single edit.
+ */
+async function correctShift(s) {
+  showError("");
+  const clockInAt = prompt("Clock-in time (ISO 8601, e.g. 2026-07-26T09:00:00Z):", s.clockInAt);
+  if (clockInAt === null) return;
+  const clockOutAt = prompt("Clock-out time (ISO 8601), or leave blank to keep it open:", s.clockOutAt || "");
+  if (clockOutAt === null) return;
+  const reason = prompt("Why is this being corrected? (kept on the record)");
+  if (!reason) return;
+  try {
+    await api(`/api/time-clock/shifts/${encodeURIComponent(s.id)}/adjust`, {
+      method: "POST",
+      body: JSON.stringify({ clockInAt, ...(clockOutAt.trim() ? { clockOutAt: clockOutAt.trim() } : {}), reason }),
+    });
+    await loadTimesheet();
+    await loadClockSummary();
+  } catch (err) { showError(err.message); }
+}
+
+async function postShiftToPayroll(s) {
+  showError("");
+  if (!confirm(`Post ${formatMs(s.durationMs)} on ${s.localDate} to payroll? The shift can't be corrected afterwards.`)) return;
+  try {
+    await api(`/api/time-clock/shifts/${encodeURIComponent(s.id)}/post-to-payroll`, { method: "POST", body: "{}" });
+    await loadTimesheet();
+  } catch (err) { showError(err.message); }
+}
+
+async function loadOnTheClock() {
+  const list = document.getElementById("onTheClockList");
+  try {
+    const open = await api("/api/time-clock/on-the-clock");
+    list.innerHTML = "";
+    for (const s of open) {
+      const name = knownStaff.find((m) => m.actorId === s.actorId)?.displayName || s.actorId;
+      list.appendChild(
+        listRow(`<strong>${escapeHtml(name)}</strong>
+          <span class="badge ${s.likelyForgotten ? "rejected" : "approved"}">${escapeHtml(formatMs(s.durationMs))}</span>
+          <div class="meta-tight">Since ${escapeHtml(formatTimeOfDay(s.clockInAt))}${s.likelyForgotten ? " — probably forgot to clock out" : ""}</div>`),
+      );
+    }
+    if (open.length === 0) list.innerHTML = '<li class="static empty">Nobody is on the clock right now.</li>';
+  } catch {
+    list.innerHTML = '<li class="static empty">Seeing everyone on the clock is attorney-only.</li>';
+  }
+}
+
+async function punch(action) {
+  showError("");
+  const noteEl = document.getElementById("clockNote");
+  try {
+    const note = noteEl.value.trim();
+    await api(`/api/time-clock/${action}`, { method: "POST", body: JSON.stringify(note ? { note } : {}) });
+    noteEl.value = "";
+    await loadClockSummary();
+    await loadTimesheet();
+    if (currentRole === "attorney") await loadOnTheClock();
+  } catch (err) { showError(err.message); }
+}
+
+document.getElementById("clockInBtn").addEventListener("click", () => punch("clock-in"));
+document.getElementById("clockOutBtn").addEventListener("click", () => punch("clock-out"));
+document.getElementById("loadTimesheet").addEventListener("click", loadTimesheet);
+document.getElementById("refreshOnTheClock").addEventListener("click", loadOnTheClock);
+document.getElementById("timeClockActorId").addEventListener("change", loadTimesheet);
+document.getElementById("timeClockBucket").addEventListener("change", loadTimesheet);
+
+document.getElementById("navTimeClock").addEventListener("click", () => {
+  const isAttorney = currentRole === "attorney";
+  document.getElementById("onTheClockCard").hidden = !isAttorney;
+  // Viewing someone else's timesheet is attorney-only, so for everyone
+  // else there's nothing to pick between — hide the picker rather than
+  // offer a choice that 403s.
+  const picker = document.getElementById("timeClockActorId");
+  document.getElementById("timeClockPersonField").hidden = !isAttorney;
+  if (isAttorney) fillPeopleSelect(picker);
+  else {
+    picker.innerHTML = "";
+    const opt = document.createElement("option");
+    opt.value = currentActorId;
+    opt.textContent = "you";
+    picker.appendChild(opt);
+  }
+  if (currentActorId && [...picker.options].some((o) => o.value === currentActorId)) picker.value = currentActorId;
+  loadClockSummary();
+  loadTimesheet();
+  if (isAttorney) loadOnTheClock();
+});
+
+// A panel that isn't on screen shouldn't be re-rendering a ticking clock.
+for (const btn of document.querySelectorAll("nav.nav button")) {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.panel !== "time-clock") stopClockTicking();
+  });
+}

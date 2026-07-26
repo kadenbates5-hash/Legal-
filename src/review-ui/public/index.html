@@ -27,6 +27,7 @@
     <button data-panel="billing" id="navBilling" hidden><span class="dot"></span>Billing</button>
     <button data-panel="trust" id="navTrust" hidden><span class="dot"></span>Trust</button>
     <button data-panel="invoices" id="navInvoices" hidden><span class="dot"></span>Invoices</button>
+    <button data-panel="time-clock" id="navTimeClock"><span class="dot"></span>Time Clock</button>
     <button data-panel="payroll" id="navPayroll"><span class="dot"></span>Payroll</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
     <button data-panel="audit" id="navAudit" hidden><span class="dot"></span>Audit Log</button>
@@ -505,6 +506,55 @@
         <ul id="invoiceList" class="list"></ul>
       </div>
       <div id="invoiceDetail"></div>
+    </section>
+
+    <!-- ===== Payroll ===== -->
+    <!-- ===== Time Clock ===== -->
+    <section class="panel" id="panel-time-clock">
+      <p class="subtitle">Punch in when you start, punch out when you finish, and the daily, weekly and monthly totals build themselves. Days are counted in the firm's own timezone, so an evening shift lands on the evening it was worked. Anyone can punch their own clock; only an attorney can correct a punch or post a shift to payroll — a timesheet you could quietly rewrite yourself wouldn't be worth much.</p>
+
+      <div class="card">
+        <div class="clock-state" id="clockState">Loading…</div>
+        <div class="field-row">
+          <label class="field grow">Note (optional) <input id="clockNote" placeholder="e.g. working remote, at the courthouse" /></label>
+          <button class="btn primary big" id="clockInBtn">Clock in</button>
+          <button class="btn danger big" id="clockOutBtn" hidden>Clock out</button>
+        </div>
+      </div>
+
+      <div class="stat-grid" id="clockTotals"></div>
+
+      <div class="card">
+        <div class="field-row">
+          <h3 class="row-title">Timesheet</h3>
+          <label class="field" id="timeClockPersonField">Person <select id="timeClockActorId"></select></label>
+          <label class="field">Totals by
+            <select id="timeClockBucket">
+              <option value="day">day</option>
+              <option value="week">week</option>
+              <option value="month">month</option>
+            </select>
+          </label>
+          <label class="field">From <input id="timeClockFrom" type="date" /></label>
+          <label class="field">To <input id="timeClockTo" type="date" /></label>
+          <button class="btn" id="loadTimesheet">Load</button>
+        </div>
+        <ul id="timeBucketList" class="list"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Shifts</h3>
+        <p class="subtitle-inline">An open shift is shown but never counted in a total — a total that changes every time you look at it isn't a total.</p>
+        <ul id="shiftList" class="list"></ul>
+      </div>
+
+      <div class="card" id="onTheClockCard">
+        <div class="field-row">
+          <h3 class="row-title">On the clock right now</h3>
+          <button class="btn" id="refreshOnTheClock">Refresh</button>
+        </div>
+        <ul id="onTheClockList" class="list"></ul>
+      </div>
     </section>
 
     <!-- ===== Payroll ===== -->

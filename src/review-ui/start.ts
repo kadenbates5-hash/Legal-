@@ -35,6 +35,7 @@ import { TrustService } from "./trust-service.js";
 import { ClientFileService } from "./client-file-service.js";
 import { InvoicingService } from "./invoicing-service.js";
 import { PayrollService } from "./payroll-service.js";
+import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
 import type { ReviewServerOptions } from "./server.js";
 
@@ -262,6 +263,20 @@ const invoicing = new InvoicingService({
 /** Backs the "Payroll" panel — what the firm pays its people, deliberately unconnected to client matters or trust. */
 const payroll = new PayrollService({ store: state.payroll, auditLog: state.auditLog });
 
+/**
+ * Backs the "Time Clock" panel — the capture side of payroll.
+ * `FIRM_TIME_ZONE` decides where a day starts: bucketing punches by UTC
+ * would put an evening shift on the wrong day, and therefore in the
+ * wrong week and pay period. Defaults to the host's own zone.
+ */
+const FIRM_TIME_ZONE = process.env["FIRM_TIME_ZONE"] ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+const timeClock = new TimeClockService({
+  clock: state.timeClock,
+  payroll: state.payroll,
+  auditLog: state.auditLog,
+  defaultTimeZone: FIRM_TIME_ZONE,
+});
+
 /** Backs the attorney-only "Audit Log" panel — see audit-service.ts. */
 const audit = new AuditService(state.auditLog);
 
@@ -388,6 +403,7 @@ const server = createReviewServer(service, state.auth, {
   clientFile,
   invoicing,
   payroll,
+  timeClock,
   maxRequestBodyBytes,
   loginThrottle: state.loginThrottle,
   auditLog: state.auditLog,
@@ -406,4 +422,5 @@ server.listen(port, () => {
     console.log(`Telephony integration active — point a Twilio phone number's voice webhook at ${PUBLIC_BASE_URL}/api/voice/twilio/incoming`);
   }
   if (assistant) console.log("Assistant panel active (ANTHROPIC_API_KEY set).");
+  console.log(`Time clock day boundary: ${FIRM_TIME_ZONE} (set FIRM_TIME_ZONE to change).`);
 });

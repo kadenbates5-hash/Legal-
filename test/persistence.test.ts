@@ -338,6 +338,26 @@ describe("system-state persistence integration", () => {
     expect(reloaded.payroll.summarize("2026-07-01", "2026-07-31").totalGrossPayCents).toBe(240_00);
   });
 
+  it("persists and reloads time-clock shifts, including one still open", async () => {
+    const state = await loadSystemState(filePath);
+    const closed = state.timeClock.clockIn("p1");
+    state.timeClock.clockOut("p1");
+    state.timeClock.adjust(closed.id, { clockOutAt: "2030-01-01T17:00:00Z", by: "a1", reason: "forgot" });
+    state.timeClock.clockIn("p2");
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.timeClock.get(closed.id)!.corrections).toHaveLength(1);
+    expect(reloaded.timeClock.openShift("p1")).toBeUndefined();
+    // Someone mid-shift when the process restarted is still mid-shift after it.
+    expect(reloaded.timeClock.openShift("p2")).toBeDefined();
+    // And the rules survive the reload: no double-punch, no double-post.
+    expect(() => reloaded.timeClock.clockIn("p2")).toThrow(/already clocked in/i);
+    reloaded.timeClock.markPosted(closed.id, "worked_1");
+    expect(() => reloaded.timeClock.markPosted(closed.id, "worked_2")).toThrow(/already been posted/i);
+  });
+
   it("persists and reloads billing hours entries across a process restart", async () => {
     const state = await loadSystemState(filePath);
     const entry = state.billingHours.log({ matterId: "m1", actorId: "p1", date: "2026-07-28", hours: 2, description: "Discovery review" });

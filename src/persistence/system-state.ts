@@ -16,6 +16,7 @@ import { MatterStore, type Matter } from "../core/matters.js";
 import { TrustLedger, type TrustLedgerSnapshot } from "../core/trust-ledger.js";
 import { InvoiceStore, type InvoiceSnapshot } from "../core/invoicing.js";
 import { PayrollStore, type PayrollSnapshot } from "../core/payroll.js";
+import { TimeClock, type TimeClockSnapshot } from "../core/time-clock.js";
 import type { FirmConfig } from "../config/firm-config.js";
 import { fileStateStore, type StateStore } from "./state-store.js";
 
@@ -61,6 +62,8 @@ export interface SystemStateSnapshot {
   invoices?: InvoiceSnapshot;
   /** Staff pay rates and worked hours (see core/payroll.ts) — what the firm pays its people, distinct from billable time. */
   payroll?: PayrollSnapshot;
+  /** Clock in/out punches (see core/time-clock.ts) — the capture side of payroll. */
+  timeClock?: TimeClockSnapshot;
 }
 
 export interface SystemState {
@@ -82,6 +85,7 @@ export interface SystemState {
   trustLedger: TrustLedger;
   invoices: InvoiceStore;
   payroll: PayrollStore;
+  timeClock: TimeClock;
 }
 
 export interface LoadSystemStateOptions {
@@ -109,6 +113,7 @@ function emptySnapshot(): SystemStateSnapshot {
     trustLedger: { entries: [], nextId: 1 },
     invoices: { invoices: [], payments: [], nextInvoiceNumber: 1, nextId: 1 },
     payroll: { rates: [], workedHours: [], nextId: 1 },
+    timeClock: { shifts: [], nextId: 1 },
   };
 }
 
@@ -137,6 +142,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
     snapshot.invoices ?? { invoices: [], payments: [], nextInvoiceNumber: 1, nextId: 1 },
   );
   const payroll = PayrollStore.fromSnapshot(snapshot.payroll ?? { rates: [], workedHours: [], nextId: 1 });
+  const timeClock = TimeClock.fromSnapshot(snapshot.timeClock ?? { shifts: [], nextId: 1 });
   return {
     auditLog,
     utilization,
@@ -155,6 +161,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
     trustLedger,
     invoices,
     payroll,
+    timeClock,
   };
 }
 
@@ -178,6 +185,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     trustLedger: state.trustLedger.toSnapshot(),
     invoices: state.invoices.toSnapshot(),
     payroll: state.payroll.toSnapshot(),
+    timeClock: state.timeClock.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }
