@@ -63,7 +63,13 @@ name-normalizing so "Acme, Inc." and "ACME Corporation" are one
 adversary, classifying hits against ABA Model Rules 1.7/1.9 and
 searching every matter because Rule 1.10 imputes a conflict to the whole
 firm, auditing every check, and wired into live intake so a caller who
-names a current client stops the conversation. Docket opens on a
+names a current client stops the conversation; a **Trust** panel for
+client funds (IOLTA) where a client's balance can never go negative,
+entries are corrected by reversal rather than edited, money is integer
+cents, moving funds *out* is attorney-only, and three-way reconciliation
+reports a discrepancy to the penny; and an audited, attorney-only
+**client file export** bundling everything held for a matter, since the
+client file belongs to the client. Docket opens on a
 role-aware **Home** panel showing what
 needs you, and every person/matter field is a picker rather than an id
 typed from memory. Security-wise it ships **login brute-force

@@ -31,6 +31,8 @@ import { PdfParseTextExtractor } from "../integrations/pdf-text.js";
 import { PdfLibCondenser } from "../integrations/pdf-condenser.js";
 import { MattersService } from "./matters-service.js";
 import { ConflictChecker } from "../core/conflicts.js";
+import { TrustService } from "./trust-service.js";
+import { ClientFileService } from "./client-file-service.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -208,6 +210,35 @@ const matters = new MattersService({
   auditLog: state.auditLog,
 });
 
+/**
+ * Backs the "Trust" panel. The hard invariants (no overdrawn client
+ * sub-ledger, integer cents, immutable history) live in
+ * `core/trust-ledger.ts` so no route or future integration can bypass
+ * them; this service adds matter scoping and the attorney gate on money
+ * leaving the account.
+ */
+const trust = new TrustService({
+  ledger: state.trustLedger,
+  accessControl: state.accessControl,
+  auditLog: state.auditLog,
+});
+
+/**
+ * Backs the Cases panel's "Export client file" action. The client file
+ * belongs to the client, so producing it is a first-class, audited
+ * operation rather than a manual trawl through six stores.
+ */
+const clientFile = new ClientFileService({
+  accessControl: state.accessControl,
+  auditLog: state.auditLog,
+  matters: state.matters,
+  workProducts: state.workProductStore,
+  documents: state.documentStore,
+  research: state.researchLibrary,
+  billing: state.billingHours,
+  trust: state.trustLedger,
+});
+
 /** Backs the attorney-only "Audit Log" panel — see audit-service.ts. */
 const audit = new AuditService(state.auditLog);
 
@@ -330,6 +361,8 @@ const server = createReviewServer(service, state.auth, {
   billingHours,
   pdfReports,
   matters,
+  trust,
+  clientFile,
   maxRequestBodyBytes,
   loginThrottle: state.loginThrottle,
   auditLog: state.auditLog,

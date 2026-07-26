@@ -25,6 +25,7 @@
     <button data-panel="messages" id="navMessages"><span class="dot"></span>Messages</button>
     <button data-panel="staff-schedule" id="navStaffSchedule"><span class="dot"></span>Schedule</button>
     <button data-panel="billing" id="navBilling" hidden><span class="dot"></span>Billing</button>
+    <button data-panel="trust" id="navTrust" hidden><span class="dot"></span>Trust</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
     <button data-panel="audit" id="navAudit" hidden><span class="dot"></span>Audit Log</button>
   </nav>
@@ -436,6 +437,53 @@
           <button class="btn" id="loadMyBillingHours">Refresh</button>
         </div>
         <ul id="billingMineList" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- ===== Trust / IOLTA (paralegal/attorney) ===== -->
+    <section class="panel" id="panel-trust">
+      <p class="subtitle">Client funds held in trust. A client's balance can never go below zero — that would mean one client's money covering another's costs, which this refuses outright. Entries are never edited or deleted; a mistake is corrected with a reversing entry so both remain on the record. Recording a deposit is open to paralegals; moving money <em>out</em> is attorney-only.</p>
+
+      <div class="card">
+        <div class="field-row">
+          <label class="field">Matter ID <input id="trustMatterId" list="matterOptions" autocomplete="off" /></label>
+          <button class="btn" id="loadTrustLedger">Load ledger</button>
+          <div class="field"><div class="k">Balance</div><div id="trustBalance" class="n">—</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Record an entry</h3>
+        <div class="field-row">
+          <label class="field">Type
+            <select id="trustType">
+              <option value="deposit">deposit (funds in)</option>
+              <option value="disbursement">disbursement (paid on client's behalf)</option>
+              <option value="earned_fee_transfer">earned fee transfer (to operating)</option>
+              <option value="refund">refund to client</option>
+            </select>
+          </label>
+          <label class="field">Amount <input id="trustAmount" type="number" step="0.01" min="0.01" placeholder="0.00" /></label>
+          <label class="field">Reference <input id="trustReference" placeholder="check no. / wire ref" /></label>
+          <label class="field grow">Description <input id="trustDescription" placeholder="what this movement was for" /></label>
+          <button class="btn primary" id="recordTrustEntry">Record</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Ledger</h3>
+        <ul id="trustEntries" class="list"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Three-way reconciliation</h3>
+        <p class="subtitle-inline">The sum of every client's sub-ledger must equal the trust account's actual bank balance. A difference is never rounded away — it means funds are missing, misposted, or unrecorded. Attorney-only.</p>
+        <div class="field-row">
+          <label class="field">Bank statement balance <input id="trustBankBalance" type="number" step="0.01" placeholder="0.00" /></label>
+          <button class="btn" id="runReconcile">Reconcile</button>
+        </div>
+        <div id="reconcileResult"></div>
+        <ul id="reconcileList" class="list"></ul>
       </div>
     </section>
 

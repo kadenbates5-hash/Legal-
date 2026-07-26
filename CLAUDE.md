@@ -756,6 +756,64 @@ whether two matters are "substantially related" under Rule 1.9, or know
 anything about matters the firm never wrote down — the panel says that
 last part out loud on a clean result, rather than implying an all-clear.
 
+## Client trust accounting (IOLTA) and client-file export
+
+Two duties that sit outside the review-gate model but get the same
+treatment: enforced in code, not asked of a human.
+
+- `core/trust-ledger.ts` — `TrustLedger`. Client funds held in trust are
+  not the firm's money, and mishandling them is among the fastest routes
+  to disbarment there is. Three invariants are structural, with no
+  configuration knob:
+  1. **A matter's balance can never go below zero.** A negative
+     sub-ledger means one client's funds paid another client's costs —
+     the cardinal violation, and the reason this file exists rather than
+     a spreadsheet. Enforced in `#append`, so no route, assistant tool
+     call, or future integration can route around it.
+  2. **Entries are immutable.** A mistake is corrected with a reversing
+     entry (`reverse()`), never an edit or delete — same append-only
+     reasoning as `audit.ts`. A ledger you can quietly edit is not
+     evidence of anything. Reversals are themselves subject to the
+     no-overdraw rule, and can't be double-applied or reversed.
+  3. **Money is integer cents.** Floats lose fractions of a cent and a
+     trust ledger that doesn't reconcile to the penny is an audit
+     finding. The UI converts once, at the input edge.
+  `reconcile(bankBalanceCents)` is the ledger side of a three-way
+  reconciliation: the sum of every client sub-ledger must equal the
+  actual bank balance, and a difference is reported exactly rather than
+  rounded away.
+- `review-ui/trust-service.ts` — two gates for two risks. Matter scoping
+  reuses `AccessControl`'s `billing_internal` category (as billing hours
+  does), and **money leaving the account is attorney-only**: recording an
+  incoming deposit is bookkeeping a paralegal can do, but a
+  disbursement, an earned-fee transfer, a refund, or a reversal all move
+  client funds and in practice need an authorized signer.
+  Reconciliation is attorney-only too — it deliberately exposes every
+  matter's balance at once. Every call is audited; a trust ledger's value
+  is evidentiary.
+  `server.ts` wires `GET|POST /api/trust/matters/:matterId`,
+  `POST /api/trust/matters/:matterId/:entryId/reverse`, and
+  `POST /api/trust/reconcile`. An overdraw returns **409**, not 400 — it
+  is a conflict with the ledger's current state, not a malformed request.
+- `review-ui/client-file-service.ts` — `ClientFileService`. **The client
+  file belongs to the client**, and a firm that can only produce it by
+  trawling six stores produces it late and incomplete, so
+  `GET /api/client-file/:matterId` bundles the matter record, work
+  product, documents, research references, billing hours and trust
+  ledger into one downloadable file. Attorney-only, because deciding
+  what to produce has privilege implications, and audited with a count
+  of what left.
+
+What none of this does: bookkeeping, bank integration, or the firm's
+actual reconciliation duty (it can tell you the ledger and the bank
+disagree; it cannot tell you the bank balance). It doesn't know your
+jurisdiction's rules on retainers, interest, or unclaimed funds. And the
+export deliberately **does not** decide what a client is legally entitled
+to — jurisdictions differ on whether internal work product forms part of
+the client file and whether a retaining lien applies, so the bundle
+carries a notice telling the attorney to review and withhold rather than
+pretending the question is settled.
+
 ## Transport & session security
 
 Hardening that applies to every route, independent of any one panel.
@@ -903,8 +961,8 @@ distinct trust levels:
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over sixteen panels — Home, Review Queue, Deadlines,
-Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Research, Assistant,
+between sections) over seventeen panels — Home, Review Queue, Deadlines,
+Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Trust, Research, Assistant,
 Staff, Messages, Schedule, Billing, Accounts, and Audit Log (Drafting/
 Cases/Research/Assistant/Billing and Accounts/Audit Log hidden from the
 nav for roles that can't use them; Staff/Messages/Schedule are open to

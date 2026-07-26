@@ -13,6 +13,7 @@ import { StaffScheduleStore, type StaffScheduleEntry } from "../core/staff-sched
 import { BillingHoursStore, type BillingHoursEntry } from "../core/billing-hours.js";
 import { LoginThrottle, type LoginThrottleSnapshot } from "../core/login-throttle.js";
 import { MatterStore, type Matter } from "../core/matters.js";
+import { TrustLedger, type TrustLedgerSnapshot } from "../core/trust-ledger.js";
 import type { FirmConfig } from "../config/firm-config.js";
 import { fileStateStore, type StateStore } from "./state-store.js";
 
@@ -52,6 +53,8 @@ export interface SystemStateSnapshot {
   loginThrottle?: LoginThrottleSnapshot;
   /** Matter records: client/adverse parties, status, responsible attorney (see core/matters.ts). The input to conflicts screening. */
   matters?: Matter[];
+  /** Client trust (IOLTA) ledger entries (see core/trust-ledger.ts). Append-only; corrections are reversing entries. */
+  trustLedger?: TrustLedgerSnapshot;
 }
 
 export interface SystemState {
@@ -70,6 +73,7 @@ export interface SystemState {
   billingHours: BillingHoursStore;
   loginThrottle: LoginThrottle;
   matters: MatterStore;
+  trustLedger: TrustLedger;
 }
 
 export interface LoadSystemStateOptions {
@@ -94,6 +98,7 @@ function emptySnapshot(): SystemStateSnapshot {
     billingHours: [],
     loginThrottle: { failures: [] },
     matters: [],
+    trustLedger: { entries: [], nextId: 1 },
   };
 }
 
@@ -117,6 +122,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const billingHours = BillingHoursStore.fromSnapshot(snapshot.billingHours ?? []);
   const loginThrottle = LoginThrottle.fromSnapshot(snapshot.loginThrottle ?? { failures: [] });
   const matters = MatterStore.fromSnapshot(snapshot.matters ?? []);
+  const trustLedger = TrustLedger.fromSnapshot(snapshot.trustLedger ?? { entries: [], nextId: 1 });
   return {
     auditLog,
     utilization,
@@ -132,6 +138,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
     billingHours,
     loginThrottle,
     matters,
+    trustLedger,
   };
 }
 
@@ -152,6 +159,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     billingHours: state.billingHours.toSnapshot(),
     loginThrottle: state.loginThrottle.toSnapshot(),
     matters: state.matters.toSnapshot(),
+    trustLedger: state.trustLedger.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }

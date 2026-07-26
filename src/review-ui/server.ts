@@ -24,6 +24,9 @@ import type { StaffScheduleStatus } from "../core/staff-schedule.js";
 import type { BillingHoursService } from "./billing-hours-service.js";
 import type { PdfReportService } from "./pdf-report-service.js";
 import type { MattersService } from "./matters-service.js";
+import type { TrustService } from "./trust-service.js";
+import type { ClientFileService } from "./client-file-service.js";
+import { TrustAccountingError, type TrustEntryType } from "../core/trust-ledger.js";
 import type { MatterStatus, PartyRole } from "../core/matters.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
@@ -252,12 +255,18 @@ function errorStatus(err: unknown): number {
     return 401;
   }
   if (err instanceof AccessDeniedError) return 403;
+  // An overdraw or a double-reversal is a conflict with the ledger's current
+  // state, not a malformed request — 409 says "the world says no", not "you typed it wrong".
+  if (err instanceof TrustAccountingError) {
+    return err.message.startsWith("no trust entry") ? 404 : 409;
+  }
   if (err instanceof ReviewGateError) return 409;
   if (err instanceof Error && err.message.startsWith("no work product")) return 404;
   if (err instanceof Error && err.message.startsWith("no intake demo session")) return 404;
   if (err instanceof Error && err.message.startsWith("no user")) return 404;
   if (err instanceof Error && err.message.startsWith("no document")) return 404;
   if (err instanceof Error && err.message.startsWith("no matter")) return 404;
+  if (err instanceof Error && err.message.startsWith("no trust entry")) return 404;
   if (err instanceof Error && err.message.startsWith("no saved reference")) return 404;
   if (err instanceof Error && err.message.startsWith("no assistant session")) return 404;
   if (err instanceof Error && err.message.startsWith("cannot disable")) return 409;
@@ -371,6 +380,8 @@ export interface ReviewServerOptions {
   billingHours?: BillingHoursService;
   pdfReports?: PdfReportService;
   matters?: MattersService;
+  trust?: TrustService;
+  clientFile?: ClientFileService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
   /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
@@ -426,6 +437,8 @@ async function handleRequest(
     billingHours,
     pdfReports,
     matters,
+    trust,
+    clientFile,
     voiceCalls,
     audioClips,
     twilio,
@@ -630,6 +643,35 @@ async function handleRequest(
         return;
       }
       await handleBillingHoursRequest(billingHours, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/client-file/")) {
+      if (!clientFile) {
+        sendJson(res, 404, { error: "client file export is not configured on this server" });
+        return;
+      }
+      if (req.method !== "GET") {
+        sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      const matterId = decodeURIComponent(url.pathname.slice("/api/client-file/".length));
+      if (!matterId) {
+        sendJson(res, 404, { error: "not found" });
+        return;
+      }
+      sendJson(res, 200, clientFile.export(actor, matterId));
+      // The export is audited, so it changes persisted state.
+      onMutated?.();
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/trust")) {
+      if (!trust) {
+        sendJson(res, 404, { error: "trust accounting is not configured on this server" });
+        return;
+      }
+      await handleTrustRequest(trust, req, res, actor, url, onMutated);
       return;
     }
 
@@ -1067,6 +1109,58 @@ async function handleDocumentsRequest(
   if (segments.length === 3 && req.method === "DELETE") {
     documents.delete(actor, matterId, id);
     sendJson(res, 200, { ok: true });
+    onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleTrustRequest(
+  trust: TrustService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  // Reconciliation is firm-wide, so it isn't nested under a matter id.
+  if (url.pathname === "/api/trust/reconcile" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    sendJson(res, 200, trust.reconcile(actor, Number(body["bankBalanceCents"])));
+    onMutated?.();
+    return;
+  }
+
+  const segments = url.pathname.replace(/^\/api\/trust\/?/, "").split("/").filter(Boolean);
+  if (segments[0] !== "matters" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const matterId = segments[1]!;
+
+  if (segments.length === 2 && req.method === "GET") {
+    sendJson(res, 200, trust.getMatterLedger(actor, matterId));
+    return;
+  }
+
+  if (segments.length === 2 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = trust.record(actor, matterId, {
+      type: body["type"] as Exclude<TrustEntryType, "reversal">,
+      amountCents: Number(body["amountCents"]),
+      description: String(body["description"] ?? ""),
+      ...(typeof body["reference"] === "string" && body["reference"] ? { reference: body["reference"] } : {}),
+    });
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 4 && segments[3] === "reverse" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = trust.reverse(actor, matterId, segments[2]!, String(body["reason"] ?? ""));
+    sendJson(res, 200, result);
     onMutated?.();
     return;
   }

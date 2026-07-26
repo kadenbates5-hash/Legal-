@@ -13,6 +13,7 @@ const PANEL_TITLES = {
   messages: "Messages",
   "staff-schedule": "Schedule",
   billing: "Billing",
+  trust: "Trust",
   accounts: "Accounts",
   audit: "Audit Log",
 };
@@ -23,7 +24,7 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
     for (const b of document.querySelectorAll("nav.nav button")) b.classList.toggle("active", b === btn);
     for (const s of document.querySelectorAll("section.panel")) s.classList.toggle("active", s.id === `panel-${panel}`);
     document.getElementById("panelTitle").textContent = PANEL_TITLES[panel] || "";
-    if (["messages", "staff-schedule", "drafting", "billing", "research", "cases", "scheduling", "conflicts"].includes(panel)) {
+    if (["messages", "staff-schedule", "drafting", "billing", "research", "cases", "scheduling", "conflicts", "trust"].includes(panel)) {
       refreshPickers();
     }
     if (panel === "home") loadHome();
@@ -72,6 +73,7 @@ async function loadWhoami() {
       document.getElementById("navResearch").hidden = false;
       document.getElementById("navAssistant").hidden = false;
       document.getElementById("navBilling").hidden = false;
+      document.getElementById("navTrust").hidden = false;
     }
     // Review Queue and Deadlines are attorney-only server-side (ReviewGateService gates
     // every method, including reads) — only fetch them once we know the role, and only
@@ -740,6 +742,31 @@ async function loadCaseDetail(matterId) {
         <ul id="caseWorkProducts" class="list"></ul>
       </div>
     `;
+
+    if (currentRole === "attorney") {
+      const exportBtn = mkButton("Export client file", async () => {
+        showError("");
+        try {
+          const bundle = await api(`/api/client-file/${encodeURIComponent(matterId)}`);
+          // Download as JSON rather than rendering: this is the client's
+          // file, meant to leave the system intact.
+          const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = `client-file-${matterId}.json`;
+          link.click();
+          URL.revokeObjectURL(link.href);
+          const c = bundle.counts;
+          showError(
+            `Exported: ${c.workProducts} work product, ${c.documents} document(s), ${c.researchReferences} reference(s), ` +
+              `${c.billingHours} time entr(ies), ${c.trustEntries} trust entr(ies). Review before producing — see the notice in the file.`,
+          );
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+      document.querySelector("#caseDetail .card .field-row").appendChild(exportBtn);
+    }
 
     api("/api/documents/limits")
       .then((limits) => {
@@ -1689,3 +1716,139 @@ document.getElementById("runConflictCheck").addEventListener("click", runConflic
 document.getElementById("loadMatterRecord").addEventListener("click", loadMatterRecord);
 document.getElementById("saveMatterRecord").addEventListener("click", saveMatterRecord);
 document.getElementById("navConflicts").addEventListener("click", loadMatterList);
+
+/* ===== Trust / IOLTA =====
+   Money is handled as integer cents everywhere below. The input is in
+   dollars because that's what a human types, but it's converted once, at
+   the edge, and never round-tripped through a float again — a trust
+   ledger that doesn't reconcile to the penny is an audit finding. */
+const TRUST_TYPE_LABEL = {
+  deposit: "deposit",
+  disbursement: "disbursement",
+  earned_fee_transfer: "earned fee transfer",
+  refund: "refund",
+  reversal: "reversal",
+};
+
+function dollarsToCents(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return NaN;
+  // Round after scaling: 12.34 * 100 is 1233.9999... in binary floating point.
+  return Math.round(n * 100);
+}
+
+function centsToDollars(cents) {
+  const sign = cents < 0 ? "-" : "";
+  const abs = Math.abs(cents);
+  return `${sign}$${Math.floor(abs / 100).toLocaleString()}.${String(abs % 100).padStart(2, "0")}`;
+}
+
+async function loadTrustLedger() {
+  showError("");
+  const list = document.getElementById("trustEntries");
+  try {
+    const matterId = document.getElementById("trustMatterId").value.trim();
+    if (!matterId) return;
+    const view = await api(`/api/trust/matters/${encodeURIComponent(matterId)}`);
+    document.getElementById("trustBalance").textContent = centsToDollars(view.balanceCents);
+    list.innerHTML = "";
+    for (const e of view.entries) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      const outbound = e.type !== "deposit" && e.type !== "reversal";
+      li.innerHTML = `<span class="badge ${e.type === "deposit" ? "approved" : e.type === "reversal" ? "pending_review" : "rejected"}">${escapeHtml(TRUST_TYPE_LABEL[e.type] || e.type)}</span>
+        <strong>${outbound ? "−" : "+"}${escapeHtml(centsToDollars(e.amountCents))}</strong>
+        <span class="badge">balance ${escapeHtml(centsToDollars(e.balanceAfterCents))}</span>
+        <div class="mt-xs">${escapeHtml(e.description)}</div>
+        <div class="meta-tight">${escapeHtml(e.recordedBy)} · ${new Date(e.recordedAt).toLocaleString()}${e.reference ? ` · ref ${escapeHtml(e.reference)}` : ""}</div>`;
+      // Only an un-reversed, non-reversal entry can be corrected.
+      const alreadyReversed = view.entries.some((x) => x.reversalOf === e.id);
+      if (currentRole === "attorney" && e.type !== "reversal" && !alreadyReversed) {
+        const btn = mkButton("Reverse", async () => {
+          showError("");
+          const reason = prompt("Why is this entry being reversed? (kept on the record)");
+          if (!reason) return;
+          try {
+            await api(`/api/trust/matters/${encodeURIComponent(matterId)}/${e.id}/reverse`, {
+              method: "POST",
+              body: JSON.stringify({ reason }),
+            });
+            await loadTrustLedger();
+          } catch (err) {
+            showError(err.message);
+          }
+        });
+        btn.classList.add("danger");
+        li.appendChild(document.createElement("br"));
+        li.appendChild(btn);
+      }
+      list.appendChild(li);
+    }
+    if (view.entries.length === 0) list.innerHTML = '<li class="static empty">No trust activity on this matter.</li>';
+  } catch (err) {
+    showError(err.message);
+    list.innerHTML = "";
+    document.getElementById("trustBalance").textContent = "—";
+  }
+}
+
+document.getElementById("loadTrustLedger").addEventListener("click", loadTrustLedger);
+document.getElementById("navTrust").addEventListener("click", loadTrustLedger);
+
+document.getElementById("recordTrustEntry").addEventListener("click", async () => {
+  showError("");
+  try {
+    const matterId = document.getElementById("trustMatterId").value.trim();
+    const amountCents = dollarsToCents(document.getElementById("trustAmount").value);
+    const description = document.getElementById("trustDescription").value.trim();
+    if (!matterId || !description || !Number.isFinite(amountCents) || amountCents <= 0) {
+      showError("Matter, a positive amount, and a description are all required.");
+      return;
+    }
+    await api(`/api/trust/matters/${encodeURIComponent(matterId)}`, {
+      method: "POST",
+      body: JSON.stringify({
+        type: document.getElementById("trustType").value,
+        amountCents,
+        description,
+        reference: document.getElementById("trustReference").value.trim(),
+      }),
+    });
+    document.getElementById("trustAmount").value = "";
+    document.getElementById("trustDescription").value = "";
+    document.getElementById("trustReference").value = "";
+    await loadTrustLedger();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+document.getElementById("runReconcile").addEventListener("click", async () => {
+  showError("");
+  const out = document.getElementById("reconcileResult");
+  const list = document.getElementById("reconcileList");
+  try {
+    const bankBalanceCents = dollarsToCents(document.getElementById("trustBankBalance").value);
+    if (!Number.isFinite(bankBalanceCents)) {
+      showError("Enter the bank statement balance.");
+      return;
+    }
+    const r = await api("/api/trust/reconcile", { method: "POST", body: JSON.stringify({ bankBalanceCents }) });
+    out.innerHTML = r.balanced
+      ? `<p class="subtitle-inline">Balanced. Ledger total ${escapeHtml(centsToDollars(r.ledgerTotalCents))} matches the bank.</p>`
+      : `<div class="flags"><strong>Out of balance by ${escapeHtml(centsToDollars(r.differenceCents))}.</strong>
+         Ledger says ${escapeHtml(centsToDollars(r.ledgerTotalCents))}, bank says ${escapeHtml(centsToDollars(r.bankBalanceCents))}.
+         Investigate before any further disbursement.</div>`;
+    list.innerHTML = "";
+    for (const m of r.perMatter) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>${escapeHtml(m.matterId)}</strong> <span class="badge">${escapeHtml(centsToDollars(m.balanceCents))}</span>`;
+      list.appendChild(li);
+    }
+    if (r.perMatter.length === 0) list.innerHTML = '<li class="static empty">No matters hold trust funds.</li>';
+  } catch (err) {
+    showError(err.message);
+    out.innerHTML = "";
+  }
+});

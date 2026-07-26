@@ -275,6 +275,32 @@ describe("system-state persistence integration", () => {
     expect(restored?.parties[0]?.name).toBe("Carlos Ruiz");
   });
 
+  it("persists and reloads the trust ledger, and the reloaded one still refuses an overdraw", async () => {
+    const state = await loadSystemState(filePath);
+    state.trustLedger.record({
+      matterId: "m-1",
+      type: "deposit",
+      amountCents: 250_00,
+      description: "Retainer",
+      recordedBy: "a1",
+    });
+
+    await saveSystemState(filePath, state);
+
+    const reloaded = await loadSystemState(filePath);
+    expect(reloaded.trustLedger.balanceForMatter("m-1")).toBe(250_00);
+    // Rules survive the round-trip, not just the numbers.
+    expect(() =>
+      reloaded.trustLedger.record({
+        matterId: "m-1",
+        type: "disbursement",
+        amountCents: 250_01,
+        description: "Too much",
+        recordedBy: "a1",
+      }),
+    ).toThrow(/overdraw/i);
+  });
+
   it("persists and reloads billing hours entries across a process restart", async () => {
     const state = await loadSystemState(filePath);
     const entry = state.billingHours.log({ matterId: "m1", actorId: "p1", date: "2026-07-28", hours: 2, description: "Discovery review" });
