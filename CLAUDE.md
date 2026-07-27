@@ -1501,11 +1501,19 @@ phished or reused. Four decisions carry the design:
   would lock an attorney out of their own matters after five ordinary
   logins. A *wrong* code does count — that one is guessing.
 
-Weakening the factor re-proves the password (`verifyPassword`) even
-though the caller already holds a session: a borrowed unlocked laptop
-shouldn't be enough to strip the protection on the account. Disabling
-and resetting both revoke every live session, so the change can't be
-ridden on an existing one.
+Both *weakening* the factor and *establishing* it re-prove the password
+(`verifyPassword`) even though the caller already holds a session: a
+borrowed unlocked laptop shouldn't be enough to strip the protection on
+the account — and, symmetrically, shouldn't be enough to plant one
+either. That second half matters because MFA is opt-in: most accounts
+have none yet, so a session alone letting someone silently enroll a
+secret only *they* hold would be a durable, covert foothold — the
+legitimate owner's next login would demand a code they can't produce,
+recoverable only through an attorney's `resetMfa`. `beginMfaEnrollment`
+checks the password; `confirmMfaEnrollment` doesn't need to (nothing is
+live until it succeeds with a code from the secret that check already
+gated). Disabling and resetting both revoke every live session, so the
+change can't be ridden on an existing one.
 
 The routes are `GET /api/mfa`, `POST /api/mfa/begin|confirm|disable|
 recovery-codes` (all self-service, taking no user id at all — enrolling

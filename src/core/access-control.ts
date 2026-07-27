@@ -121,6 +121,16 @@ export class AccessControl {
     }
 
     if (actor.role === "paralegal") {
+      // client_portal is a different surface entirely (a hand-picked,
+      // client-safe projection built outside this category system) —
+      // matter-scoping a paralegal has nothing to do with it, so it's
+      // denied outright rather than falling through to "matches the
+      // assignment, so allow". Without this, matter-scoping alone would
+      // silently authorize a paralegal against a category built for a
+      // different actor and a different (narrower) view of the matter.
+      if (category === "client_portal") {
+        return "client_portal is not a paralegal category";
+      }
       const assignment = this.#paralegalAssignments.get(actor.id);
       if (!assignment) {
         return "paralegal agent has no active matter assignment";

@@ -355,12 +355,22 @@ export class AuthService {
    * anything — see rule 1 above. Calling it again simply replaces the
    * pending secret, so restarting a half-finished enrollment is safe.
    *
+   * Requires the current password, the same as `disableMfa`/
+   * `regenerateRecoveryCodes` — a session alone must not be enough to
+   * *plant* a factor either, not just to strip one. Without this, a
+   * briefly hijacked or unattended session (most accounts have no MFA
+   * yet, since enrollment is voluntary) could silently enroll a secret
+   * only the attacker holds, then rely on the victim never producing a
+   * code and needing an attorney's `resetMfa` to get back in — a quiet,
+   * durable foothold rather than a one-off theft.
+   *
    * Refuses if MFA is already confirmed: re-enrolling would silently
    * invalidate the working authenticator entry, so that path has to go
    * through a disable first.
    */
-  beginMfaEnrollment(userId: string, options: { issuer?: string } = {}): { secret: string; uri: string } {
+  beginMfaEnrollment(userId: string, password: string, options: { issuer?: string } = {}): { secret: string; uri: string } {
     const user = this.#requireUser(userId);
+    this.verifyPassword(userId, password);
     if (user.mfa) throw new AuthError("two-factor authentication is already enabled for this account");
     const secret = generateTotpSecret();
     this.#replaceUser({ ...user, pendingMfaSecret: secret });
@@ -373,6 +383,12 @@ export class AuthService {
    * they are stored hashed, exactly like passwords, so there is no way
    * to show them again later. `regenerateRecoveryCodes` issues a fresh
    * set for anyone who didn't write them down.
+   *
+   * Does **not** re-check the password: `beginMfaEnrollment` already
+   * did, and by design nothing about `pendingMfaSecret` widens what an
+   * attacker who merely holds the session (without the password) could
+   * do — it isn't live until this call succeeds with a code from the
+   * *same* secret, which the password check already gated.
    */
   confirmMfaEnrollment(userId: string, code: string): { recoveryCodes: string[] } {
     const user = this.#requireUser(userId);

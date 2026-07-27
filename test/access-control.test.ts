@@ -52,6 +52,18 @@ describe("access control", () => {
     ).not.toThrow();
   });
 
+  it("denies a paralegal the client_portal category even on their own assigned matter", () => {
+    // client_portal is a hand-picked, client-safe projection built
+    // outside this category system entirely — matter-scoping matching
+    // must never be read as authorizing it, the same way it's never
+    // read as authorizing high_sensitivity without an explicit grant.
+    const ac = new AccessControl(new AuditLog());
+    ac.assignParalegal("p1", "m1");
+    expect(() =>
+      ac.authorize({ actor: { id: "p1", role: "paralegal" }, matterId: "m1", category: "client_portal" }),
+    ).toThrow(AccessDeniedError);
+  });
+
   it("denies staff and system actors by default (no scope modeled for them)", () => {
     const ac = new AccessControl(new AuditLog());
     expect(() =>

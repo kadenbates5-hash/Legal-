@@ -225,8 +225,10 @@ function showRecoveryCodes(codes) {
 
 document.getElementById("mfaBeginBtn").addEventListener("click", async () => {
   showError("");
+  const password = prompt("Confirm your password to set up two-factor authentication.");
+  if (!password) return;
   try {
-    const { secret, uri } = await api("/api/mfa/begin", { method: "POST" });
+    const { secret, uri } = await api("/api/mfa/begin", { method: "POST", body: JSON.stringify({ password }) });
     document.getElementById("mfaSecret").textContent = secret.replace(/(.{4})/g, "$1 ").trim();
     const link = document.getElementById("mfaUri");
     link.href = uri;

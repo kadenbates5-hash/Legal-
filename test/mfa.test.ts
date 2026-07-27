@@ -9,7 +9,7 @@ import type { Actor } from "../src/core/types.js";
 function enrolledUser(): { auth: AuthService; userId: string; secret: string; recoveryCodes: string[] } {
   const auth = new AuthService();
   const user = auth.createUser({ username: "dana", password: "correct-horse", role: "attorney" });
-  const { secret } = auth.beginMfaEnrollment(user.id);
+  const { secret } = auth.beginMfaEnrollment(user.id, "correct-horse");
   // Enrolls with the *previous* window's code (accepted, within drift) so
   // the current one is still unspent and the tests below can log in with
   // it — see "spends the code used to enroll" for why that matters.
@@ -21,7 +21,7 @@ describe("enrollment", () => {
   it("does not require a second factor until enrollment is confirmed", () => {
     const auth = new AuthService();
     const user = auth.createUser({ username: "dana", password: "correct-horse", role: "attorney" });
-    auth.beginMfaEnrollment(user.id);
+    auth.beginMfaEnrollment(user.id, "correct-horse");
 
     // The whole point of the two-step enrollment: generating a secret
     // must not lock out someone who mistyped it into their app.
@@ -32,7 +32,7 @@ describe("enrollment", () => {
   it("refuses to confirm with a code the secret didn't produce", () => {
     const auth = new AuthService();
     const user = auth.createUser({ username: "dana", password: "correct-horse", role: "attorney" });
-    auth.beginMfaEnrollment(user.id);
+    auth.beginMfaEnrollment(user.id, "correct-horse");
     expect(() => auth.confirmMfaEnrollment(user.id, "000000")).toThrow(/isn't valid/);
     expect(auth.mfaStatus(user.id).enabled).toBe(false);
   });
@@ -43,15 +43,22 @@ describe("enrollment", () => {
     expect(() => auth.confirmMfaEnrollment(user.id, "000000")).toThrow(/start enrollment/);
   });
 
+  it("refuses to start enrollment without the current password — a session alone must not be enough to plant a factor", () => {
+    const auth = new AuthService();
+    const user = auth.createUser({ username: "dana", password: "correct-horse", role: "attorney" });
+    expect(() => auth.beginMfaEnrollment(user.id, "wrong")).toThrow(/current password is incorrect/);
+    expect(auth.mfaStatus(user.id).enrollmentPending).toBe(false);
+  });
+
   it("refuses to re-enroll over a working second factor", () => {
     const { auth, userId } = enrolledUser();
-    expect(() => auth.beginMfaEnrollment(userId)).toThrow(/already enabled/);
+    expect(() => auth.beginMfaEnrollment(userId, "correct-horse")).toThrow(/already enabled/);
   });
 
   it("spends the code used to enroll, so it can't then be used to log in", () => {
     const auth = new AuthService();
     const user = auth.createUser({ username: "dana", password: "correct-horse", role: "attorney" });
-    const { secret } = auth.beginMfaEnrollment(user.id);
+    const { secret } = auth.beginMfaEnrollment(user.id, "correct-horse");
     const code = totpCode(secret);
     auth.confirmMfaEnrollment(user.id, code);
     expect(() => auth.login("dana", "correct-horse", false, code)).toThrow(/already been used/);

@@ -62,10 +62,19 @@ describe("MFA over HTTP", () => {
     }
   });
 
+  it("refuses to start enrollment with the wrong password, even holding a valid session", async () => {
+    const cookie = (await login("dana")).cookie!;
+    const res = await post(cookie, "/api/mfa/begin", { password: "wrong" });
+    expect(res.status).toBe(403);
+    expect((await (await fetch(`${baseUrl}/api/mfa`, { headers: { Cookie: cookie } })).json())).toMatchObject({
+      enrollmentPending: false,
+    });
+  });
+
   it("enrolls end to end, then demands a code at the next login", async () => {
     const cookie = (await login("dana")).cookie!;
 
-    const begun = (await (await post(cookie, "/api/mfa/begin")).json()) as { secret: string; uri: string };
+    const begun = (await (await post(cookie, "/api/mfa/begin", { password: "correct-horse" })).json()) as { secret: string; uri: string };
     expect(begun.uri).toContain("otpauth://totp/Ruiz%20%26%20Partners:dana");
 
     // Still password-only: nothing is enforced until a code is proven.
@@ -89,7 +98,7 @@ describe("MFA over HTTP", () => {
 
   it("does not count an MFA challenge as a failed login attempt", async () => {
     const cookie = (await login("dana")).cookie!;
-    const { secret } = (await (await post(cookie, "/api/mfa/begin")).json()) as { secret: string };
+    const { secret } = (await (await post(cookie, "/api/mfa/begin", { password: "correct-horse" })).json()) as { secret: string };
     await post(cookie, "/api/mfa/confirm", { code: totpCode(secret, Date.now() - 30_000) });
 
     // Six ordinary two-step sign-ins would otherwise trip a five-failure
@@ -103,7 +112,7 @@ describe("MFA over HTTP", () => {
 
   it("counts a wrong code as a failed attempt — that one is guessing", async () => {
     const cookie = (await login("dana")).cookie!;
-    const { secret } = (await (await post(cookie, "/api/mfa/begin")).json()) as { secret: string };
+    const { secret } = (await (await post(cookie, "/api/mfa/begin", { password: "correct-horse" })).json()) as { secret: string };
     await post(cookie, "/api/mfa/confirm", { code: totpCode(secret, Date.now() - 30_000) });
 
     for (let i = 0; i < 5; i += 1) await login("dana", "correct-horse", "000000");
@@ -113,7 +122,7 @@ describe("MFA over HTTP", () => {
 
   it("refuses to disable or reissue codes without the password, even holding the session", async () => {
     const cookie = (await login("dana")).cookie!;
-    const { secret } = (await (await post(cookie, "/api/mfa/begin")).json()) as { secret: string };
+    const { secret } = (await (await post(cookie, "/api/mfa/begin", { password: "correct-horse" })).json()) as { secret: string };
     await post(cookie, "/api/mfa/confirm", { code: totpCode(secret, Date.now() - 30_000) });
 
     expect((await post(cookie, "/api/mfa/disable", { password: "nope" })).status).toBe(403);
@@ -131,7 +140,7 @@ describe("MFA over HTTP", () => {
 
   it("lets an attorney reset someone else's factor, and nobody else", async () => {
     const samCookie = (await login("sam")).cookie!;
-    const { secret } = (await (await post(samCookie, "/api/mfa/begin")).json()) as { secret: string };
+    const { secret } = (await (await post(samCookie, "/api/mfa/begin", { password: "correct-horse" })).json()) as { secret: string };
     await post(samCookie, "/api/mfa/confirm", { code: totpCode(secret, Date.now() - 30_000) });
     const samId = auth.listUsers().find((u) => u.username === "sam")!.id;
 

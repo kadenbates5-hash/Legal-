@@ -585,10 +585,12 @@ async function handleRequest(
         return;
       }
       if (url.pathname === "/api/mfa/begin" && req.method === "POST") {
-        // The secret and its QR URI are shown once, on screen, to the
-        // person who just proved they hold this session. Nothing is
-        // required of them yet — see `beginMfaEnrollment`.
-        sendJson(res, 200, auth.beginMfaEnrollment(user.id, { issuer: firmName ?? "Docket" }));
+        // Re-proves the password, same as disable/regenerate below — a
+        // session alone must not be enough to plant a factor either,
+        // only to use one already agreed on. See `beginMfaEnrollment`.
+        const body = await readJsonBody(req);
+        const result = auth.beginMfaEnrollment(user.id, String(body["password"] ?? ""), { issuer: firmName ?? "Docket" });
+        sendJson(res, 200, result);
         onMutated?.();
         return;
       }
