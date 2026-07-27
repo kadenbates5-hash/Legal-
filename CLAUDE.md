@@ -1625,7 +1625,7 @@ narrower view than staff, not the same data with a different login:**
   instructions text (the same letterhead field the invoice itself
   prints), the honest "say what's actually configured" pattern
   `emailTransportReady()` already uses elsewhere.
-- **There is also no messaging.** `core/messaging.ts`, `StaffService`,
+- **`core/messaging.ts` still has no client access.** `StaffService`,
   `StaffScheduleService`, `PayrollService`, and `TimeClockService` all
   predate the client portal and were written as "open to every
   logged-in human" meaning *every staff role* — none of them anticipated
@@ -1634,9 +1634,10 @@ narrower view than staff, not the same data with a different login:**
   `"system"` already was: a client account could otherwise have read the
   entire staff directory (who's assigned to which matter), posted to the
   firm-wide announcements, seen who's in the office, or appeared as a
-  line on the firm's own payroll. A client-firm message thread would be
-  a reasonable next feature, but is a distinct addition, not a gap in
-  this one — it doesn't exist yet.
+  line on the firm's own payroll. The staff `MessagingStore` stays
+  staff-only — see the client-firm thread below, which is deliberately
+  a *separate*, narrower store rather than a client being added to this
+  one.
 - Server routes are entirely `GET`, under `/api/client-portal/*`
   (`matters`, `matters/:id`, `matters/:id/invoices/:id/preview`,
   `matters/:id/invoices/:id/pdf`, `matters/:id/documents/:id`) — there
@@ -1654,11 +1655,59 @@ narrower view than staff, not the same data with a different login:**
   lands directly on My Matters rather than the staff Home panel, which
   would otherwise show tiles for surfaces the account can't reach.
 
-What this doesn't do: online payment (see above), client-firm messaging,
-letting a client see anything about a matter beyond title/status/its own
-invoices and explicitly-shared documents, or a self-service signup —
+What this doesn't do: online payment (see above — client-firm messaging
+*is* now built, see below), letting a client see anything about a
+matter beyond title/status/its own invoices and explicitly-shared
+documents, or a self-service signup —
 same as everywhere else in this project, an account is created by an
 attorney, not by the client themselves.
+
+### Client-firm messaging
+
+`src/core/client-messages.ts` / `src/review-ui/client-messaging-service.ts`
+— a message thread between a firm and a client, one per matter. Backs a
+"Messages" card in both the client's My Matters panel and staff's Cases
+panel, reading and writing the *same* thread.
+
+Deliberately not part of `core/messaging.ts`, which is staff-only and
+denies `"client"` by name (see above) — that store models direct/group/
+announcement conversations between colleagues, none of which apply to a
+client relationship. This is simpler on purpose: exactly one thread per
+matter. A co-client (two client accounts both granted the same matter)
+shares it rather than getting a private line each — it's a conversation
+about the matter, the same reasoning `core/matters.ts` gives for parties.
+
+It's the one surface in this system two different actor kinds both read
+*and write*, so `ClientMessagingService` picks the `AccessControl`
+category by who's asking rather than sharing one check: a client goes
+through `client_portal` (exactly the matters it's been granted); staff
+goes through `case_file` (an attorney unconditionally, a paralegal only
+its one assigned matter) — the same gate the Drafting/Cases panels
+already use. Every other role is denied outright before either check
+runs. Every post is audited (`client_message_posted`) — a client-facing
+exchange about a matter is exactly the sort of thing an attorney
+reviewing an incident, or a bar complaint, needs a record of. There is
+no edit or delete, same reasoning as the audit log and the internal
+`MessagingStore`.
+
+Discoverability needed one small fix elsewhere: `CasesService`'s Cases
+panel list was derived only from work product, documents, and paralegal
+assignments — a matter granted to a client but with nothing else filed
+on it (the common case right after granting access) wouldn't appear,
+leaving staff with no way to find the thread a client could already post
+to. `CasesService` now also includes every matterId with a client
+grant (`AccessControl.listClientAssignments()`) in that list.
+
+Server routes are `GET|POST /api/client-messages/matters/:matterId` —
+the one client-adjacent surface with a `POST`, since unlike
+`/api/client-portal/*` this one is genuinely bidirectional. 404s if no
+`ClientMessagingService` was passed to `createReviewServer`.
+
+What this doesn't do: attachments, read receipts, or replacing a phone
+call for anything urgent — the client-facing copy says so. It also
+doesn't route through email or any notification; a client or a staff
+member finds a reply by opening the panel, the same as every other
+message-shaped surface in this project.
 
 ## Attorney review-gate UI — "Docket"
 
@@ -1764,7 +1813,9 @@ nav item is hidden except **My Matters** and **Security** — see below.
   download it back out as a data URI, plus "Draft report from this PDF"
   and "Condense" actions on any uploaded PDF (see "PDF intake,
   document-report drafting, and PDF condensing" above) — alongside its
-  drafted work product; same role gate as Drafting), Research (search
+  drafted work product and a "Client messages" thread with whichever
+  client accounts are granted the matter (see "Client-firm messaging"
+  above); same role gate as Drafting), Research (search
   case law, "Save to
   matter" on any result, and a per-matter quick-access list with a
   Remove action — same role gate as Drafting), Assistant (a chat window

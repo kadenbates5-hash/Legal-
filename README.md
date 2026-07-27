@@ -129,8 +129,12 @@ narrower than any staff view: matter title/status, non-draft invoices
 (itemised preview and PDF — exactly what was emailed), and only the
 documents staff explicitly shared — never a matter's parties, internal
 notes, or anyone's billing rate. There's no online payment (no real
-card processor is wired up anywhere in this system) and no client-firm
-messaging yet; both are honestly absent rather than half-built.
+card processor is wired up anywhere in this system) — that stays
+honestly absent — but there is a **client-firm message thread**, one
+per matter, showing up as a "Messages" card in both the client's My
+Matters panel and staff's Cases panel: a client goes through the same
+`client_portal` access check as the rest of the portal, staff through
+the ordinary `case_file` gate, and every post is audited.
 
 ## Setup
 

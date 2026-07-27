@@ -45,6 +45,17 @@ describe("CasesService", () => {
     expect(matterIds).toEqual(["m1"]);
   });
 
+  it("surfaces a matter granted to a client even with no document or work product yet", () => {
+    // A client can post to the messages thread the moment an attorney
+    // grants portal access — staff needs a way to find that matter in
+    // Cases before anything else has been filed on it.
+    const { cases, accessControl } = makeService();
+    accessControl.grantClientAccess("c1", "m3");
+    expect(cases.listCases(attorney).map((c) => c.matterId)).toContain("m3");
+    // Still scoped normally for a paralegal not assigned to it.
+    expect(cases.listCases(paralegal).map((c) => c.matterId)).not.toContain("m3");
+  });
+
   it("summarizes work-product and document counts for a case", () => {
     const { cases, documentStore } = makeService();
     documentStore.upload({ matterId: "m1", fileName: "a.pdf", contentType: "application/pdf", content: "YQ==", uploadedBy: "p1" });

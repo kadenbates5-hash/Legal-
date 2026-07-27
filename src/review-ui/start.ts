@@ -36,6 +36,7 @@ import { TrustService } from "./trust-service.js";
 import { ClientFileService } from "./client-file-service.js";
 import { InvoicingService } from "./invoicing-service.js";
 import { ClientPortalService } from "./client-portal-service.js";
+import { ClientMessagingService } from "./client-messaging-service.js";
 import { PayrollService } from "./payroll-service.js";
 import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
@@ -352,6 +353,18 @@ const clientPortal = new ClientPortalService({
 });
 
 /**
+ * Backs the per-matter message thread between a client and staff — a
+ * card in both the client's "My Matters" panel and staff's Cases panel,
+ * reading and writing the same thread. See client-messaging-service.ts
+ * for the two-category access split.
+ */
+const clientMessaging = new ClientMessagingService({
+  store: state.clientMessages,
+  accessControl: state.accessControl,
+  auditLog: state.auditLog,
+});
+
+/**
  * Backs the global search box. Given every store directly rather than
  * the panel services, because it needs to read across all of them at
  * once — and does its own `AccessControl` filtering, silently omitting
@@ -576,6 +589,7 @@ const server = createReviewServer(service, state.auth, {
   clientFile,
   invoicing,
   clientPortal,
+  clientMessaging,
   search,
   payroll,
   timeClock,

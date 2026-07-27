@@ -91,6 +91,11 @@ export class CasesService {
     for (const wp of this.#workProductStore.listAll()) all.add(wp.matterId);
     for (const doc of this.#documentStore.listAll()) all.add(doc.matterId);
     for (const assignment of this.#accessControl.listAssignments()) all.add(assignment.matterId);
+    // A matter granted to a client but with no document/work product yet
+    // is still real — staff needs to be able to find it to reach the
+    // client-messages thread on it, which a client can post to the
+    // moment the grant exists, before staff has filed anything at all.
+    for (const grant of this.#accessControl.listClientAssignments()) all.add(grant.matterId);
 
     if (actor.role === "attorney") return [...all];
 

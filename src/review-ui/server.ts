@@ -28,6 +28,7 @@ import type { TrustService } from "./trust-service.js";
 import type { ClientFileService } from "./client-file-service.js";
 import type { InvoicingService } from "./invoicing-service.js";
 import type { ClientPortalService } from "./client-portal-service.js";
+import type { ClientMessagingService } from "./client-messaging-service.js";
 import type { SearchService } from "./search-service.js";
 import type { PayrollService } from "./payroll-service.js";
 import type { TimeClockService } from "./time-clock-service.js";
@@ -432,6 +433,7 @@ export interface ReviewServerOptions {
   clientFile?: ClientFileService;
   invoicing?: InvoicingService;
   clientPortal?: ClientPortalService;
+  clientMessaging?: ClientMessagingService;
   search?: SearchService;
   payroll?: PayrollService;
   timeClock?: TimeClockService;
@@ -496,6 +498,7 @@ async function handleRequest(
     clientFile,
     invoicing,
     clientPortal,
+    clientMessaging,
     search,
     payroll,
     timeClock,
@@ -863,6 +866,15 @@ async function handleRequest(
         return;
       }
       await handleClientPortalRequest(clientPortal, req, res, actor, url);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/client-messages")) {
+      if (!clientMessaging) {
+        sendJson(res, 404, { error: "client messaging is not configured on this server" });
+        return;
+      }
+      await handleClientMessagingRequest(clientMessaging, req, res, actor, url, onMutated);
       return;
     }
 
@@ -1782,6 +1794,43 @@ async function handleClientPortalRequest(
   if (segments.length === 4 && segments[2] === "documents" && req.method === "GET") {
     const doc = clientPortal.getDocument(actor, matterId, segments[3]!);
     sendBinary(res, doc.contentType || "application/octet-stream", doc.fileName, Buffer.from(doc.content, "base64"));
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+/**
+ * `GET|POST /api/client-messages/matters/:matterId` — the one surface
+ * both a client and staff read and write. `ClientMessagingService`
+ * itself picks the right `AccessControl` category by role, so this
+ * handler doesn't need to know which kind of actor it's serving.
+ */
+async function handleClientMessagingRequest(
+  clientMessaging: ClientMessagingService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  const segments = url.pathname.replace(/^\/api\/client-messages\/?/, "").split("/").filter(Boolean);
+  if (segments[0] !== "matters" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const matterId = segments[1]!;
+
+  if (segments.length === 2 && req.method === "GET") {
+    sendJson(res, 200, clientMessaging.list(actor, matterId));
+    return;
+  }
+
+  if (segments.length === 2 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = clientMessaging.post(actor, matterId, String(body["body"] ?? ""));
+    sendJson(res, 200, result);
+    onMutated?.();
     return;
   }
 

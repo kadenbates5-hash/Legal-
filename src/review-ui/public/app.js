@@ -322,6 +322,47 @@ async function loadMyMatters() {
   }
 }
 
+/* ===== Client/firm message thread — shared by the client's My Matters
+   panel and staff's Cases panel, since both read and write the same
+   thread through the same /api/client-messages route. */
+function renderMessageThread(messages) {
+  if (messages.length === 0) return '<li class="static empty">No messages yet.</li>';
+  return messages
+    .map(
+      (m) => `<li class="static">
+        <span class="badge">${escapeHtml(m.authorRole)}</span>
+        <span class="meta-xs">${new Date(m.sentAt).toLocaleString()}</span>
+        <div class="mt-xs">${escapeHtml(m.body)}</div>
+      </li>`,
+    )
+    .join("");
+}
+
+async function loadMessageThread(matterId, listElementId) {
+  try {
+    const messages = await api(`/api/client-messages/matters/${encodeURIComponent(matterId)}`);
+    document.getElementById(listElementId).innerHTML = renderMessageThread(messages);
+  } catch (err) {
+    // Not every role reaches this thread (e.g. no grant yet) — the card
+    // just shows nothing rather than an error breaking the rest of the panel.
+    document.getElementById(listElementId).innerHTML = '<li class="static empty">No messages yet.</li>';
+  }
+}
+
+async function sendMessage(matterId, inputId, listElementId) {
+  showError("");
+  const input = document.getElementById(inputId);
+  const body = input.value.trim();
+  if (!body) return;
+  try {
+    await api(`/api/client-messages/matters/${encodeURIComponent(matterId)}`, { method: "POST", body: JSON.stringify({ body }) });
+    input.value = "";
+    await loadMessageThread(matterId, listElementId);
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 async function openMyMatter(matterId) {
   showError("");
   const el = document.getElementById("myMatterDetail");
@@ -377,7 +418,24 @@ async function openMyMatter(matterId) {
       <div class="card">
         <h3>Documents shared with you</h3>
         <ul class="list">${documentRows || '<li class="static empty">Nothing has been shared with you yet.</li>'}</ul>
+      </div>
+      <div class="card">
+        <h3>Messages</h3>
+        <p class="subtitle-inline">A message thread with the firm about this matter — not a substitute for calling about anything urgent.</p>
+        <ul id="clientMessageThread" class="list"></ul>
+        <div class="field-row mt-sm">
+          <label class="field grow">Send a message <input id="clientMessageBody" type="text" placeholder="Type a message…" /></label>
+          <button class="btn primary" id="clientMessageSend">Send</button>
+        </div>
       </div>`;
+
+    await loadMessageThread(matterId, "clientMessageThread");
+    document.getElementById("clientMessageSend").addEventListener("click", () =>
+      sendMessage(matterId, "clientMessageBody", "clientMessageThread"),
+    );
+    document.getElementById("clientMessageBody").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendMessage(matterId, "clientMessageBody", "clientMessageThread");
+    });
 
     for (const btn of el.querySelectorAll("[data-preview]")) {
       btn.addEventListener("click", async () => {
@@ -1036,7 +1094,24 @@ async function loadCaseDetail(matterId) {
         <h3>Work product</h3>
         <ul id="caseWorkProducts" class="list"></ul>
       </div>
+      <div class="card">
+        <h3>Client messages</h3>
+        <p class="subtitle-inline">A thread with whichever client accounts are granted this matter's portal access — not privileged the way a note to file is, since the client reads it too.</p>
+        <ul id="caseMessageThread" class="list"></ul>
+        <div class="field-row mt-sm">
+          <label class="field grow">Reply <input id="caseMessageBody" type="text" placeholder="Type a message…" /></label>
+          <button class="btn primary" id="caseMessageSend">Send</button>
+        </div>
+      </div>
     `;
+
+    await loadMessageThread(matterId, "caseMessageThread");
+    document.getElementById("caseMessageSend").addEventListener("click", () =>
+      sendMessage(matterId, "caseMessageBody", "caseMessageThread"),
+    );
+    document.getElementById("caseMessageBody").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendMessage(matterId, "caseMessageBody", "caseMessageThread");
+    });
 
     if (currentRole === "attorney") {
       const exportBtn = mkButton("Export client file", async () => {

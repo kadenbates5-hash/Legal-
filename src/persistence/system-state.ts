@@ -17,6 +17,7 @@ import { TrustLedger, type TrustLedgerSnapshot } from "../core/trust-ledger.js";
 import { InvoiceStore, type InvoiceSnapshot } from "../core/invoicing.js";
 import { PayrollStore, type PayrollSnapshot } from "../core/payroll.js";
 import { TimeClock, type TimeClockSnapshot } from "../core/time-clock.js";
+import { ClientMessageStore, type ClientMessage } from "../core/client-messages.js";
 import type { FirmConfig } from "../config/firm-config.js";
 import { fileStateStore, type StateStore } from "./state-store.js";
 
@@ -73,6 +74,8 @@ export interface SystemStateSnapshot {
   payroll?: PayrollSnapshot;
   /** Clock in/out punches (see core/time-clock.ts) — the capture side of payroll. */
   timeClock?: TimeClockSnapshot;
+  /** The per-matter client/firm message threads (see core/client-messages.ts), backing the My Matters and Cases panels' "Messages" cards. */
+  clientMessages?: ClientMessage[];
 }
 
 export interface SystemState {
@@ -96,6 +99,7 @@ export interface SystemState {
   invoices: InvoiceStore;
   payroll: PayrollStore;
   timeClock: TimeClock;
+  clientMessages: ClientMessageStore;
 }
 
 export interface LoadSystemStateOptions {
@@ -126,6 +130,7 @@ function emptySnapshot(): SystemStateSnapshot {
     invoices: { invoices: [], payments: [], nextInvoiceNumber: 1, nextId: 1 },
     payroll: { rates: [], workedHours: [], nextId: 1 },
     timeClock: { shifts: [], nextId: 1 },
+    clientMessages: [],
   };
 }
 
@@ -155,6 +160,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   );
   const payroll = PayrollStore.fromSnapshot(snapshot.payroll ?? { rates: [], workedHours: [], nextId: 1 });
   const timeClock = TimeClock.fromSnapshot(snapshot.timeClock ?? { shifts: [], nextId: 1 });
+  const clientMessages = ClientMessageStore.fromSnapshot(snapshot.clientMessages ?? []);
   return {
     auditLog,
     auditAnchors: (snapshot.auditAnchors ?? []).map((a) => ({ ...a })),
@@ -175,6 +181,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
     invoices,
     payroll,
     timeClock,
+    clientMessages,
   };
 }
 
@@ -201,6 +208,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     invoices: state.invoices.toSnapshot(),
     payroll: state.payroll.toSnapshot(),
     timeClock: state.timeClock.toSnapshot(),
+    clientMessages: state.clientMessages.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }
