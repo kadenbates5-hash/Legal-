@@ -29,6 +29,7 @@
     <button data-panel="invoices" id="navInvoices" hidden><span class="dot"></span>Invoices</button>
     <button data-panel="time-clock" id="navTimeClock"><span class="dot"></span>Time Clock</button>
     <button data-panel="payroll" id="navPayroll"><span class="dot"></span>Payroll</button>
+    <button data-panel="security"><span class="dot"></span>Security</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
     <button data-panel="audit" id="navAudit" hidden><span class="dot"></span>Audit Log</button>
   </nav>
@@ -373,6 +374,62 @@
           <button class="btn" id="refreshStaff">Refresh</button>
         </div>
         <ul id="staffList" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- ===== Security (every logged-in human — your own account only) ===== -->
+    <section class="panel" id="panel-security">
+      <p class="subtitle">Your own sign-in. Nothing here touches anyone else's account.</p>
+      <div class="card">
+        <div class="field-row">
+          <h3 class="row-title">Two-factor authentication</h3>
+          <span id="mfaStatusBadge" class="badge"></span>
+        </div>
+        <p class="subtitle-inline">
+          A password is the credential most likely to be phished or reused, and this system holds
+          case files, trust balances and the audit log behind it. A second factor is a six-digit
+          code from an app on your phone — Google Authenticator, 1Password, Authy, anything that
+          scans an <code>otpauth://</code> link.
+        </p>
+
+        <div id="mfaOff">
+          <button class="btn primary" id="mfaBeginBtn">Set up two-factor authentication</button>
+        </div>
+
+        <div id="mfaEnrolling" hidden>
+          <p><strong>1.</strong> Add this account to your authenticator app — either open the link
+             on the phone itself, or type the key in by hand:</p>
+          <p><a id="mfaUri" class="mono" href="#">otpauth link</a></p>
+          <p class="mono" id="mfaSecret"></p>
+          <p><strong>2.</strong> Then type the code it shows. Nothing changes until this succeeds,
+             so a mistyped key can't lock you out:</p>
+          <div class="field-row">
+            <label class="field">Code from your app <input id="mfaConfirmCode" type="text" inputmode="numeric"
+                   autocomplete="one-time-code" placeholder="000000" /></label>
+            <button class="btn primary" id="mfaConfirmBtn">Turn it on</button>
+            <button class="btn" id="mfaCancelBtn">Cancel</button>
+          </div>
+        </div>
+
+        <div id="mfaOn" hidden>
+          <p class="subtitle-inline"><span id="mfaCodesRemaining"></span> unused recovery codes remain.</p>
+          <div class="field-row">
+            <button class="btn" id="mfaRegenerateBtn">Issue new recovery codes</button>
+            <button class="btn danger" id="mfaDisableBtn">Turn off two-factor authentication</button>
+          </div>
+        </div>
+
+        <div id="mfaCodesCard" hidden>
+          <h3>Recovery codes — save these now</h3>
+          <p class="subtitle-inline">
+            These are shown once and stored hashed, so this screen is the only place they exist.
+            Each works exactly once, in place of a code from your app. Print them or put them in a
+            password manager: without them, a lost phone means asking an attorney to reset your
+            second factor, which is recorded in the audit log.
+          </p>
+          <pre class="mono" id="mfaCodes"></pre>
+          <button class="btn" id="mfaCodesDoneBtn">I've saved them</button>
+        </div>
       </div>
     </section>
 

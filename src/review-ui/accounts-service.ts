@@ -10,8 +10,13 @@ import type { AuditLog } from "../core/audit.js";
  * covered here (self-service password change is `AuthService.
  * changePassword()`, wired directly into `server.ts` since it needs no
  * attorney gate — any logged-in user can change their own password).
- * MFA and self-service invites remain out of scope — see CLAUDE.md's
- * "Not yet built". Same pattern as `ReviewGateService` — every method
+ * Attorney-initiated MFA reset lives here too, for the same reason
+ * password reset does — it is an override of someone else's credential
+ * (`resetMfa`). Enrolling in MFA is self-service and lives on the
+ * routes in `server.ts`, since nobody else should be able to add a
+ * second factor to your account. Self-service invites remain out of
+ * scope — see CLAUDE.md's "Not yet built". Same pattern as
+ * `ReviewGateService` — every method
  * requires an attorney actor,
  * including plain reads, since a receptionist/paralegal credential has no
  * business seeing the account list at all.
@@ -34,6 +39,10 @@ export interface AccountSummary {
   disabled: boolean;
   /** Set after an attorney resets this account's password; cleared once the holder changes it themselves. */
   mustChangePassword: boolean;
+  /** Whether this account requires a second factor at login. The secret itself never leaves `AuthService`. */
+  mfaEnabled: boolean;
+  /** Counted so an attorney can see who is one lost phone away from needing a reset. */
+  recoveryCodesRemaining: number;
   /** Only ever set for role "paralegal" — the matter (if any) this account is currently scoped to. */
   matterAssignment?: ParalegalAssignment;
 }
@@ -100,6 +109,8 @@ export class AccountsService {
       displayName: user.displayName,
       disabled: user.disabled,
       mustChangePassword: user.mustChangePassword,
+      mfaEnabled: user.mfa !== undefined,
+      recoveryCodesRemaining: (user.mfa?.recoveryCodes ?? []).filter((c) => !c.usedAt).length,
       ...(matterAssignment ? { matterAssignment } : {}),
     };
   }
@@ -137,6 +148,35 @@ export class AccountsService {
     requireAttorney(actor);
     const user = this.#auth.resetPassword(userId, newPassword);
     this.#audit(actor, "account_password_reset", `user=${user.id} username=${user.username}`);
+    return this.#summarize(user);
+  }
+
+  /**
+   * Turns off someone else's second factor — the last resort for a lost
+   * phone and lost recovery codes both.
+   *
+   * This is a **real bypass of another person's authentication**, and it
+   * is the single most attractive action in this panel to an attacker
+   * who has already compromised one attorney account: do this, then log
+   * in as anyone with just their password. So it is deliberately loud
+   * rather than quiet — audited with who did it to whom, and it revokes
+   * every one of that user's live sessions (`AuthService.disableMfa`)
+   * so the change can't be used to ride an existing session.
+   *
+   * It cannot be made safer by restricting it further, only less usable:
+   * someone has to be able to do this, and in a firm this size that
+   * someone is an attorney. What makes it survivable is that it leaves a
+   * record, in a log whose integrity is separately provable.
+   */
+  resetMfa(actor: Actor, userId: string): AccountSummary {
+    requireAttorney(actor);
+    const before = this.#auth.mfaStatus(userId);
+    const user = this.#auth.disableMfa(userId);
+    this.#audit(
+      actor,
+      "account_mfa_reset",
+      `user=${user.id} username=${user.username} wasEnabled=${before.enabled}`,
+    );
     return this.#summarize(user);
   }
 

@@ -18,6 +18,7 @@ const PANEL_TITLES = {
   invoices: "Invoices",
   "time-clock": "Time Clock",
   payroll: "Payroll",
+  security: "Security",
   accounts: "Accounts",
   audit: "Audit Log",
 };
@@ -32,6 +33,7 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
       refreshPickers();
     }
     if (panel === "home") loadHome();
+    if (panel === "security") loadMfaStatus();
   });
 }
 
@@ -175,6 +177,104 @@ document.getElementById("changePasswordBtn").addEventListener("click", async () 
   } catch (err) {
     showError(err.message);
   }
+});
+
+/* ===== Security panel: your own second factor =====
+   Every route here acts on the caller's own account and takes no user
+   id — enrolling a second factor onto someone else's account would be a
+   way to lock them out of it. Turning one off for someone else is an
+   attorney action, and lives in the Accounts panel where the rest of the
+   overrides are. */
+function showMfaSection(id) {
+  for (const section of ["mfaOff", "mfaEnrolling", "mfaOn"]) {
+    document.getElementById(section).hidden = section !== id;
+  }
+}
+
+async function loadMfaStatus() {
+  try {
+    const status = await api("/api/mfa");
+    const badge = document.getElementById("mfaStatusBadge");
+    badge.textContent = status.enabled ? "on" : "off";
+    badge.className = `badge ${status.enabled ? "approved" : "draft"}`;
+    document.getElementById("mfaCodesRemaining").textContent = status.recoveryCodesRemaining;
+    showMfaSection(status.enabled ? "mfaOn" : "mfaOff");
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+function showRecoveryCodes(codes) {
+  document.getElementById("mfaCodes").textContent = codes.join("\n");
+  document.getElementById("mfaCodesCard").hidden = false;
+}
+
+document.getElementById("mfaBeginBtn").addEventListener("click", async () => {
+  showError("");
+  try {
+    const { secret, uri } = await api("/api/mfa/begin", { method: "POST" });
+    document.getElementById("mfaSecret").textContent = secret.replace(/(.{4})/g, "$1 ").trim();
+    const link = document.getElementById("mfaUri");
+    link.href = uri;
+    link.textContent = uri;
+    showMfaSection("mfaEnrolling");
+    document.getElementById("mfaConfirmCode").focus();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+document.getElementById("mfaCancelBtn").addEventListener("click", () => {
+  // Nothing to undo server-side: a pending secret gates nothing, and the
+  // next "Set up" simply replaces it.
+  document.getElementById("mfaConfirmCode").value = "";
+  showMfaSection("mfaOff");
+});
+
+document.getElementById("mfaConfirmBtn").addEventListener("click", async () => {
+  showError("");
+  const code = document.getElementById("mfaConfirmCode").value.trim();
+  if (!code) return;
+  try {
+    const { recoveryCodes } = await api("/api/mfa/confirm", { method: "POST", body: JSON.stringify({ code }) });
+    document.getElementById("mfaConfirmCode").value = "";
+    showRecoveryCodes(recoveryCodes);
+    await loadMfaStatus();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+document.getElementById("mfaRegenerateBtn").addEventListener("click", async () => {
+  showError("");
+  const password = prompt("Confirm your password to issue new recovery codes. The old ones stop working.");
+  if (!password) return;
+  try {
+    const { recoveryCodes } = await api("/api/mfa/recovery-codes", { method: "POST", body: JSON.stringify({ password }) });
+    showRecoveryCodes(recoveryCodes);
+    await loadMfaStatus();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+document.getElementById("mfaDisableBtn").addEventListener("click", async () => {
+  showError("");
+  const password = prompt("Confirm your password to turn off two-factor authentication.");
+  if (!password) return;
+  try {
+    await api("/api/mfa/disable", { method: "POST", body: JSON.stringify({ password }) });
+    // Disabling revokes every session, this one included.
+    alert("Two-factor authentication is off. Please log in again.");
+    window.location.href = "/login.html";
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+document.getElementById("mfaCodesDoneBtn").addEventListener("click", () => {
+  document.getElementById("mfaCodesCard").hidden = true;
+  document.getElementById("mfaCodes").textContent = "";
 });
 
 loadWhoami();
@@ -1386,7 +1486,8 @@ async function loadAccounts() {
         <span class="badge">${acct.role}</span>
         <span class="badge ${acct.disabled ? "rejected" : "approved"}">${acct.disabled ? "disabled" : "enabled"}</span>
         ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${escapeHtml(acct.matterAssignment.matterId)}</span>` : ""}
-        ${acct.mustChangePassword ? `<span class="badge pending_review">password reset pending</span>` : ""}`;
+        ${acct.mustChangePassword ? `<span class="badge pending_review">password reset pending</span>` : ""}
+        ${acct.mfaEnabled ? `<span class="badge approved">2FA · ${acct.recoveryCodesRemaining} codes left</span>` : ""}`;
       const toggleBtn = mkButton(acct.disabled ? "Enable" : "Disable", async () => {
         showError("");
         try {
@@ -1410,6 +1511,24 @@ async function loadAccounts() {
       });
       li.appendChild(document.createElement("br"));
       li.append(toggleBtn, resetBtn);
+
+      // Only offered where there's something to clear. This is a real
+      // bypass of someone else's second factor — the confirm spells that
+      // out, and the action is recorded in the audit log either way.
+      if (acct.mfaEnabled) {
+        li.append(
+          mkButton("Reset 2FA", async () => {
+            showError("");
+            if (!confirm(`Turn off two-factor authentication for ${acct.username}?\n\nThey will be able to sign in with their password alone until they set it up again. This is recorded in the audit log.`)) return;
+            try {
+              await api(`/api/accounts/${acct.id}/reset-mfa`, { method: "POST", body: "{}" });
+              await loadAccounts();
+            } catch (err) {
+              showError(err.message);
+            }
+          }),
+        );
+      }
 
       if (acct.role === "paralegal") {
         const matterInput = document.createElement("input");

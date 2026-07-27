@@ -1449,8 +1449,9 @@ accounts:
   survives a restart), and the system key persist across process
   restarts.
 
-This is still a real-vendor-shaped seed, not a finished identity system:
-there's still no MFA. Password reset *is* now built (see below) —
+This is still a real-vendor-shaped seed, not a finished identity system,
+though MFA *is* now built — see "Two-factor authentication" below.
+Password reset *is* now built (see below) —
 attorney-initiated, not the self-service email-link flow production auth
 usually means. Adding/disabling accounts after the one-time boot-time
 seed *is* built now — see `AccountsService` below — but it's
@@ -1459,6 +1460,65 @@ email verification, no invite links). It replaces the *trust* gap
 (headers anyone could set) with a *real* one (credentialed sessions),
 which is the prerequisite §5/§6 called for, not the last word on
 production auth.
+
+### Two-factor authentication
+
+`src/core/totp.ts` — RFC 6238 TOTP hand-rolled over `node:crypto`, the
+same dependency-light call as the Google Calendar JWT flow and the SMTP
+client. It's pinned against the RFC's own published test vectors, so
+"does this implement the standard" is a checkable question rather than a
+transitive-dependency one, and any authenticator app (Google
+Authenticator, 1Password, Authy) works with it.
+
+The system holds case files, trust balances and the audit log behind a
+single password, and a password is the credential most likely to be
+phished or reused. Four decisions carry the design:
+
+- **Enrollment isn't switched on until a code has been proven to work.**
+  `beginMfaEnrollment()` only stores a *pending* secret and gates
+  nothing; `confirmMfaEnrollment()` requires a working code before the
+  factor becomes real. Generating a secret and immediately enforcing it
+  locks out anyone who mistyped it, misread the QR link, or whose phone
+  clock is wrong — and that person is exactly who the firm needs able to
+  log in.
+- **A lost phone must not be a permanent lockout.** Ten single-use
+  recovery codes are issued at enrollment, shown once and stored hashed
+  like passwords. Losing those too is what `AccountsService.resetMfa()`
+  is for — attorney-only, session-revoking, and audited as
+  `account_mfa_reset`, because it *is* a real bypass of someone else's
+  second factor and the most attractive action in the Accounts panel to
+  anyone who has already compromised one attorney account. It can't be
+  made safer by restricting it further, only less usable; what makes it
+  survivable is that it leaves a record in a log whose integrity is
+  separately provable.
+- **A code can't be replayed inside its own window.** `verifyTotp()`
+  returns the matching *step* rather than a boolean specifically so the
+  last accepted step can be recorded and refused a second time — a code
+  stays valid for its whole 30 seconds otherwise.
+- **An MFA challenge is not a failed login.** `MfaRequiredError` is a
+  distinct type from `AuthError` because the login throttle must treat
+  them oppositely: counting the normal first half of a two-step sign-in
+  would lock an attorney out of their own matters after five ordinary
+  logins. A *wrong* code does count — that one is guessing.
+
+Weakening the factor re-proves the password (`verifyPassword`) even
+though the caller already holds a session: a borrowed unlocked laptop
+shouldn't be enough to strip the protection on the account. Disabling
+and resetting both revoke every live session, so the change can't be
+ridden on an existing one.
+
+The routes are `GET /api/mfa`, `POST /api/mfa/begin|confirm|disable|
+recovery-codes` (all self-service, taking no user id at all — enrolling
+a factor onto someone else's account would be a way to lock them out of
+it) plus `POST /api/accounts/:id/reset-mfa`. The UI is the **Security**
+panel, open to every logged-in human, and a `2FA` badge with the unused
+recovery-code count in the Accounts panel.
+
+What this doesn't do: show a scannable QR image (the `otpauth://` link
+is offered instead — tapping it on the phone works, and so does typing
+the key; rendering a QR would mean hand-rolling an encoder for the same
+information), support WebAuthn/passkeys, or make MFA mandatory
+firm-wide.
 
 `AccountsService` (`src/review-ui/accounts-service.ts`) wraps `AuthService`
 the same way `ReviewGateService` wraps `review-gate.ts`: every method,
@@ -1514,10 +1574,10 @@ distinct trust levels:
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over twenty-one panels — Home, Search, Review Queue, Deadlines,
+between sections) over twenty-two panels — Home, Search, Review Queue, Deadlines,
 Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Trust, Invoices,
 Time Clock, Payroll, Research, Assistant,
-Staff, Messages, Schedule, Billing, Accounts, and Audit Log (Drafting/
+Staff, Messages, Schedule, Billing, Security, Accounts, and Audit Log (Drafting/
 Cases/Research/Assistant/Billing and Accounts/Audit Log hidden from the
 nav for roles that can't use them; Staff/Messages/Schedule are open to
 every logged-in human so they're never hidden). Review Queue and
@@ -1827,10 +1887,15 @@ above). Still open:
   risk) — a firm decision, not a technical one
 - Syncing the other direction: `Appointment`s aren't pushed to Google
   Calendar as events, only deadline confirmations flow in from it
-- The rest of account management: MFA, self-service (email-link) password
+- The rest of account management: self-service (email-link) password
   reset, and self-service invites — attorney-initiated password reset,
-  self-service password change, and adding/disabling users after the
-  one-time boot-time seed are all built (see "Real authentication" above)
+  self-service password change, TOTP two-factor authentication, and
+  adding/disabling users after the one-time boot-time seed are all built
+  (see "Real authentication" above)
+- Enforcing MFA firm-wide: enrollment is per-person and voluntary, and
+  there is no policy switch making it mandatory. A firm that wants it
+  everywhere checks the Accounts panel's `2FA` badges — which is a
+  process, not a control
 - A normalized relational schema for the Postgres adapter, if this ever
   needs to scale past what one JSON blob per deployment comfortably
   handles (see "Persistence" above) — a bigger redesign, deliberately not

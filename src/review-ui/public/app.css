@@ -363,3 +363,22 @@
 }
 .hit-snippet { font-size: 0.82rem; margin-top: 0.25rem; line-height: 1.45; }
 .hit-snippet mark { background: var(--warn-soft); color: inherit; padding: 0 0.1rem; border-radius: 2px; }
+
+/* ---------- Security panel ---------- */
+/* A TOTP secret and a recovery code are transcribed by hand, often read
+   aloud — monospaced so O/0 and I/1 are distinguishable, and spaced out
+   so a long run of characters can be tracked with a finger. */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  word-break: break-all;
+}
+pre.mono {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  line-height: 1.9;
+  overflow-x: auto;
+}

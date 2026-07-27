@@ -560,6 +560,7 @@ const server = createReviewServer(service, state.auth, {
   loginThrottle: state.loginThrottle,
   auditLog: state.auditLog,
   trustProxy,
+  ...(firmConfig?.firmName ? { firmName: firmConfig.firmName } : {}),
   ...(assistant ? { assistant } : {}),
   ...voiceOptions,
 });

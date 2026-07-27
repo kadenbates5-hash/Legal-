@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { AccessDeniedError, ReviewGateError, type Actor } from "../core/types.js";
-import { AuthError, type AuthService } from "../core/auth.js";
+import { AuthError, MfaRequiredError, type AuthService } from "../core/auth.js";
 import { LoginThrottle } from "../core/login-throttle.js";
 import type { AuditLog } from "../core/audit.js";
 import type { DeadlineType } from "../core/deadline.js";
@@ -443,6 +443,8 @@ export interface ReviewServerOptions {
   twilio?: TwilioVoiceConfig;
   /** See the module doc comment above — off by default, only enable behind a real TLS-terminating proxy. */
   trustProxy?: boolean;
+  /** Names the firm inside an authenticator app's entry (`otpauth://` issuer). Cosmetic; falls back to "Docket". */
+  firmName?: string;
 }
 
 export function createReviewServer(service: ReviewGateService, auth: AuthService, options?: ReviewServerOptions): Server {
@@ -499,6 +501,7 @@ async function handleRequest(
     maxRequestBodyBytes = DEFAULT_MAX_REQUEST_BODY_BYTES,
     loginThrottle,
     auditLog,
+    firmName,
   } = options;
   // Bound every buffered body for this request before any route runs — see
   // `readBodyBuffer`. Applies to the unauthenticated routes (login, Twilio
@@ -551,6 +554,85 @@ async function handleRequest(
       auth.changePassword(user.id, String(body["currentPassword"] ?? ""), String(body["newPassword"] ?? ""));
       sendJson(res, 200, { ok: true }, { "Set-Cookie": clearSessionCookieHeader() });
       onMutated?.();
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+    }
+    return;
+  }
+
+  /**
+   * Self-service second factor. Deliberately *not* on `AccountsService`:
+   * enrolling a second factor onto someone else's account would be a way
+   * to lock them out of it, so every route here acts only on the caller's
+   * own account and takes no user id at all — the same reasoning that
+   * puts `/api/change-password` here rather than behind the attorney
+   * gate. Turning MFA *off* for someone else is the one MFA action an
+   * attorney can take, and it lives on `/api/accounts/:id/reset-mfa`
+   * where the rest of the overrides are.
+   */
+  if (url.pathname.startsWith("/api/mfa")) {
+    try {
+      const user = auth.userForToken(parseCookies(req)[SESSION_COOKIE_NAME]);
+      if (!user) throw new AuthError("authentication required");
+
+      if (url.pathname === "/api/mfa" && req.method === "GET") {
+        sendJson(res, 200, auth.mfaStatus(user.id));
+        return;
+      }
+      if (url.pathname === "/api/mfa/begin" && req.method === "POST") {
+        // The secret and its QR URI are shown once, on screen, to the
+        // person who just proved they hold this session. Nothing is
+        // required of them yet — see `beginMfaEnrollment`.
+        sendJson(res, 200, auth.beginMfaEnrollment(user.id, { issuer: firmName ?? "Docket" }));
+        onMutated?.();
+        return;
+      }
+      if (url.pathname === "/api/mfa/confirm" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const result = auth.confirmMfaEnrollment(user.id, String(body["code"] ?? ""));
+        auditLog?.append({
+          actor: { id: user.actorId, role: user.role },
+          matterId: undefined,
+          action: "mfa_enabled",
+          detail: `user=${user.id}`,
+        });
+        sendJson(res, 200, result);
+        onMutated?.();
+        return;
+      }
+      // Both of the below re-prove the password first. A session alone
+      // isn't enough to weaken the factor that protects it — otherwise a
+      // borrowed unlocked laptop is a full account takeover.
+      if (url.pathname === "/api/mfa/disable" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        auth.verifyPassword(user.id, String(body["password"] ?? ""));
+        auth.disableMfa(user.id);
+        auditLog?.append({
+          actor: { id: user.actorId, role: user.role },
+          matterId: undefined,
+          action: "mfa_disabled",
+          detail: `user=${user.id} self-service`,
+        });
+        // disableMfa revokes every session, this one included.
+        sendJson(res, 200, { ok: true }, { "Set-Cookie": clearSessionCookieHeader() });
+        onMutated?.();
+        return;
+      }
+      if (url.pathname === "/api/mfa/recovery-codes" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        auth.verifyPassword(user.id, String(body["password"] ?? ""));
+        const recoveryCodes = auth.regenerateRecoveryCodes(user.id);
+        auditLog?.append({
+          actor: { id: user.actorId, role: user.role },
+          matterId: undefined,
+          action: "mfa_recovery_codes_regenerated",
+          detail: `user=${user.id}`,
+        });
+        sendJson(res, 200, { recoveryCodes });
+        onMutated?.();
+        return;
+      }
+      sendJson(res, 404, { error: "not found" });
     } catch (err) {
       sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
     }
@@ -913,7 +995,7 @@ async function handleLogin(
     }
 
     try {
-      const session = auth.login(username, password, remember);
+      const session = auth.login(username, password, remember, String(body["mfaCode"] ?? ""));
       const user = auth.userForToken(session.token);
       throttle?.recordSuccess(keys);
       auditLog?.append({
@@ -930,6 +1012,23 @@ async function handleLogin(
       );
       onMutated?.();
     } catch (loginErr) {
+      // The password was right; the login page now needs to ask for a
+      // code. Deliberately *not* counted as a failed attempt — this is
+      // the ordinary first half of every MFA login, and counting it
+      // would lock an attorney out of their own matters after five
+      // normal sign-ins. Logged, though: a burst of these is somebody
+      // working through a list of correct passwords.
+      if (loginErr instanceof MfaRequiredError) {
+        auditLog?.append({
+          actor: { id: username || "unknown", role: "anonymous" },
+          matterId: undefined,
+          action: "login_mfa_challenged",
+          detail: `ip=${ip}`,
+        });
+        sendJson(res, 401, { error: loginErr.message, mfaRequired: true });
+        onMutated?.();
+        return;
+      }
       if (loginErr instanceof AuthError) {
         throttle?.recordFailure(keys);
         // Deliberately logs the *attempted* username, not whether it exists —
@@ -1096,6 +1195,9 @@ async function handleAccountsRequest(
         break;
       case "reset-password":
         result = accounts.resetPassword(actor, id, String(body["newPassword"] ?? ""));
+        break;
+      case "reset-mfa":
+        result = accounts.resetMfa(actor, id);
         break;
       default:
         sendJson(res, 404, { error: "not found" });

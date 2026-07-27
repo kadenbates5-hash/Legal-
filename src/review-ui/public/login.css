@@ -56,3 +56,7 @@
   button.submit:hover { background: var(--accent-hover); }
   .error { color: var(--danger); background: var(--danger-soft); border-radius: 8px; padding: 0.5rem 0.7rem; margin-top: 1rem; font-size: 0.85rem; display: none; }
   .error:not(:empty) { display: block; }
+  /* "Enter the code from your app" is a step in the flow, not a failure —
+     showing it in the red error box tells people they did something wrong
+     at the exact moment they didn't. */
+  .error.notice { color: var(--text); background: var(--accent-soft, #eef1fb); }

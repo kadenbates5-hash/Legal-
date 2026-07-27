@@ -18,6 +18,10 @@
       <input id="remember" type="checkbox" />
       <label for="remember">Remember me on this device</label>
     </div>
+    <label id="mfaField" hidden>Authentication code
+      <input id="mfaCode" type="text" inputmode="numeric" autocomplete="one-time-code"
+             placeholder="000000 — or a recovery code" />
+    </label>
     <button type="submit" class="submit">Sign in</button>
     <div id="error" class="error"></div>
   </form>
