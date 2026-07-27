@@ -17,7 +17,8 @@ export type FieldCategory =
   | "scheduling"
   | "case_file"
   | "billing_internal"
-  | "high_sensitivity";
+  | "high_sensitivity"
+  | "client_portal";
 
 export interface AccessRequest {
   actor: Actor;
@@ -31,10 +32,24 @@ export interface ParalegalAssignment {
   highSensitivityGranted: boolean;
 }
 
+/**
+ * A client account's grant to view one matter through the client portal.
+ * Unlike a paralegal assignment (one matter at a time, because a
+ * paralegal *acts* on a matter) this is a plain whitelist entry — a
+ * repeat client can reasonably have several matters over time, and
+ * granting a second doesn't need to revoke the first.
+ */
+export interface ClientMatterGrant {
+  actorId: string;
+  matterId: string;
+}
+
 const RECEPTIONIST_ALLOWED: ReadonlySet<FieldCategory> = new Set(["intake", "scheduling"]);
 
 export class AccessControl {
   #paralegalAssignments = new Map<string, ParalegalAssignment>();
+  /** actorId -> the set of matterIds a client account may view. */
+  #clientAssignments = new Map<string, Set<string>>();
   #auditLog: AuditLog;
 
   constructor(auditLog: AuditLog) {
@@ -58,6 +73,22 @@ export class AccessControl {
   getParalegalAssignment(actorId: string): ParalegalAssignment | undefined {
     const assignment = this.#paralegalAssignments.get(actorId);
     return assignment ? { ...assignment } : undefined;
+  }
+
+  /** Grants a client account visibility into one matter. Additive — granting a second matter doesn't revoke the first. */
+  grantClientAccess(actorId: string, matterId: string): void {
+    const set = this.#clientAssignments.get(actorId) ?? new Set<string>();
+    set.add(matterId);
+    this.#clientAssignments.set(actorId, set);
+  }
+
+  revokeClientAccess(actorId: string, matterId: string): void {
+    this.#clientAssignments.get(actorId)?.delete(matterId);
+  }
+
+  /** Every matterId this client account can view — the Accounts panel's read of a client's current grants. */
+  getClientMatterIds(actorId: string): string[] {
+    return [...(this.#clientAssignments.get(actorId) ?? [])];
   }
 
   /** Throws AccessDeniedError on any violation; never returns a partial/degraded result. */
@@ -103,6 +134,21 @@ export class AccessControl {
       return undefined;
     }
 
+    if (actor.role === "client") {
+      // A client's whole surface is the portal category — case_file,
+      // billing_internal etc. are staff-only even for a matter the
+      // client is otherwise granted, since those carry work product and
+      // internal notes a client-safe view has deliberately not filtered.
+      if (category !== "client_portal") {
+        return "client role is scoped to the client portal only";
+      }
+      const matterIds = this.#clientAssignments.get(actor.id);
+      if (!matterIds?.has(matterId)) {
+        return "client account has not been granted access to this matter";
+      }
+      return undefined;
+    }
+
     // staff/system actors: default deny unless explicitly modeled above.
     return "role not authorized by default policy";
   }
@@ -112,15 +158,36 @@ export class AccessControl {
     return [...this.#paralegalAssignments.values()].map((a) => ({ ...a }));
   }
 
+  /** Every client-matter grant, flattened — so the client portal (and the Accounts panel) can discover which matters exist. */
+  listClientAssignments(): ClientMatterGrant[] {
+    const out: ClientMatterGrant[] = [];
+    for (const [actorId, matterIds] of this.#clientAssignments) {
+      for (const matterId of matterIds) out.push({ actorId, matterId });
+    }
+    return out;
+  }
+
   /** Plain-data snapshot for persistence — paralegal-matter assignments otherwise vanish on every restart. */
   toSnapshot(): ParalegalAssignment[] {
     return this.listAssignments();
   }
 
-  static fromSnapshot(auditLog: AuditLog, snapshot: readonly ParalegalAssignment[]): AccessControl {
+  /** Separate from `toSnapshot()` so an old snapshot (predating client accounts) round-trips unchanged — see `fromSnapshot`'s optional third parameter. */
+  clientAccessSnapshot(): ClientMatterGrant[] {
+    return this.listClientAssignments();
+  }
+
+  static fromSnapshot(
+    auditLog: AuditLog,
+    snapshot: readonly ParalegalAssignment[],
+    clientSnapshot: readonly ClientMatterGrant[] = [],
+  ): AccessControl {
     const accessControl = new AccessControl(auditLog);
     for (const assignment of snapshot) {
       accessControl.#paralegalAssignments.set(assignment.actorId, { ...assignment });
+    }
+    for (const grant of clientSnapshot) {
+      accessControl.grantClientAccess(grant.actorId, grant.matterId);
     }
     return accessControl;
   }

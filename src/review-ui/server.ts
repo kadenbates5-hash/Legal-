@@ -27,6 +27,7 @@ import type { MattersService } from "./matters-service.js";
 import type { TrustService } from "./trust-service.js";
 import type { ClientFileService } from "./client-file-service.js";
 import type { InvoicingService } from "./invoicing-service.js";
+import type { ClientPortalService } from "./client-portal-service.js";
 import type { SearchService } from "./search-service.js";
 import type { PayrollService } from "./payroll-service.js";
 import type { TimeClockService } from "./time-clock-service.js";
@@ -310,12 +311,14 @@ function errorStatus(err: unknown): number {
   if (err instanceof Error && err.message.startsWith("no user")) return 404;
   if (err instanceof Error && err.message.startsWith("no document")) return 404;
   if (err instanceof Error && err.message.startsWith("no matter")) return 404;
+  if (err instanceof Error && err.message === "invoicing is not configured on this server") return 404;
   if (err instanceof Error && err.message.startsWith("no trust entry")) return 404;
   if (err instanceof Error && err.message.startsWith("no worked-hours entry")) return 404;
   if (err instanceof Error && err.message.startsWith("no saved reference")) return 404;
   if (err instanceof Error && err.message.startsWith("no assistant session")) return 404;
   if (err instanceof Error && err.message.startsWith("cannot disable")) return 409;
   if (err instanceof Error && err.message.startsWith("matter assignment only applies")) return 400;
+  if (err instanceof Error && err.message.startsWith("matter access only applies")) return 400;
   if (err instanceof SchedulingError) {
     return err.message.startsWith("no appointment") ? 404 : 409;
   }
@@ -428,6 +431,7 @@ export interface ReviewServerOptions {
   trust?: TrustService;
   clientFile?: ClientFileService;
   invoicing?: InvoicingService;
+  clientPortal?: ClientPortalService;
   search?: SearchService;
   payroll?: PayrollService;
   timeClock?: TimeClockService;
@@ -491,6 +495,7 @@ async function handleRequest(
     trust,
     clientFile,
     invoicing,
+    clientPortal,
     search,
     payroll,
     timeClock,
@@ -850,6 +855,15 @@ async function handleRequest(
       return;
     }
 
+    if (url.pathname.startsWith("/api/client-portal")) {
+      if (!clientPortal) {
+        sendJson(res, 404, { error: "the client portal is not configured on this server" });
+        return;
+      }
+      await handleClientPortalRequest(clientPortal, req, res, actor, url);
+      return;
+    }
+
     if (url.pathname.startsWith("/api/time-clock")) {
       if (!timeClock) {
         sendJson(res, 404, { error: "the time clock is not configured on this server" });
@@ -1199,6 +1213,12 @@ async function handleAccountsRequest(
       case "reset-mfa":
         result = accounts.resetMfa(actor, id);
         break;
+      case "grant-matter-access":
+        result = accounts.grantMatterAccess(actor, id, String(body["matterId"] ?? ""));
+        break;
+      case "revoke-matter-access":
+        result = accounts.revokeMatterAccess(actor, id, String(body["matterId"] ?? ""));
+        break;
       default:
         sendJson(res, 404, { error: "not found" });
         return;
@@ -1350,6 +1370,14 @@ async function handleDocumentsRequest(
   if (segments.length === 3 && req.method === "DELETE") {
     documents.delete(actor, matterId, id);
     sendJson(res, 200, { ok: true });
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 4 && segments[3] === "client-visibility" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = documents.setClientVisibility(actor, matterId, id, body["visible"] === true);
+    sendJson(res, 200, result);
     onMutated?.();
     return;
   }
@@ -1698,6 +1726,60 @@ async function handleTrustRequest(
     const result = trust.reverse(actor, matterId, segments[2]!, String(body["reason"] ?? ""));
     sendJson(res, 200, result);
     onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+/**
+ * `GET /api/client-portal/matters` (the client's own matter list),
+ * `GET /api/client-portal/matters/:matterId` (one matter's detail — trust
+ * balance, non-draft invoices, shared documents), and the two download
+ * routes for an invoice PDF / a shared document's bytes. No POST routes
+ * at all: the whole surface is read-only, since a client never creates
+ * or changes anything through this API — see `ClientPortalService`'s
+ * doc comment for why.
+ */
+async function handleClientPortalRequest(
+  clientPortal: ClientPortalService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+): Promise<void> {
+  const segments = url.pathname.replace(/^\/api\/client-portal\/?/, "").split("/").filter(Boolean);
+
+  if (segments.length === 1 && segments[0] === "matters" && req.method === "GET") {
+    sendJson(res, 200, clientPortal.listMyMatters(actor));
+    return;
+  }
+
+  if (segments[0] !== "matters" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const matterId = segments[1]!;
+
+  if (segments.length === 2 && req.method === "GET") {
+    sendJson(res, 200, clientPortal.getMatter(actor, matterId));
+    return;
+  }
+
+  if (segments.length === 5 && segments[2] === "invoices" && segments[4] === "preview" && req.method === "GET") {
+    sendJson(res, 200, clientPortal.previewInvoice(actor, matterId, segments[3]!));
+    return;
+  }
+
+  if (segments.length === 5 && segments[2] === "invoices" && segments[4] === "pdf" && req.method === "GET") {
+    const { filename, data } = await clientPortal.invoicePdf(actor, matterId, segments[3]!);
+    sendBinary(res, "application/pdf", filename, data);
+    return;
+  }
+
+  if (segments.length === 4 && segments[2] === "documents" && req.method === "GET") {
+    const doc = clientPortal.getDocument(actor, matterId, segments[3]!);
+    sendBinary(res, doc.contentType || "application/octet-stream", doc.fileName, Buffer.from(doc.content, "base64"));
     return;
   }
 

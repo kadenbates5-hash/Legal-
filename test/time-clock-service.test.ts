@@ -61,6 +61,14 @@ describe("TimeClockService — punching", () => {
     expect(() => service.clockIn(machine)).toThrow(AccessDeniedError);
     expect(() => service.whoIsOnTheClock(machine)).toThrow(AccessDeniedError);
   });
+
+  // Predates the client portal — a client is never an employee of the
+  // firm and should never appear on its time clock.
+  it("refuses a client account outright", () => {
+    const { service } = makeService();
+    const client: Actor = { id: "c1", role: "client" };
+    expect(() => service.clockIn(client)).toThrow(AccessDeniedError);
+  });
 });
 
 describe("TimeClockService — who may see whose timesheet", () => {

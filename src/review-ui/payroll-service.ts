@@ -19,9 +19,10 @@ import type { PayRate, PayrollStore, PayrollSummary, WorkedHoursEntry } from "..
  * - Recording worked hours follows the same self-vs-attorney split as
  *   the staff schedule: log your own, or an attorney logs anyone's.
  */
+/** A client is never an employee of the firm, so `"client"` is denied by name here too — see the equivalent note in `time-clock-service.ts`. */
 function requireHuman(actor: Actor): void {
-  if (actor.role === "system") {
-    throw new AccessDeniedError("payroll is not available to the system credential");
+  if (actor.role === "system" || actor.role === "client") {
+    throw new AccessDeniedError("payroll is not available to this role");
   }
 }
 

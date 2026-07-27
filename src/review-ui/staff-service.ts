@@ -23,9 +23,16 @@ export interface StaffMember {
   matterAssignment?: ParalegalAssignment;
 }
 
+/**
+ * "Every logged-in human" here means every *staff* role — written
+ * before the client portal existed. A client seeing the full internal
+ * directory (every attorney/paralegal, who's assigned to which matter)
+ * was never the intent, so `"client"` is denied by name, same as
+ * `"system"`.
+ */
 function requireStaffRole(actor: Actor): void {
-  if (actor.role === "system") {
-    throw new AccessDeniedError("the staff directory is not available to the system credential");
+  if (actor.role === "system" || actor.role === "client") {
+    throw new AccessDeniedError("the staff directory is not available to this role");
   }
 }
 

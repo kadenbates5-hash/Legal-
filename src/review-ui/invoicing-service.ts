@@ -677,7 +677,66 @@ export class InvoicingService {
     return invoice;
   }
 
+  /**
+   * The same lookup `#requireOnMatter` does, plus refusing a still-draft
+   * invoice — a client seeing a paralegal's in-progress guess before an
+   * attorney has committed it is exactly the "not final" leak the review
+   * gate exists to prevent everywhere else in this system.
+   */
+  #requireIssuedOnMatter(matterId: string, invoiceId: string): Invoice {
+    const invoice = this.#requireOnMatter(matterId, invoiceId);
+    if (invoice.status === "draft") {
+      throw new InvoicingError(`no invoice '${invoiceId}' on matter '${matterId}'`);
+    }
+    return invoice;
+  }
+
   #audit(actor: Actor, matterId: string, action: string, detail: string): void {
     this.#auditLog.append({ actor, matterId, action, detail });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Client portal — read-only, and only ever the same document that was
+   * already emailed. Nothing here can create, send, void, or pay an
+   * invoice; those remain firm-side acts on `requireLegalStaff` methods
+   * above. Gated through `AccessControl`'s `client_portal` category
+   * rather than `billing_internal`, since that category also reaches
+   * internal billing-hours detail a client-safe view has not filtered.
+   * ------------------------------------------------------------------ */
+
+  #requireClient(actor: Actor): void {
+    if (actor.role !== "client") {
+      throw new AccessDeniedError(`this is the client-portal invoice view (got role '${actor.role}')`);
+    }
+  }
+
+  /** Every non-draft invoice on a matter the client is granted — a void invoice still appears, so the record of it isn't silently erased. */
+  listForClient(actor: Actor, matterId: string): InvoiceView[] {
+    this.#requireClient(actor);
+    this.#accessControl.authorize({ actor, matterId, category: "client_portal" });
+    return this.#store
+      .listByMatter(matterId)
+      .filter((invoice) => invoice.status !== "draft")
+      .map((invoice) => this.#view(invoice));
+  }
+
+  /** The exact document that was emailed — see `preview()`'s staff-facing counterpart. */
+  previewForClient(actor: Actor, matterId: string, invoiceId: string): RenderedInvoice {
+    this.#requireClient(actor);
+    this.#accessControl.authorize({ actor, matterId, category: "client_portal" });
+    return this.#render(this.#requireIssuedOnMatter(matterId, invoiceId));
+  }
+
+  /** The exact PDF that was emailed — see `renderPdf()`'s staff-facing counterpart. */
+  async renderPdfForClient(actor: Actor, matterId: string, invoiceId: string): Promise<{ filename: string; data: Buffer }> {
+    this.#requireClient(actor);
+    this.#accessControl.authorize({ actor, matterId, category: "client_portal" });
+    if (!this.#pdf) throw new InvoicingError("PDF rendering is not configured on this server");
+    const invoice = this.#requireIssuedOnMatter(matterId, invoiceId);
+    const params = this.#renderParams(invoice);
+    return {
+      filename: invoicePdfFilename(invoice.number, params.matterTitle ?? invoice.matterId),
+      data: await this.#pdf.render(params),
+    };
   }
 }

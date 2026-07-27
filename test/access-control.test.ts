@@ -151,4 +151,86 @@ describe("access control", () => {
       expect(restored.getParalegalAssignment("p1")).toBeUndefined();
     });
   });
+
+  describe("client portal access", () => {
+    it("denies a client with no grant", () => {
+      const ac = new AccessControl(new AuditLog());
+      expect(() =>
+        ac.authorize({ actor: { id: "c1", role: "client" }, matterId: "m1", category: "client_portal" }),
+      ).toThrow(AccessDeniedError);
+    });
+
+    it("grants exactly the matters a client was given, and nothing else", () => {
+      const ac = new AccessControl(new AuditLog());
+      ac.grantClientAccess("c1", "m1");
+      expect(() =>
+        ac.authorize({ actor: { id: "c1", role: "client" }, matterId: "m1", category: "client_portal" }),
+      ).not.toThrow();
+      expect(() =>
+        ac.authorize({ actor: { id: "c1", role: "client" }, matterId: "m2", category: "client_portal" }),
+      ).toThrow(AccessDeniedError);
+    });
+
+    it("is additive — granting a second matter doesn't revoke the first (unlike a paralegal assignment)", () => {
+      const ac = new AccessControl(new AuditLog());
+      ac.grantClientAccess("c1", "m1");
+      ac.grantClientAccess("c1", "m2");
+      expect(ac.getClientMatterIds("c1").sort()).toEqual(["m1", "m2"]);
+      expect(() =>
+        ac.authorize({ actor: { id: "c1", role: "client" }, matterId: "m1", category: "client_portal" }),
+      ).not.toThrow();
+      expect(() =>
+        ac.authorize({ actor: { id: "c1", role: "client" }, matterId: "m2", category: "client_portal" }),
+      ).not.toThrow();
+    });
+
+    it("revoking one matter leaves the others intact", () => {
+      const ac = new AccessControl(new AuditLog());
+      ac.grantClientAccess("c1", "m1");
+      ac.grantClientAccess("c1", "m2");
+      ac.revokeClientAccess("c1", "m1");
+      expect(ac.getClientMatterIds("c1")).toEqual(["m2"]);
+    });
+
+    it("confines a client to the client_portal category even on a matter it's granted", () => {
+      const ac = new AccessControl(new AuditLog());
+      ac.grantClientAccess("c1", "m1");
+      for (const category of ["case_file", "billing_internal", "high_sensitivity", "intake", "scheduling"] as const) {
+        expect(() => ac.authorize({ actor: { id: "c1", role: "client" }, matterId: "m1", category })).toThrow(
+          AccessDeniedError,
+        );
+      }
+    });
+
+    it("lists every grant, flattened, for the Accounts panel", () => {
+      const ac = new AccessControl(new AuditLog());
+      ac.grantClientAccess("c1", "m1");
+      ac.grantClientAccess("c1", "m2");
+      ac.grantClientAccess("c2", "m1");
+      expect(ac.listClientAssignments().sort((a, b) => a.actorId.localeCompare(b.actorId) || a.matterId.localeCompare(b.matterId))).toEqual([
+        { actorId: "c1", matterId: "m1" },
+        { actorId: "c1", matterId: "m2" },
+        { actorId: "c2", matterId: "m1" },
+      ]);
+    });
+
+    it("round-trips client grants, and an old snapshot with none still loads", () => {
+      const auditLog = new AuditLog();
+      const ac = new AccessControl(auditLog);
+      ac.assignParalegal("p1", "m1");
+      ac.grantClientAccess("c1", "m1");
+      ac.grantClientAccess("c1", "m2");
+
+      const restored = AccessControl.fromSnapshot(auditLog, ac.toSnapshot(), ac.clientAccessSnapshot());
+      expect(restored.getClientMatterIds("c1").sort()).toEqual(["m1", "m2"]);
+      // Restored instance still enforces the rule, not just replayed data.
+      expect(() =>
+        restored.authorize({ actor: { id: "c1", role: "client" }, matterId: "m3", category: "client_portal" }),
+      ).toThrow(AccessDeniedError);
+
+      // A snapshot predating client accounts (no third argument at all).
+      const legacyRestored = AccessControl.fromSnapshot(auditLog, ac.toSnapshot());
+      expect(legacyRestored.getClientMatterIds("c1")).toEqual([]);
+    });
+  });
 });

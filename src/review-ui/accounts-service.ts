@@ -45,6 +45,8 @@ export interface AccountSummary {
   recoveryCodesRemaining: number;
   /** Only ever set for role "paralegal" — the matter (if any) this account is currently scoped to. */
   matterAssignment?: ParalegalAssignment;
+  /** Only ever set for role "client" — every matter this account has been granted through the client portal. Unlike a paralegal, additive: more than one is normal. */
+  clientMatterAccess?: string[];
 }
 
 function requireAttorney(actor: Actor): void {
@@ -101,6 +103,8 @@ export class AccountsService {
   #summarize(user: User): AccountSummary {
     const matterAssignment =
       user.role === "paralegal" ? this.#accessControl.getParalegalAssignment(user.actorId) : undefined;
+    const clientMatterAccess =
+      user.role === "client" ? this.#accessControl.getClientMatterIds(user.actorId) : undefined;
     return {
       id: user.id,
       username: user.username,
@@ -112,6 +116,7 @@ export class AccountsService {
       mfaEnabled: user.mfa !== undefined,
       recoveryCodesRemaining: (user.mfa?.recoveryCodes ?? []).filter((c) => !c.usedAt).length,
       ...(matterAssignment ? { matterAssignment } : {}),
+      ...(clientMatterAccess ? { clientMatterAccess } : {}),
     };
   }
 
@@ -212,6 +217,39 @@ export class AccountsService {
     }
     if (user.role !== "paralegal") {
       throw new Error(`matter assignment only applies to paralegal accounts (user '${userId}' has role '${user.role}')`);
+    }
+    return user;
+  }
+
+  /**
+   * Grants a client account visibility into one matter through the
+   * client portal. Additive, unlike a paralegal's one-matter-at-a-time
+   * assignment — a returning client reasonably has several matters over
+   * the years, and granting a new one shouldn't cost them the last.
+   */
+  grantMatterAccess(actor: Actor, userId: string, matterId: string): AccountSummary {
+    requireAttorney(actor);
+    const user = this.#requireClient(userId);
+    this.#accessControl.grantClientAccess(user.actorId, matterId);
+    this.#audit(actor, "client_portal_access_granted", `user=${user.id} username=${user.username}`, matterId);
+    return this.#summarize(user);
+  }
+
+  revokeMatterAccess(actor: Actor, userId: string, matterId: string): AccountSummary {
+    requireAttorney(actor);
+    const user = this.#requireClient(userId);
+    this.#accessControl.revokeClientAccess(user.actorId, matterId);
+    this.#audit(actor, "client_portal_access_revoked", `user=${user.id} username=${user.username}`, matterId);
+    return this.#summarize(user);
+  }
+
+  #requireClient(userId: string): User {
+    const user = this.#auth.listUsers().find((u) => u.id === userId);
+    if (!user) {
+      throw new Error(`no user '${userId}'`);
+    }
+    if (user.role !== "client") {
+      throw new Error(`matter access only applies to client accounts (user '${userId}' has role '${user.role}')`);
     }
     return user;
   }

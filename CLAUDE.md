@@ -1567,6 +1567,91 @@ distinct trust levels:
   until they act on it), just a flag the login banner and Accounts panel
   nudge on.
 
+## Client portal
+
+`src/review-ui/client-portal-service.ts` — the one surface in this
+system a client logs into directly, rather than only ever receiving
+email from. Backs the "My Matters" panel.
+
+A `"client"` role (`Actor.role`, `AuthService`'s `UserRole`) is a real,
+credentialed account like any other — created from the Accounts panel,
+subject to the same login throttle, MFA, and password rules as
+everyone else. **The whole design constraint is that it sees a strictly
+narrower view than staff, not the same data with a different login:**
+
+- `core/access-control.ts` gained a `client_portal` `FieldCategory` and
+  a parallel grant table (`grantClientAccess`/`revokeClientAccess`/
+  `getClientMatterIds`) — deliberately **not** the paralegal-assignment
+  model. A paralegal assignment is one matter at a time because a
+  paralegal *acts* on a matter; a client grant is additive, because a
+  returning client reasonably has several matters over the years and
+  granting a new one shouldn't cost them the last. A client actor
+  authorized against any *other* category (`case_file`,
+  `billing_internal`, `high_sensitivity`) is denied outright, even on a
+  matter it's otherwise granted — those categories carry privileged
+  drafts, internal notes, and every timekeeper's rate, none of which a
+  client-safe view is built to filter.
+- `ClientPortalService` builds its own hand-picked projection rather
+  than passing an internal record through: a matter is
+  `{ matterId, title, status }` — never `description` or `parties` (a
+  `Matter`'s parties name the adverse side); a document only appears if
+  staff explicitly marked it `visibleToClient` on `core/document-store.ts`
+  (defaults to `false` on upload, same as a draft starting unreviewed —
+  `DocumentsService.setClientVisibility()` is the one write path, and
+  it's audited `document_shared_with_client`/`document_unshared_with_client`);
+  an invoice is exactly what `InvoicingService.emailInvoice()` already
+  sent to this client's inbox (`listForClient`/`previewForClient`/
+  `renderPdfForClient`, added to `InvoicingService` itself so the
+  rendering logic isn't duplicated) — **never a draft**, since a client
+  seeing a paralegal's in-progress guess before an attorney commits it
+  is the same "not final" leak the review gate exists to prevent
+  everywhere else; the trust balance is a single number
+  (`TrustLedger.balanceForMatter`), never the entry history, which can
+  carry narrative descriptions of firm work a balance doesn't need to
+  say.
+- **There is deliberately no online payment.** `ManualPaymentProcessor`
+  is the only processor this project wires up (see "Invoicing, payments,
+  and staff payroll" above) — nothing has ever accepted a live card in
+  this system, for any role — so a "Pay now" button would be a promise
+  the software can't keep. The panel instead shows the firm's payment
+  instructions text (the same letterhead field the invoice itself
+  prints), the honest "say what's actually configured" pattern
+  `emailTransportReady()` already uses elsewhere.
+- **There is also no messaging.** `core/messaging.ts`, `StaffService`,
+  `StaffScheduleService`, `PayrollService`, and `TimeClockService` all
+  predate the client portal and were written as "open to every
+  logged-in human" meaning *every staff role* — none of them anticipated
+  a client account. Adding the `"client"` role therefore required
+  auditing all five and denying `"client"` by name in each, the same way
+  `"system"` already was: a client account could otherwise have read the
+  entire staff directory (who's assigned to which matter), posted to the
+  firm-wide announcements, seen who's in the office, or appeared as a
+  line on the firm's own payroll. A client-firm message thread would be
+  a reasonable next feature, but is a distinct addition, not a gap in
+  this one — it doesn't exist yet.
+- Server routes are entirely `GET`, under `/api/client-portal/*`
+  (`matters`, `matters/:id`, `matters/:id/invoices/:id/preview`,
+  `matters/:id/invoices/:id/pdf`, `matters/:id/documents/:id`) — there
+  is no `POST` anywhere on this surface, since a client never creates or
+  changes anything through it. `AccountsService.grantMatterAccess()`/
+  `revokeMatterAccess()` (attorney-only, audited
+  `client_portal_access_granted`/`_revoked`) are how a client gets
+  access to a matter in the first place, exposed as
+  `POST /api/accounts/:id/grant-matter-access` /
+  `.../revoke-matter-access` and a chip-list-plus-input control in the
+  Accounts panel next to a client account.
+- The dashboard gives a client account a different shell, not a
+  trimmed staff one: every nav item is hidden except **My Matters** and
+  **Security** (a client still manages its own password/MFA), and login
+  lands directly on My Matters rather than the staff Home panel, which
+  would otherwise show tiles for surfaces the account can't reach.
+
+What this doesn't do: online payment (see above), client-firm messaging,
+letting a client see anything about a matter beyond title/status/its own
+invoices and explicitly-shared documents, or a self-service signup —
+same as everywhere else in this project, an account is created by an
+attorney, not by the client themselves.
+
 ## Attorney review-gate UI — "Docket"
 
 `src/review-ui/` — the attorney-facing app over `review-gate.ts`
@@ -1574,18 +1659,23 @@ distinct trust levels:
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over twenty-two panels — Home, Search, Review Queue, Deadlines,
+between sections) over twenty-three panels — Home, My Matters, Search,
+Review Queue, Deadlines,
 Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Trust, Invoices,
 Time Clock, Payroll, Research, Assistant,
 Staff, Messages, Schedule, Billing, Security, Accounts, and Audit Log (Drafting/
 Cases/Research/Assistant/Billing and Accounts/Audit Log hidden from the
 nav for roles that can't use them; Staff/Messages/Schedule are open to
-every logged-in human so they're never hidden). Review Queue and
+every logged-in *staff* human so they're never hidden **for a staff
+role** — a client account is denied those surfaces server-side, see
+"Client portal" below, and the nav hides them for it too). Review Queue
+and
 Deadlines are themselves attorney-only server-side (`ReviewGateService`
 gates every method, including reads), so the dashboard only fires their
 initial load once `GET /api/me` confirms the role — a non-attorney
 session sees an inline "attorney-only" message instead of a background
-403 on login.
+403 on login. A client account gets a different shell entirely: every
+nav item is hidden except **My Matters** and **Security** — see below.
 
 - `review-service.ts` — `ReviewGateService`. `review-gate.ts` already
   guards the status-transition methods against non-attorney actors, but

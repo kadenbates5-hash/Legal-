@@ -22,6 +22,14 @@ export interface CaseDocument {
   size: number;
   uploadedBy: string;
   uploadedAt: string;
+  /**
+   * Whether the client can see and download this document through the
+   * client portal. Defaults to `false` — an uploaded file starts private
+   * the same way a draft starts unreviewed, and someone on staff has to
+   * make an affirmative choice to share it, the same as `close()`
+   * requiring a note rather than inferring disposition.
+   */
+  visibleToClient: boolean;
 }
 
 export class DocumentStore {
@@ -38,6 +46,7 @@ export class DocumentStore {
       size: Buffer.byteLength(params.content, "base64"),
       uploadedBy: params.uploadedBy,
       uploadedAt: new Date().toISOString(),
+      visibleToClient: false,
     };
     this.#byId.set(document.id, document);
     return document;
@@ -45,6 +54,15 @@ export class DocumentStore {
 
   get(id: string): CaseDocument | undefined {
     return this.#byId.get(id);
+  }
+
+  /** The one write path for client visibility — a deliberate, auditable act by whoever calls it (see `DocumentsService.setClientVisibility`). */
+  setClientVisibility(id: string, visible: boolean): CaseDocument {
+    const doc = this.#byId.get(id);
+    if (!doc) throw new Error(`no document '${id}'`);
+    const updated = { ...doc, visibleToClient: visible };
+    this.#byId.set(id, updated);
+    return updated;
   }
 
   listAll(): CaseDocument[] {
@@ -67,7 +85,9 @@ export class DocumentStore {
     const store = new DocumentStore();
     let maxId = 0;
     for (const doc of snapshot) {
-      store.#byId.set(doc.id, { ...doc });
+      // `visibleToClient` may be absent on a snapshot predating client
+      // accounts — defaults to false, same as a freshly uploaded file.
+      store.#byId.set(doc.id, { ...doc, visibleToClient: doc.visibleToClient ?? false });
       const num = Number(doc.id.replace(/^doc_/, ""));
       if (Number.isFinite(num) && num > maxId) maxId = num;
     }

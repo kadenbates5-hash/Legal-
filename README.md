@@ -123,7 +123,14 @@ section for what's still ahead
 this, Google Calendar key rotation/vendor due-diligence). Sign-in
 supports TOTP two-factor authentication with single-use recovery codes —
 enrolled per-person from the Security panel, reset by an attorney only
-as a last resort, and audited when they do.
+as a last resort, and audited when they do. A **client portal** ("My
+Matters") gives clients their own credentialed login, deliberately
+narrower than any staff view: matter title/status, non-draft invoices
+(itemised preview and PDF — exactly what was emailed), and only the
+documents staff explicitly shared — never a matter's parties, internal
+notes, or anyone's billing rate. There's no online payment (no real
+card processor is wired up anywhere in this system) and no client-firm
+messaging yet; both are honestly absent rather than half-built.
 
 ## Setup
 

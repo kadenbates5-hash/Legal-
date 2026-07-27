@@ -14,6 +14,15 @@ describe("StaffScheduleService", () => {
     expect(() => service.listForDate(system, "2026-07-28")).toThrow(AccessDeniedError);
   });
 
+  // Predates the client portal — a client seeing who's in the office
+  // (or setting their own "entry") was never the intent.
+  it("denies a client account", () => {
+    const service = new StaffScheduleService(new StaffScheduleStore());
+    const client: Actor = { id: "c1", role: "client" };
+    expect(() => service.listForDate(client, "2026-07-28")).toThrow(AccessDeniedError);
+    expect(() => service.setEntry(client, "c1", "2026-07-28", "remote")).toThrow(AccessDeniedError);
+  });
+
   it("lets anyone set their own entry", () => {
     const service = new StaffScheduleService(new StaffScheduleStore());
     const entry = service.setEntry(paralegal, "p1", "2026-07-28", "remote");

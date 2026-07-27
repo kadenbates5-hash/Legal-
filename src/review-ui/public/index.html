@@ -12,6 +12,7 @@
   <div class="brand"><span class="mark">D</span><span class="name">Docket</span></div>
   <nav class="nav">
     <button data-panel="home" class="active"><span class="dot"></span>Home</button>
+    <button data-panel="my-matters" id="navMyMatters" hidden><span class="dot"></span>My Matters</button>
     <button data-panel="queue"><span class="dot"></span>Review Queue</button>
     <button data-panel="deadlines"><span class="dot"></span>Deadlines</button>
     <button data-panel="scheduling"><span class="dot"></span>Scheduling</button>
@@ -63,6 +64,16 @@
         <div class="field-row"><h3 class="row-title">Today</h3></div>
         <ul id="homeToday" class="list"></ul>
       </div>
+    </section>
+
+    <!-- ===== My Matters (client role only) ===== -->
+    <section class="panel" id="panel-my-matters">
+      <p class="subtitle">Your matters with this firm — status, invoices, and anything staff has shared with you. Nothing here can be edited from this screen.</p>
+      <div class="card">
+        <div class="field-row"><h3 class="row-title">Your matters</h3></div>
+        <ul id="myMattersList" class="list"></ul>
+      </div>
+      <div id="myMatterDetail"></div>
     </section>
 
     <!-- ===== Search ===== -->
@@ -716,6 +727,7 @@
               <option value="paralegal">paralegal</option>
               <option value="receptionist">receptionist</option>
               <option value="staff">staff</option>
+              <option value="client">client</option>
             </select>
           </label>
           <button class="btn primary" id="createAccount">Add account</button>

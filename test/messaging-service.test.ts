@@ -23,6 +23,15 @@ describe("MessagingService", () => {
     expect(() => messaging.listConversations(system)).toThrow(AccessDeniedError);
   });
 
+  // Predates the client portal — "every logged-in human" meant every
+  // staff role, not a client DMing an attorney or posting to Announcements.
+  it("denies a client account entirely", () => {
+    const { messaging } = makeService();
+    const client: Actor = { id: "c1", role: "client" };
+    expect(() => messaging.listConversations(client)).toThrow(AccessDeniedError);
+    expect(() => messaging.postAnnouncement(client, "hello")).toThrow(AccessDeniedError);
+  });
+
   it("lets two participants exchange direct messages, with resolved display names", () => {
     const { messaging } = makeService();
     const conversation = messaging.startDirectConversation(attorney, "p1");

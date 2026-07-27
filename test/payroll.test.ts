@@ -99,6 +99,17 @@ function makeService() {
 }
 
 describe("PayrollService — who may see what people are paid", () => {
+  // Predates the client portal — a client is never an employee of the
+  // firm and should never appear on its payroll, even for "their own" id.
+  it("refuses a client account outright, even asking about its own actorId", () => {
+    const { service } = makeService();
+    const client: Actor = { id: "c1", role: "client" };
+    expect(() => service.recordHours(client, "c1", { date: "2026-07-02", hoursMilli: 8_000, description: "x" })).toThrow(
+      AccessDeniedError,
+    );
+    expect(() => service.listRates(client, "c1")).toThrow(AccessDeniedError);
+  });
+
   it("keeps setting a pay rate attorney-only", () => {
     const { service } = makeService();
     expect(() => service.setRate(paralegal, "p1", { hourlyCents: 100_00, effectiveFrom: "2026-01-01" })).toThrow(

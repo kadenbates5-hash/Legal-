@@ -35,6 +35,7 @@ export interface DocumentSummary {
   size: number;
   uploadedBy: string;
   uploadedAt: string;
+  visibleToClient: boolean;
 }
 
 export interface DocumentWithContent extends DocumentSummary {
@@ -56,6 +57,7 @@ function summarize(doc: CaseDocument): DocumentSummary {
     size: doc.size,
     uploadedBy: doc.uploadedBy,
     uploadedAt: doc.uploadedAt,
+    visibleToClient: doc.visibleToClient,
   };
 }
 
@@ -122,6 +124,27 @@ export class DocumentsService {
     this.#accessControl.authorize({ actor, matterId, category: "case_file" });
     const doc = this.#requireMatterDocument(matterId, id);
     return { ...summarize(doc), content: doc.content };
+  }
+
+  /**
+   * Shares (or unshares) a document with the client portal. A deliberate,
+   * auditable act rather than a default: an uploaded file starts private,
+   * the same reasoning as a `WorkProduct` starting in `draft`, so staff
+   * has to affirmatively decide a given exhibit or letter is fit for a
+   * client to see before it appears there.
+   */
+  setClientVisibility(actor: Actor, matterId: string, id: string, visible: boolean): DocumentSummary {
+    requireCaseFileRole(actor);
+    this.#accessControl.authorize({ actor, matterId, category: "case_file" });
+    this.#requireMatterDocument(matterId, id);
+    const doc = this.#store.setClientVisibility(id, visible);
+    this.#auditLog?.append({
+      actor,
+      matterId,
+      action: visible ? "document_shared_with_client" : "document_unshared_with_client",
+      detail: `document=${id} name=${doc.fileName}`,
+    });
+    return summarize(doc);
   }
 
   delete(actor: Actor, matterId: string, id: string): void {

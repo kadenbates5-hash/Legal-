@@ -28,9 +28,14 @@ import {
  * shift can no longer be adjusted — the payroll entry is the record
  * from that point on.
  */
+/**
+ * "Every logged-in human" here means every *staff* role — written
+ * before the client portal existed. A client is never an employee of
+ * the firm, so `"client"` is denied by name, same as `"system"`.
+ */
 function requireHuman(actor: Actor): void {
-  if (actor.role === "system") {
-    throw new AccessDeniedError("the time clock is not available to the system credential");
+  if (actor.role === "system" || actor.role === "client") {
+    throw new AccessDeniedError("the time clock is not available to this role");
   }
 }
 

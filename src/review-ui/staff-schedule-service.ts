@@ -1,9 +1,16 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import { StaffScheduleStore, type StaffScheduleEntry, type StaffScheduleStatus } from "../core/staff-schedule.js";
 
+/**
+ * "Every logged-in human" here means every *staff* role — this predates
+ * the client portal, and a client seeing who's in the office on a given
+ * day (or worse, being able to set an entry) was never the intent. So
+ * `"client"` is denied by name, the same way `"system"` already is,
+ * rather than left to fall through a role list this file doesn't own.
+ */
 function requireHuman(actor: Actor): void {
-  if (actor.role === "system") {
-    throw new AccessDeniedError("the staff schedule is not available to the system credential");
+  if (actor.role === "system" || actor.role === "client") {
+    throw new AccessDeniedError("the staff schedule is not available to this role");
   }
 }
 

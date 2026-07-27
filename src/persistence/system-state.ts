@@ -7,7 +7,7 @@ import { ResearchLibrary, type SavedReference } from "../core/research-library.j
 import { DeadlineTracker, type DeadlineCalculation } from "../core/deadline.js";
 import { SchedulingService, type Appointment } from "../core/scheduling.js";
 import { AuthService, type AuthSnapshot } from "../core/auth.js";
-import { AccessControl, type ParalegalAssignment } from "../core/access-control.js";
+import { AccessControl, type ParalegalAssignment, type ClientMatterGrant } from "../core/access-control.js";
 import { MessagingStore, type MessagingSnapshot } from "../core/messaging.js";
 import { StaffScheduleStore, type StaffScheduleEntry } from "../core/staff-schedule.js";
 import { BillingHoursStore, type BillingHoursEntry } from "../core/billing-hours.js";
@@ -49,6 +49,8 @@ export interface SystemStateSnapshot {
   auth?: AuthSnapshot;
   /** Paralegal-to-matter assignments (see core/access-control.ts) — without this they'd vanish on every restart. */
   paralegalAssignments?: ParalegalAssignment[];
+  /** Client-account matter grants (see core/access-control.ts) — a separate key so a snapshot predating client accounts round-trips unchanged. */
+  clientMatterAccess?: ClientMatterGrant[];
   /** Uploaded case documents (see core/document-store.ts), backing the Cases panel. */
   documents?: CaseDocument[];
   /** Saved statute/case-law references (see core/research-library.ts), backing the Research panel's "quick access" list. */
@@ -112,6 +114,7 @@ function emptySnapshot(): SystemStateSnapshot {
     appointments: [],
     auth: { users: [], sessions: [] },
     paralegalAssignments: [],
+    clientMatterAccess: [],
     documents: [],
     savedReferences: [],
     messaging: { conversations: [], messages: [] },
@@ -138,7 +141,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const deadlineTracker = DeadlineTracker.fromSnapshot(snapshot.deadlines ?? []);
   const scheduling = SchedulingService.fromSnapshot(snapshot.appointments ?? [], options);
   const auth = AuthService.fromSnapshot(snapshot.auth ?? { users: [], sessions: [] });
-  const accessControl = AccessControl.fromSnapshot(auditLog, snapshot.paralegalAssignments ?? []);
+  const accessControl = AccessControl.fromSnapshot(auditLog, snapshot.paralegalAssignments ?? [], snapshot.clientMatterAccess ?? []);
   const documentStore = DocumentStore.fromSnapshot(snapshot.documents ?? []);
   const researchLibrary = ResearchLibrary.fromSnapshot(snapshot.savedReferences ?? []);
   const messaging = MessagingStore.fromSnapshot(snapshot.messaging ?? { conversations: [], messages: [] });
@@ -186,6 +189,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     appointments: state.scheduling.toSnapshot(),
     auth: state.auth.toSnapshot(),
     paralegalAssignments: state.accessControl.toSnapshot(),
+    clientMatterAccess: state.accessControl.clientAccessSnapshot(),
     documents: state.documentStore.toSnapshot(),
     savedReferences: state.researchLibrary.toSnapshot(),
     messaging: state.messaging.toSnapshot(),

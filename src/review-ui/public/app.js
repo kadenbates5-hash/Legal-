@@ -68,6 +68,20 @@ async function loadWhoami() {
     if (me.mustChangePassword) {
       showError("An attorney reset your password — please change it (top right) to one only you know.");
     }
+    if (me.role === "client") {
+      // A client sees only its own matters plus its own login security —
+      // everything else here is a firm-internal surface (staff directory,
+      // messaging, scheduling, billing internals) that a client account
+      // has no server-side access to anyway; hiding the nav for it is
+      // just not showing doors that would all 403.
+      for (const btn of document.querySelectorAll("nav.nav button")) {
+        if (btn.id !== "navMyMatters" && btn.dataset.panel !== "security") btn.hidden = true;
+      }
+      document.getElementById("navMyMatters").hidden = false;
+      document.getElementById("navMyMatters").click();
+      loadMyMatters();
+      return;
+    }
     if (me.role === "attorney") {
       document.getElementById("navAccounts").hidden = false;
       document.getElementById("navAudit").hidden = false;
@@ -276,6 +290,114 @@ document.getElementById("mfaCodesDoneBtn").addEventListener("click", () => {
   document.getElementById("mfaCodesCard").hidden = true;
   document.getElementById("mfaCodes").textContent = "";
 });
+
+/* ===== My Matters (client role) =====
+   Read-only end to end — there is no upload, edit, or pay-online button
+   anywhere in this panel. See client-portal-service.ts's doc comment for
+   why: everything here is a hand-picked, client-safe projection of data
+   that lives fully behind staff's own gated panels. */
+async function loadMyMatters() {
+  showError("");
+  const list = document.getElementById("myMattersList");
+  list.innerHTML = "";
+  document.getElementById("myMatterDetail").innerHTML = "";
+  try {
+    const matters = await api("/api/client-portal/matters");
+    for (const m of matters) {
+      const li = document.createElement("li");
+      li.innerHTML = `<strong>${escapeHtml(m.title)}</strong> <span class="badge">${escapeHtml(m.status)}</span> <span class="meta-xs">${escapeHtml(m.matterId)}</span>`;
+      li.addEventListener("click", () => openMyMatter(m.matterId));
+      list.appendChild(li);
+    }
+    if (matters.length === 0) {
+      list.innerHTML = '<li class="static empty">No matters on file for you yet. If you were expecting to see one here, ask the firm to grant portal access.</li>';
+    } else if (matters.length === 1) {
+      // The common case — a client with one matter shouldn't have to click through to it.
+      openMyMatter(matters[0].matterId);
+    }
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function openMyMatter(matterId) {
+  showError("");
+  const el = document.getElementById("myMatterDetail");
+  el.innerHTML = "<p>Loading…</p>";
+  try {
+    const detail = await api(`/api/client-portal/matters/${encodeURIComponent(matterId)}`);
+    const invoiceRows = (detail.invoices || [])
+      .map((inv) => {
+        const statusBadge =
+          inv.status === "paid" ? "approved" : inv.status === "void" ? "rejected" : inv.status === "sent" ? "pending_review" : "";
+        return `<li class="static">
+          <strong>Invoice ${escapeHtml(inv.number)}</strong>
+          <span class="badge ${statusBadge}">${escapeHtml(inv.status)}</span>
+          <span class="meta-xs">balance ${escapeHtml(centsToDollars(inv.totals.balanceCents))} of ${escapeHtml(centsToDollars(inv.totals.subtotalCents))}</span>
+          <div class="mt-xs">
+            <button class="btn" data-preview="${inv.id}">View itemization</button>
+            <a class="btn" href="/api/client-portal/matters/${encodeURIComponent(matterId)}/invoices/${inv.id}/pdf">Download PDF</a>
+          </div>
+          <pre class="preview hidden mono mt-sm" id="clientInvoicePreview-${inv.id}"></pre>
+        </li>`;
+      })
+      .join("");
+
+    const documentRows = (detail.documents || [])
+      .map(
+        (doc) => `<li class="static">
+          <strong>${escapeHtml(doc.fileName)}</strong>
+          <span class="badge">${formatBytes(doc.size)}</span>
+          <div class="meta-xs">Shared ${new Date(doc.uploadedAt).toLocaleDateString()}</div>
+          <a class="btn mt-xs" href="/api/client-portal/matters/${encodeURIComponent(matterId)}/documents/${doc.id}">Download</a>
+        </li>`,
+      )
+      .join("");
+
+    el.innerHTML = `
+      <div class="card">
+        <h3>${escapeHtml(detail.title)} <span class="badge">${escapeHtml(detail.status)}</span></h3>
+        ${
+          detail.trustBalanceCents !== undefined
+            ? `<p class="subtitle-inline">Funds held in trust for this matter: <strong>${escapeHtml(centsToDollars(detail.trustBalanceCents))}</strong></p>`
+            : ""
+        }
+        ${
+          detail.paymentInstructions
+            ? `<p class="subtitle-inline">${escapeHtml(detail.paymentInstructions)}</p>`
+            : ""
+        }
+      </div>
+      <div class="card">
+        <h3>Invoices</h3>
+        <ul class="list">${invoiceRows || '<li class="static empty">No invoices issued yet.</li>'}</ul>
+      </div>
+      <div class="card">
+        <h3>Documents shared with you</h3>
+        <ul class="list">${documentRows || '<li class="static empty">Nothing has been shared with you yet.</li>'}</ul>
+      </div>`;
+
+    for (const btn of el.querySelectorAll("[data-preview]")) {
+      btn.addEventListener("click", async () => {
+        showError("");
+        const invoiceId = btn.dataset.preview;
+        const pre = document.getElementById(`clientInvoicePreview-${invoiceId}`);
+        try {
+          if (!pre.textContent) {
+            const rendered = await api(`/api/client-portal/matters/${encodeURIComponent(matterId)}/invoices/${invoiceId}/preview`);
+            pre.textContent = rendered.text;
+          }
+          pre.classList.toggle("hidden");
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+    }
+  } catch (err) {
+    showError(err.message);
+    el.innerHTML = "";
+  }
+}
 
 loadWhoami();
 
@@ -953,10 +1075,24 @@ async function loadCaseDetail(matterId) {
       li.classList.add("static");
       li.innerHTML = `<strong>${escapeHtml(doc.fileName)}</strong>
         <span class="badge">${formatBytes(doc.size)}</span>
+        ${doc.visibleToClient ? `<span class="badge approved">shared with client</span>` : ""}
         <div class="meta">Uploaded by ${escapeHtml(doc.uploadedBy)} on ${new Date(doc.uploadedAt).toLocaleString()}</div>`;
       const downloadBtn = mkButton("Download", () => downloadDocument(matterId, doc));
       li.appendChild(document.createElement("br"));
       li.appendChild(downloadBtn);
+      const shareBtn = mkButton(doc.visibleToClient ? "Unshare with client" : "Share with client", async () => {
+        showError("");
+        try {
+          await api(`/api/documents/matters/${encodeURIComponent(matterId)}/${doc.id}/client-visibility`, {
+            method: "POST",
+            body: JSON.stringify({ visible: !doc.visibleToClient }),
+          });
+          await loadCaseDetail(matterId);
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+      li.appendChild(shareBtn);
       if (isPdf) {
         const draftReportBtn = mkButton("Draft report from this PDF", async () => {
           showError("");
@@ -1561,6 +1697,54 @@ async function loadAccounts() {
           unassignBtn.classList.add("danger");
           li.appendChild(unassignBtn);
         }
+      }
+
+      if (acct.role === "client") {
+        // Additive, unlike a paralegal's one-matter-at-a-time slot: a
+        // returning client reasonably has several matters over the years.
+        const grants = document.createElement("div");
+        grants.className = "mt-xs";
+        for (const matterId of acct.clientMatterAccess || []) {
+          const chip = document.createElement("span");
+          chip.className = "badge confirmed mt-xs";
+          chip.textContent = matterId + " ";
+          const revokeLink = document.createElement("button");
+          revokeLink.textContent = "×";
+          revokeLink.className = "btn danger";
+          revokeLink.title = `Revoke access to ${matterId}`;
+          revokeLink.addEventListener("click", async () => {
+            showError("");
+            try {
+              await api(`/api/accounts/${acct.id}/revoke-matter-access`, { method: "POST", body: JSON.stringify({ matterId }) });
+              await loadAccounts();
+            } catch (err) {
+              showError(err.message);
+            }
+          });
+          chip.appendChild(revokeLink);
+          grants.appendChild(chip);
+        }
+        li.appendChild(grants);
+
+        const matterInput = document.createElement("input");
+        matterInput.placeholder = "matter id";
+        matterInput.className = "matter-input";
+        matterInput.setAttribute("list", "matterOptions");
+        const grantBtn = mkButton("Grant access", async () => {
+          showError("");
+          if (!matterInput.value.trim()) return;
+          try {
+            await api(`/api/accounts/${acct.id}/grant-matter-access`, {
+              method: "POST",
+              body: JSON.stringify({ matterId: matterInput.value.trim() }),
+            });
+            matterInput.value = "";
+            await loadAccounts();
+          } catch (err) {
+            showError(err.message);
+          }
+        });
+        li.append(matterInput, grantBtn);
       }
       list.appendChild(li);
     }

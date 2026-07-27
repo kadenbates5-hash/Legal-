@@ -21,9 +21,16 @@ export interface ConversationView {
   createdAt: string;
 }
 
+/**
+ * "Every logged-in human" here means every *staff* role — written before
+ * the client portal existed. A client posting to the firm-wide
+ * announcements conversation, or DMing an attorney directly, was never
+ * the intent, so `"client"` is denied by name here too, same as
+ * `"system"`.
+ */
 function requireHuman(actor: Actor): void {
-  if (actor.role === "system") {
-    throw new AccessDeniedError("messaging is not available to the system credential");
+  if (actor.role === "system" || actor.role === "client") {
+    throw new AccessDeniedError("messaging is not available to this role");
   }
 }
 

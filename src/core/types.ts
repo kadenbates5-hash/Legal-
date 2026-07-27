@@ -45,7 +45,7 @@ export type EscalationTrigger = EmergencyTrigger | StandardTrigger;
  */
 export interface Actor {
   id: string;
-  role: AgentRole | "attorney" | "staff" | "system" | "anonymous";
+  role: AgentRole | "attorney" | "staff" | "client" | "system" | "anonymous";
 }
 
 export interface MatterRef {

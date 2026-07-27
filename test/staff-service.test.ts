@@ -46,6 +46,14 @@ describe("StaffService", () => {
     expect(() => staff.list(system)).toThrow(AccessDeniedError);
   });
 
+  // The staff directory predates the client portal. "Every logged-in
+  // human" meant every staff role — a client seeing the internal
+  // directory (who's assigned to which matter) was never the intent.
+  it("denies a client account", () => {
+    const { staff } = makeStaff();
+    expect(() => staff.list({ id: "c1", role: "client" })).toThrow(AccessDeniedError);
+  });
+
   it("lists every account with displayName/initials and no password fields", () => {
     const { staff } = makeStaff();
     const list = staff.list(attorney);

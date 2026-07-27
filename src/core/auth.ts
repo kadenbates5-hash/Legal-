@@ -16,7 +16,7 @@ import { generateTotpSecret, totpUri, verifyTotp } from "./totp.js";
  * machine credential (the calendar-integration due-diligence item from
  * CLAUDE.md's "Not yet built"), not a human login.
  */
-export type UserRole = AgentRole | "attorney" | "staff";
+export type UserRole = AgentRole | "attorney" | "staff" | "client";
 
 export interface User {
   readonly id: string;

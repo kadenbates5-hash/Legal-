@@ -35,6 +35,7 @@ import { ConflictChecker } from "../core/conflicts.js";
 import { TrustService } from "./trust-service.js";
 import { ClientFileService } from "./client-file-service.js";
 import { InvoicingService } from "./invoicing-service.js";
+import { ClientPortalService } from "./client-portal-service.js";
 import { PayrollService } from "./payroll-service.js";
 import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
@@ -330,6 +331,27 @@ const invoicing = new InvoicingService({
 });
 
 /**
+ * Backs the client-facing "My Matters" surface — see
+ * client-portal-service.ts's doc comment for the access-control
+ * reasoning. `trust`/`invoicing` are optional there by design (a client
+ * portal without invoicing configured just shows no billing section)
+ * but both are always available in this deployment, so they're passed
+ * through. `paymentInstructions` reuses the same letterhead field the
+ * invoice itself prints, since there is no online payment path — see
+ * that service's doc comment for why.
+ */
+const clientPortal = new ClientPortalService({
+  accessControl: state.accessControl,
+  matters: state.matters,
+  documents: state.documentStore,
+  trust: state.trustLedger,
+  invoicing,
+  ...(firmConfig?.letterhead?.paymentInstructions ?? process.env["FIRM_PAYMENT_INSTRUCTIONS"]
+    ? { paymentInstructions: firmConfig?.letterhead?.paymentInstructions ?? process.env["FIRM_PAYMENT_INSTRUCTIONS"]! }
+    : {}),
+});
+
+/**
  * Backs the global search box. Given every store directly rather than
  * the panel services, because it needs to read across all of them at
  * once — and does its own `AccessControl` filtering, silently omitting
@@ -553,6 +575,7 @@ const server = createReviewServer(service, state.auth, {
   trust,
   clientFile,
   invoicing,
+  clientPortal,
   search,
   payroll,
   timeClock,
