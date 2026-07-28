@@ -382,3 +382,17 @@ pre.mono {
   line-height: 1.9;
   overflow-x: auto;
 }
+
+/* ---------- Firm-wide MFA requirement banner ---------- */
+/* Visibility toggled purely via the `hidden` attribute in JS — unlike
+   .error, this must not auto-show just because it has content, since
+   its content is static (the button lives here whether or not the
+   banner is currently shown). */
+.mfa-setup-banner {
+  color: var(--warn, #92400e);
+  background: var(--warn-soft, #fef3c7);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}

@@ -68,6 +68,7 @@ async function loadWhoami() {
     if (me.mustChangePassword) {
       showError("An attorney reset your password — please change it (top right) to one only you know.");
     }
+    document.getElementById("mfaSetupBanner").hidden = !me.mfaSetupRequired;
     if (me.role === "client") {
       // A client sees only its own matters plus its own login security —
       // everything else here is a firm-internal surface (staff directory,
@@ -223,6 +224,10 @@ function showRecoveryCodes(codes) {
   document.getElementById("mfaCodesCard").hidden = false;
 }
 
+document.getElementById("mfaSetupBannerBtn").addEventListener("click", () => {
+  document.querySelector('nav.nav button[data-panel="security"]').click();
+});
+
 document.getElementById("mfaBeginBtn").addEventListener("click", async () => {
   showError("");
   const password = prompt("Confirm your password to set up two-factor authentication.");
@@ -256,6 +261,9 @@ document.getElementById("mfaConfirmBtn").addEventListener("click", async () => {
     document.getElementById("mfaConfirmCode").value = "";
     showRecoveryCodes(recoveryCodes);
     await loadMfaStatus();
+    // Clears the firm-policy banner immediately, without waiting for the
+    // next full page load, if this enrollment is what it was waiting on.
+    document.getElementById("mfaSetupBanner").hidden = true;
   } catch (err) {
     showError(err.message);
   }

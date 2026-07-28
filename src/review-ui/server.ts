@@ -451,6 +451,37 @@ export interface ReviewServerOptions {
   trustProxy?: boolean;
   /** Names the firm inside an authenticator app's entry (`otpauth://` issuer). Cosmetic; falls back to "Docket". */
   firmName?: string;
+  /**
+   * Roles that must have a second factor enrolled before reaching
+   * anything beyond `/api/me`, `/api/mfa/*`, `/api/logout`, and
+   * `/api/change-password`. Absent (the default) means MFA stays
+   * opt-in for everyone — see `MFA_SETUP_ALLOWED_PATHS` below for what
+   * "enrolling" itself still has to reach while blocked.
+   *
+   * Deliberately never blocks *login* — only what a session can do
+   * afterward. Refusing the password step itself would mean the only
+   * way back in for someone who lost their phone is an attorney's
+   * `resetMfa`, and that path requires an attorney to already be able
+   * to log in and act. This way the account can always sign in and is
+   * routed straight to enrolling, with no one else's help needed
+   * unless they've also lost their recovery codes.
+   */
+  mfaRequiredRoles?: ReadonlySet<UserRole>;
+}
+
+/**
+ * The only routes an account under a firm-wide MFA requirement can
+ * reach before it has enrolled: checking/starting/confirming a factor,
+ * signing out, and fixing a password that needs changing first (an
+ * attorney-reset password shouldn't have to wait on MFA setup to be
+ * replaced). Everything else in `/api/*` is refused with a clear reason
+ * rather than a generic 403, so the dashboard can say exactly what to
+ * do next instead of just failing.
+ */
+const MFA_SETUP_ALLOWED_PATHS: readonly string[] = ["/api/me", "/api/mfa", "/api/logout", "/api/change-password"];
+
+function needsMfaSetup(user: { mfa?: unknown; role: UserRole } | undefined, mfaRequiredRoles: ReadonlySet<UserRole> | undefined): boolean {
+  return !!user && !!mfaRequiredRoles?.has(user.role) && user.mfa === undefined;
 }
 
 export function createReviewServer(service: ReviewGateService, auth: AuthService, options?: ReviewServerOptions): Server {
@@ -510,6 +541,7 @@ async function handleRequest(
     loginThrottle,
     auditLog,
     firmName,
+    mfaRequiredRoles,
   } = options;
   // Bound every buffered body for this request before any route runs — see
   // `readBodyBuffer`. Applies to the unauthenticated routes (login, Twilio
@@ -539,7 +571,13 @@ async function handleRequest(
     try {
       const actor = resolveActor(req, auth);
       const user = auth.userForToken(parseCookies(req)[SESSION_COOKIE_NAME]);
-      sendJson(res, 200, { id: actor.id, role: actor.role, username: user?.username, mustChangePassword: user?.mustChangePassword ?? false });
+      sendJson(res, 200, {
+        id: actor.id,
+        role: actor.role,
+        username: user?.username,
+        mustChangePassword: user?.mustChangePassword ?? false,
+        mfaSetupRequired: needsMfaSetup(user, mfaRequiredRoles),
+      });
     } catch (err) {
       sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
     }
@@ -668,6 +706,17 @@ async function handleRequest(
 
   try {
     const actor = resolveActor(req, auth);
+
+    if (mfaRequiredRoles?.has(actor.role as UserRole)) {
+      const user = auth.userForToken(parseCookies(req)[SESSION_COOKIE_NAME]);
+      if (needsMfaSetup(user, mfaRequiredRoles) && !MFA_SETUP_ALLOWED_PATHS.some((p) => url.pathname === p || url.pathname.startsWith(`${p}/`))) {
+        sendJson(res, 403, {
+          error: "two-factor authentication is required by firm policy — set it up in the Security panel before continuing",
+          mfaSetupRequired: true,
+        });
+        return;
+      }
+    }
 
     if (url.pathname.startsWith("/api/deadlines")) {
       await handleDeadlineRequest(service, req, res, actor, url, onMutated);

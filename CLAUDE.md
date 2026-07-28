@@ -1525,8 +1525,51 @@ recovery-code count in the Accounts panel.
 What this doesn't do: show a scannable QR image (the `otpauth://` link
 is offered instead — tapping it on the phone works, and so does typing
 the key; rendering a QR would mean hand-rolling an encoder for the same
-information), support WebAuthn/passkeys, or make MFA mandatory
-firm-wide.
+information), or support WebAuthn/passkeys.
+
+#### Firm-wide MFA policy
+
+Enrollment above is per-person and voluntary by default — the gap this
+closes is that a firm that decided everyone in a given role must have a
+second factor had no way to make that a *control* rather than something
+checked by eyeballing `2FA` badges in the Accounts panel.
+
+`MFA_REQUIRED_ROLES` (a comma-separated role list, e.g.
+`attorney,paralegal`) tells `server.ts` which roles it applies to.
+Once a role is named, any account in it that hasn't confirmed a factor
+gets every `/api/*` route refused with a clear reason **except**
+`/api/me`, `/api/mfa/*`, `/api/logout`, and `/api/change-password` —
+`needsMfaSetup()` is the one place that list and that check live.
+
+Two things about the design are load-bearing:
+
+- **It never blocks login itself.** Refusing the password step would
+  mean the only way back in for someone who's simply never set up a
+  factor yet is an attorney's `resetMfa` — a bypass meant for a lost
+  phone, not for "day one, hasn't gotten to it." Instead the account
+  always signs in and is routed straight to enrolling, using only
+  itself.
+- **It unblocks immediately, no new login required.** The check runs
+  fresh on every request from `AuthService`'s live record, not from
+  anything baked into the session at login time — so the moment
+  `confirmMfaEnrollment` succeeds, the very next request goes through.
+  A design that required logging out and back in to pick up the change
+  would make the requirement itself feel like the obstacle.
+
+`GET /api/me` reports `mfaSetupRequired` so the dashboard doesn't have
+to wait for a blocked call to find out — a sticky banner ("Firm policy
+requires two-factor authentication for your role") appears the moment
+the account is loaded and clears itself the moment enrollment is
+confirmed, without a page reload. It's a separate element from the
+regular error banner on purpose: that one gets cleared at the start of
+almost every action in the app, which would make a "you must do this"
+notice disappear the instant anyone tried to do anything else.
+
+What this doesn't do: require MFA for the `"system"` machine credential
+(it was never a candidate — `MFA_REQUIRED_ROLES` only accepts human
+roles), or retroactively invalidate a live session that predates the
+policy being turned on — it takes effect on that session's very next
+request, same as any other access change in this project.
 
 `AccountsService` (`src/review-ui/accounts-service.ts`) wraps `AuthService`
 the same way `ReviewGateService` wraps `review-gate.ts`: every method,
@@ -1968,6 +2011,7 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 # STATE_FILE=./data/system-state.json PORT=3000 npm run start:review-ui  # override the file-backed default
 # DATABASE_URL=postgres://user:pass@host:5432/docket npm run start:review-ui  # use Postgres instead of the file store
 # TRUST_PROXY=true npm run start:review-ui                               # only behind a real TLS-terminating reverse proxy — see "Real authentication"
+# MFA_REQUIRED_ROLES=attorney,paralegal npm run start:review-ui           # optional — blocks those roles' sessions from everything but enrolling MFA until they do (see "Firm-wide MFA policy")
 # FIRM_CONFIG_FILE=./data/firm-config.json npm run start:review-ui        # enable scheduling business-hours/attorney-assignment/branding, and the invoice letterhead (firmName + letterhead.addressLines/phone/billingEmail/paymentInstructions)
 # CALENDAR_SYSTEM_API_KEY=... npm run start:review-ui                     # pin the calendar-integration key instead of auto-generating one
 GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
@@ -2041,10 +2085,6 @@ above). Still open:
   self-service password change, TOTP two-factor authentication, and
   adding/disabling users after the one-time boot-time seed are all built
   (see "Real authentication" above)
-- Enforcing MFA firm-wide: enrollment is per-person and voluntary, and
-  there is no policy switch making it mandatory. A firm that wants it
-  everywhere checks the Accounts panel's `2FA` badges — which is a
-  process, not a control
 - A normalized relational schema for the Postgres adapter, if this ever
   needs to scale past what one JSON blob per deployment comfortably
   handles (see "Persistence" above) — a bigger redesign, deliberately not

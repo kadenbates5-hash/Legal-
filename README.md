@@ -123,7 +123,13 @@ section for what's still ahead
 this, Google Calendar key rotation/vendor due-diligence). Sign-in
 supports TOTP two-factor authentication with single-use recovery codes —
 enrolled per-person from the Security panel, reset by an attorney only
-as a last resort, and audited when they do. A **client portal** ("My
+as a last resort, and audited when they do. It can also be made
+**mandatory per role** (`MFA_REQUIRED_ROLES=attorney,paralegal`):
+an account in a required role can still always log in, but every route
+except enrolling, changing its password, and signing out is refused
+until it sets one up — no lockout risk, since the only way in is
+through itself, and no need to log back in once it's confirmed. A
+**client portal** ("My
 Matters") gives clients their own credentialed login, deliberately
 narrower than any staff view: matter title/status, non-draft invoices
 (itemised preview and PDF — exactly what was emailed), and only the

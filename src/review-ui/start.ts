@@ -507,6 +507,24 @@ const billingHours = new BillingHoursService({ accessControl: state.accessContro
 const trustProxy = process.env["TRUST_PROXY"] === "true";
 
 /**
+ * Firm-wide MFA policy — which roles must have a second factor enrolled
+ * before their session can reach anything beyond `/api/me`, `/api/mfa/*`,
+ * `/api/logout`, and `/api/change-password` (see server.ts's
+ * `needsMfaSetup`). Absent (the default) leaves MFA fully opt-in, same
+ * as before this existed. A comma-separated role list rather than a
+ * single boolean, since a firm might reasonably require it for attorneys
+ * before rolling it out to everyone else.
+ */
+const MFA_REQUIRED_ROLES = process.env["MFA_REQUIRED_ROLES"];
+const mfaRequiredRoles = MFA_REQUIRED_ROLES
+  ? new Set(
+      MFA_REQUIRED_ROLES.split(",")
+        .map((r) => r.trim())
+        .filter((r): r is UserRole => (["attorney", "paralegal", "receptionist", "staff", "client"] as const).includes(r as UserRole)),
+    )
+  : undefined;
+
+/**
  * The real-call telephony surface (see `server.ts`'s `handleVoiceRequest`
  * and CLAUDE.md's "Voicebox voice integration"/"Twilio telephony
  * integration"): a Twilio phone number's webhooks drive
@@ -598,6 +616,7 @@ const server = createReviewServer(service, state.auth, {
   auditLog: state.auditLog,
   trustProxy,
   ...(firmConfig?.firmName ? { firmName: firmConfig.firmName } : {}),
+  ...(mfaRequiredRoles?.size ? { mfaRequiredRoles } : {}),
   ...(assistant ? { assistant } : {}),
   ...voiceOptions,
 });
