@@ -18,6 +18,12 @@
     --sidebar-text-active: #ffffff;
     --radius: 10px;
     --shadow: 0 1px 2px rgba(20, 23, 31, 0.06), 0 1px 8px rgba(20, 23, 31, 0.04);
+    --shadow-hover: 0 2px 4px rgba(20, 23, 31, 0.08), 0 6px 16px rgba(20, 23, 31, 0.07);
+    /* Alias kept for older markup — every surface tile (stat cards, the
+       global search box) should render on the same white surface as a
+       .card, never fall through to "no background declared" and blend
+       into the page. */
+    --panel: var(--surface);
   }
 
   * { box-sizing: border-box; }
@@ -31,56 +37,77 @@
     min-height: 100vh;
   }
 
+  /* Keyboard-navigable focus. `all: unset` on .btn/nav buttons strips the
+     browser's default outline, so without this a keyboard user tabbing
+     through the app has no idea where focus is — a real access gap, not
+     just cosmetic. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  nav.nav button:focus-visible { outline-offset: -2px; }
+
   /* ---------- Sidebar ---------- */
   .sidebar {
-    width: 216px;
+    width: 224px;
     flex-shrink: 0;
     background: var(--sidebar-bg);
     color: var(--sidebar-text);
     display: flex;
     flex-direction: column;
     padding: 1.25rem 0.75rem;
+    overflow-y: auto;
   }
   .brand {
     display: flex;
     align-items: baseline;
-    gap: 0.4rem;
+    gap: 0.45rem;
     padding: 0 0.5rem 1.5rem;
   }
   .brand .mark {
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
-    background: var(--accent);
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: linear-gradient(155deg, var(--accent), var(--accent-hover));
     display: inline-flex;
     align-items: center;
     justify-content: center;
     color: white;
     font-weight: 700;
-    font-size: 0.85rem;
+    font-size: 0.88rem;
   }
-  .brand .name { font-weight: 700; font-size: 1.05rem; color: #fff; letter-spacing: -0.01em; }
+  .brand .name { font-weight: 700; font-size: 1.1rem; color: #fff; letter-spacing: -0.01em; }
 
-  nav.nav { display: flex; flex-direction: column; gap: 0.15rem; }
+  nav.nav { display: flex; flex-direction: column; gap: 0.1rem; }
+  .nav-group {
+    margin: 0.9rem 0.55rem 0.3rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #6b7280;
+  }
+  .nav-group:first-child { margin-top: 0.1rem; }
   nav.nav button {
     all: unset;
     cursor: pointer;
-    padding: 0.55rem 0.65rem;
+    padding: 0.5rem 0.65rem;
     border-radius: 8px;
-    font-size: 0.88rem;
+    font-size: 0.87rem;
     color: var(--sidebar-text);
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background 0.12s ease, color 0.12s ease;
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.6rem;
   }
-  nav.nav button:hover { background: rgba(255, 255, 255, 0.06); color: var(--sidebar-text-active); }
-  nav.nav button.active { background: var(--accent); color: #fff; }
-  nav.nav .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.55; flex-shrink: 0; }
+  nav.nav button:hover { background: rgba(255, 255, 255, 0.07); color: var(--sidebar-text-active); }
+  nav.nav button.active { background: var(--accent); color: #fff; font-weight: 600; }
+  nav.nav .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.5; flex-shrink: 0; }
   nav.nav button.active .dot { opacity: 1; }
-  nav.nav button[hidden] { display: none; }
+  nav.nav button[hidden], .nav-group[hidden] { display: none; }
 
-  .sidebar-footer { margin-top: auto; padding: 0.5rem; font-size: 0.72rem; color: #6b7280; line-height: 1.5; }
+  .sidebar-footer { margin-top: auto; padding: 0.75rem 0.5rem 0.25rem; font-size: 0.72rem; color: #6b7280; line-height: 1.5; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 
   /* ---------- Main ---------- */
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -88,11 +115,16 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.9rem 1.75rem;
+    gap: 1rem;
+    padding: 0.85rem 1.75rem;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
+    box-shadow: 0 1px 0 rgba(20, 23, 31, 0.02);
+    position: sticky;
+    top: 0;
+    z-index: 5;
   }
-  .topbar h1 { font-size: 1.05rem; margin: 0; font-weight: 600; }
+  .topbar h1 { font-size: 1.1rem; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
   .topbar .who { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; color: var(--text-muted); }
   .btn {
     all: unset;
@@ -104,14 +136,15 @@
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text);
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
   }
-  .btn:hover { background: var(--bg); }
+  .btn:hover { background: var(--bg); border-color: #d3d6dd; }
   .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .btn.primary:hover { background: var(--accent-hover); }
+  .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
   .btn.danger { color: var(--danger); border-color: var(--danger-soft); }
   .btn.danger:hover { background: var(--danger-soft); }
   .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
 
   .content { flex: 1; padding: 1.75rem; overflow-y: auto; }
   section.panel { display: none; animation: fade-in 0.15s ease; }
@@ -128,6 +161,7 @@
     box-shadow: var(--shadow);
     padding: 1.1rem 1.25rem;
     margin-bottom: 1rem;
+    transition: box-shadow 0.15s ease;
   }
   .card h3 { margin: 0 0 0.75rem; font-size: 0.95rem; }
 
@@ -141,6 +175,13 @@
     color: var(--text);
     background: var(--surface);
     min-width: 160px;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .field input:hover, .field select:hover, .field textarea:hover { border-color: #d3d6dd; }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
   .field.checkbox { flex-direction: row; align-items: center; gap: 0.4rem; }
   .field.checkbox input { min-width: auto; }
@@ -166,7 +207,7 @@
     background: var(--surface);
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
-  ul.list li:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+  ul.list li:hover { border-color: var(--accent); box-shadow: var(--shadow-hover); }
   ul.list li.static { cursor: default; }
   ul.list li.static:hover { border-color: var(--border); box-shadow: none; }
 
@@ -270,13 +311,15 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0.9rem 1rem;
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 .stat .n { font-size: 1.6rem; font-weight: 600; line-height: 1.1; }
 .stat .k { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.15rem; }
 .stat.alert .n { color: var(--danger); }
 .stat.ok .n { color: var(--ok); }
 .stat.clickable { cursor: pointer; }
-.stat.clickable:hover { border-color: var(--accent); }
+.stat.clickable:hover { border-color: var(--accent); box-shadow: var(--shadow-hover); }
 
 /* ---------- Time Clock ---------- */
 /* The punch buttons are the whole point of the panel, so they're sized
@@ -341,15 +384,17 @@
 
 /* ---------- Global search ---------- */
 .global-search {
-  background: var(--panel);
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.35rem 0.6rem;
-  font-size: 0.82rem;
-  min-width: 240px;
+  border-radius: 7px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.85rem;
+  min-width: 260px;
   color: var(--text);
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
-.global-search:focus { outline: none; border-color: var(--accent); }
+.global-search:hover { border-color: #d3d6dd; }
+.global-search:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
 .hit-kind {
   display: inline-block;
   font-size: 0.68rem;
@@ -395,4 +440,31 @@ pre.mono {
   padding: 0.6rem 0.75rem;
   font-size: 0.85rem;
   margin-bottom: 1rem;
+}
+
+/* ---------- Small screens ----------
+   A 22-item sidebar plus a 224px reservation doesn't fit a tablet in
+   portrait, let alone a phone — it used to just get silently clipped.
+   Below the breakpoint the sidebar becomes a horizontally-scrolling top
+   bar instead of a hamburger menu, so every panel stays one tap away
+   with no JS toggle to wire up. */
+@media (max-width: 860px) {
+  body { flex-direction: column; }
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    padding: 0.6rem 0.75rem;
+    overflow-x: auto;
+    overflow-y: visible;
+    gap: 0.75rem;
+  }
+  .brand { padding: 0; flex-shrink: 0; }
+  nav.nav { flex-direction: row; gap: 0.3rem; }
+  .nav-group { display: none; }
+  nav.nav button { white-space: nowrap; }
+  .sidebar-footer { display: none; }
+  .topbar { padding: 0.75rem 1rem; flex-wrap: wrap; }
+  .content { padding: 1.1rem; }
+  .global-search { min-width: 0; flex: 1 1 160px; }
 }

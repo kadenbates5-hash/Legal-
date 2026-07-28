@@ -31,7 +31,8 @@
   }
   .brand { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; }
   .brand .mark {
-    width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
+    width: 30px; height: 30px; border-radius: 8px;
+    background: linear-gradient(155deg, var(--accent), var(--accent-hover));
     display: inline-flex; align-items: center; justify-content: center;
     color: #fff; font-weight: 700; font-size: 0.95rem;
   }

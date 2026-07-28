@@ -78,6 +78,9 @@ async function loadWhoami() {
       for (const btn of document.querySelectorAll("nav.nav button")) {
         if (btn.id !== "navMyMatters" && btn.dataset.panel !== "security") btn.hidden = true;
       }
+      // The group labels are just headings over those buttons — hide them
+      // too, or a client sees "Casework"/"Team"/etc. sitting over nothing.
+      for (const label of document.querySelectorAll("nav.nav .nav-group")) label.hidden = true;
       document.getElementById("navMyMatters").hidden = false;
       document.getElementById("navMyMatters").click();
       loadMyMatters();
@@ -97,6 +100,7 @@ async function loadWhoami() {
       document.getElementById("navBilling").hidden = false;
       document.getElementById("navTrust").hidden = false;
       document.getElementById("navInvoices").hidden = false;
+      document.getElementById("navGroupFinance").hidden = false;
     }
     // Review Queue and Deadlines are attorney-only server-side (ReviewGateService gates
     // every method, including reads) — only fetch them once we know the role, and only
