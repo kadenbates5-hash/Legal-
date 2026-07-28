@@ -2436,7 +2436,14 @@ async function handleAppointmentsRequest(
   if (segments.length === 0 && req.method === "GET") {
     const matterId = url.searchParams.get("matterId");
     const attorneyId = url.searchParams.get("attorneyId");
-    const result = matterId ? scheduling.listByMatter(matterId) : attorneyId ? scheduling.listByAttorney(attorneyId) : scheduling.listAll();
+    const result =
+      url.searchParams.get("pendingCalendarSync") === "true"
+        ? scheduling.listPendingCalendarSync()
+        : matterId
+          ? scheduling.listByMatter(matterId)
+          : attorneyId
+            ? scheduling.listByAttorney(attorneyId)
+            : scheduling.listAll();
     sendJson(res, 200, result);
     return;
   }
@@ -2489,6 +2496,17 @@ async function handleAppointmentsRequest(
         break;
       case "complete":
         result = scheduling.complete(actor, id);
+        break;
+      case "calendar-sync":
+        // The calendar-push sync engine's write-back — system-role only,
+        // same credential confirmDeadline requires for a calendar_system
+        // source. Records the vendor's event id (or clears it once a
+        // cancelled appointment's event has been deleted there).
+        result = scheduling.recordCalendarSync(
+          actor,
+          id,
+          typeof body["calendarEventId"] === "string" ? body["calendarEventId"] : undefined,
+        );
         break;
       default:
         sendJson(res, 404, { error: "not found" });

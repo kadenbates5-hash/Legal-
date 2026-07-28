@@ -1,6 +1,7 @@
 import { createSign } from "node:crypto";
 import type { DeadlineType } from "../core/deadline.js";
 import type { CalendarDeadlineEvent, CalendarEventsSource } from "./calendar-events-source.js";
+import type { CalendarEventDraft, CalendarEventPublisher } from "./calendar-event-publisher.js";
 
 /**
  * Real Google Calendar implementation of `CalendarEventsSource`, read-only
@@ -124,4 +125,70 @@ export function parseDeadlineEvent(item: GoogleCalendarApiEvent): CalendarDeadli
   const date = item.start?.date ?? item.start?.dateTime?.slice(0, 10);
   if (!matterId || !isDeadlineType(deadlineType) || !date) return undefined;
   return { eventId: item.id, matterId, deadlineType, date };
+}
+
+const APPOINTMENT_TYPE_LABEL: Record<CalendarEventDraft["type"], string> = {
+  consultation: "Consultation",
+  follow_up: "Follow-up",
+};
+
+/**
+ * Exported for testing without a live Google Calendar — the event-shape
+ * rules are the part actually worth unit-testing, the same reasoning
+ * `parseDeadlineEvent` gives on the read side. Structured data
+ * (`extendedProperties.private`), not the free-text summary, is what a
+ * future read would key on if one is ever added, kept consistent here
+ * even though nothing reads these back today.
+ */
+export function buildAppointmentEventBody(appointmentId: string, draft: CalendarEventDraft) {
+  const start = new Date(draft.startTime);
+  const end = new Date(start.getTime() + draft.durationMinutes * 60_000);
+  return {
+    summary: `${APPOINTMENT_TYPE_LABEL[draft.type]} — matter ${draft.matterId}`,
+    start: { dateTime: start.toISOString() },
+    end: { dateTime: end.toISOString() },
+    extendedProperties: {
+      private: { docketAppointment: "true", appointmentId, matterId: draft.matterId, attorneyId: draft.attorneyId, type: draft.type },
+    },
+  };
+}
+
+/** Same JWT/event-shape approach as `GoogleCalendarEventsSource`, in the write direction: pushes `Appointment`s out rather than reading deadline confirmations in. */
+export class GoogleCalendarEventPublisher implements CalendarEventPublisher {
+  #credentials: GoogleServiceAccountCredentials;
+  #calendarId: string;
+
+  constructor(params: { credentials: GoogleServiceAccountCredentials; calendarId: string }) {
+    this.#credentials = params.credentials;
+    this.#calendarId = params.calendarId;
+  }
+
+  async upsertEvent(appointmentId: string, existingEventId: string | undefined, draft: CalendarEventDraft): Promise<string> {
+    const token = await fetchAccessToken(this.#credentials, "https://www.googleapis.com/auth/calendar.events");
+    const body = buildAppointmentEventBody(appointmentId, draft);
+
+    const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.#calendarId)}/events`;
+    const url = existingEventId ? `${base}/${encodeURIComponent(existingEventId)}` : base;
+    const res = await fetch(url, {
+      method: existingEventId ? "PATCH" : "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      throw new Error(`Google Calendar event ${existingEventId ? "update" : "create"} failed (${res.status}): ${await res.text()}`);
+    }
+    const created = (await res.json()) as { id: string };
+    return created.id;
+  }
+
+  async deleteEvent(eventId: string): Promise<void> {
+    const token = await fetchAccessToken(this.#credentials, "https://www.googleapis.com/auth/calendar.events");
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.#calendarId)}/events/${encodeURIComponent(eventId)}`;
+    const res = await fetch(url, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    // 404/410 means it's already gone — deleting an already-deleted event
+    // isn't a failure, it's exactly what the caller wanted.
+    if (!res.ok && res.status !== 404 && res.status !== 410) {
+      throw new Error(`Google Calendar event delete failed (${res.status}): ${await res.text()}`);
+    }
+  }
 }

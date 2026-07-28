@@ -1,6 +1,6 @@
 import { isWithinBusinessHours, type FirmConfig } from "../config/firm-config.js";
 import type { AccessControl } from "./access-control.js";
-import type { Actor } from "./types.js";
+import { AccessDeniedError, type Actor } from "./types.js";
 
 /**
  * §2: "Schedule/reschedule consultations, send reminders." Core,
@@ -44,6 +44,21 @@ export interface Appointment {
   status: AppointmentStatus;
   reminders: ReminderRecord[];
   readonly history: AppointmentHistoryEntry[];
+  /**
+   * The external calendar vendor's event id, once this appointment has
+   * been pushed at least once. `undefined` before the first push, or
+   * again after the event has been deleted there (see `recordCalendarSync`).
+   */
+  calendarEventId?: string | undefined;
+  /**
+   * True whenever this appointment has changed since it was last pushed
+   * to the calendar — including on creation, so a brand-new appointment
+   * is always due for its first sync. Only `recordCalendarSync` (the
+   * sync engine's own write-back) clears it; nothing else in this class
+   * can mark a change as already synced, since core has no idea whether
+   * any vendor is even configured.
+   */
+  calendarSyncPending: boolean;
 }
 
 /** Default reminders: one day before, and one hour before. */
@@ -108,6 +123,7 @@ export class SchedulingService {
       status: "scheduled",
       reminders: this.#buildReminders(params.startTime),
       history: [{ status: "scheduled", at: new Date().toISOString(), note: undefined }],
+      calendarSyncPending: true,
     };
     this.#appointments.set(appointment.id, appointment);
     return appointment;
@@ -128,6 +144,7 @@ export class SchedulingService {
     appointment.status = "rescheduled";
     appointment.reminders = this.#buildReminders(params.newStartTime);
     appointment.history.push({ status: "rescheduled", at: new Date().toISOString(), note: undefined });
+    appointment.calendarSyncPending = true;
     return appointment;
   }
 
@@ -140,6 +157,9 @@ export class SchedulingService {
     }
     appointment.status = "cancelled";
     appointment.history.push({ status: "cancelled", at: new Date().toISOString(), note: reason });
+    // A cancelled appointment still needs a sync pass — that's what
+    // removes the now-stale event from the calendar.
+    appointment.calendarSyncPending = true;
     return appointment;
   }
 
@@ -152,6 +172,35 @@ export class SchedulingService {
     }
     appointment.status = "completed";
     appointment.history.push({ status: "completed", at: new Date().toISOString(), note: undefined });
+    return appointment;
+  }
+
+  /**
+   * Every appointment whose calendar event is out of date with its
+   * current state — new, rescheduled, cancelled, or never pushed at
+   * all. The sync engine's whole read side; nothing here knows or cares
+   * whether any calendar vendor is even configured.
+   */
+  listPendingCalendarSync(): Appointment[] {
+    return this.listAll().filter((a) => a.calendarSyncPending);
+  }
+
+  /**
+   * The sync engine's write-back after a successful push: records the
+   * vendor's event id (or `undefined`, once a cancelled appointment's
+   * event has been deleted there) and clears the pending flag. Restricted
+   * to the `"system"` role — the same credential `confirmDeadline`
+   * requires for a `calendar_system` source — since this is a machine
+   * writing sync metadata about itself, not a human changing what the
+   * appointment actually is.
+   */
+  recordCalendarSync(actor: Actor, id: string, calendarEventId: string | undefined): Appointment {
+    if (actor.role !== "system") {
+      throw new AccessDeniedError(`recording a calendar sync requires the system credential (got role '${actor.role}')`);
+    }
+    const appointment = this.#require(id);
+    appointment.calendarEventId = calendarEventId;
+    appointment.calendarSyncPending = false;
     return appointment;
   }
 
@@ -212,6 +261,10 @@ export class SchedulingService {
         ...snapshot,
         reminders: snapshot.reminders.map((r) => ({ ...r })),
         history: snapshot.history.map((h) => ({ ...h })),
+        // A snapshot predating this field has never been pushed anywhere —
+        // treat it as pending so turning the sync on catches up on it,
+        // rather than silently treating "never recorded" as "already synced".
+        calendarSyncPending: snapshot.calendarSyncPending ?? true,
       });
     }
     return service;

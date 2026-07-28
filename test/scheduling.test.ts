@@ -346,3 +346,56 @@ describe("SchedulingService — listing and snapshots", () => {
     ).toThrow(/overlapping/);
   });
 });
+
+describe("SchedulingService — calendar sync", () => {
+  const system: Actor = { id: "sys", role: "system" };
+
+  it("marks a new appointment pending, and it appears in the pending list", () => {
+    const service = new SchedulingService({ firmConfig: makeFirmConfig() });
+    const appt = service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
+    expect(appt.calendarSyncPending).toBe(true);
+    expect(service.listPendingCalendarSync().map((a) => a.id)).toEqual([appt.id]);
+  });
+
+  it("recordCalendarSync clears the pending flag and stores the vendor event id", () => {
+    const service = new SchedulingService({ firmConfig: makeFirmConfig() });
+    const appt = service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
+    const updated = service.recordCalendarSync(system, appt.id, "gcal-event-1");
+    expect(updated.calendarSyncPending).toBe(false);
+    expect(updated.calendarEventId).toBe("gcal-event-1");
+    expect(service.listPendingCalendarSync()).toEqual([]);
+  });
+
+  it("rescheduling or cancelling marks it pending again, even after a previous sync", () => {
+    const service = new SchedulingService({ firmConfig: makeFirmConfig() });
+    const appt = service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
+    service.recordCalendarSync(system, appt.id, "gcal-event-1");
+
+    service.reschedule(receptionist, appt.id, { newStartTime: new Date(DURING_BUSINESS_HOURS.getTime() + 3_600_000) });
+    expect(service.get(appt.id)?.calendarSyncPending).toBe(true);
+    // The old event id is preserved until the sync engine overwrites it — a reschedule updates the same event, it doesn't lose track of it.
+    expect(service.get(appt.id)?.calendarEventId).toBe("gcal-event-1");
+
+    service.recordCalendarSync(system, appt.id, "gcal-event-1");
+    service.cancel(receptionist, appt.id);
+    expect(service.get(appt.id)?.calendarSyncPending).toBe(true);
+  });
+
+  it("restricts recordCalendarSync to the system role", () => {
+    const service = new SchedulingService({ firmConfig: makeFirmConfig() });
+    const appt = service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
+    expect(() => service.recordCalendarSync(receptionist, appt.id, "gcal-event-1")).toThrow(AccessDeniedError);
+    expect(() => service.recordCalendarSync({ id: "a1", role: "attorney" }, appt.id, "gcal-event-1")).toThrow(AccessDeniedError);
+  });
+
+  it("an old snapshot with no calendarSyncPending field defaults to pending, so turning sync on catches up", () => {
+    const config = makeFirmConfig();
+    const service = new SchedulingService({ firmConfig: config });
+    const appt = service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
+    service.recordCalendarSync(system, appt.id, "gcal-event-1");
+
+    const legacySnapshot = service.toSnapshot().map(({ calendarSyncPending: _drop, ...rest }) => rest);
+    const restored = SchedulingService.fromSnapshot(legacySnapshot as never, { firmConfig: config });
+    expect(restored.listPendingCalendarSync().map((a) => a.id)).toEqual([appt.id]);
+  });
+});

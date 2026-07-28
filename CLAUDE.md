@@ -340,9 +340,67 @@ by hand), and it doesn't complete §5's vendor due-diligence checklist
 (zero-retention, no training on firm data, storage jurisdiction, subpoena
 risk, encryption) for Google Calendar specifically — that's the firm's
 decision to make about the vendor, separate from this technical
-integration. It also doesn't sync the other direction: `Appointment`s
-from `core/scheduling.ts` aren't pushed to Google Calendar as events —
-that would be a separate, additive piece if wanted later.
+integration.
+
+### Pushing appointments to the calendar (the other direction — resolved)
+
+The gap named above — `Appointment`s never appearing on the shared
+calendar — is now closed, as a genuinely separate, additive piece: it
+shares no code path with the inbound deadline sync beyond the JWT bearer
+flow in `google-calendar.ts`.
+
+- `core/scheduling.ts`'s `Appointment` gained two fields:
+  `calendarEventId` (the vendor's event id, once pushed) and
+  `calendarSyncPending` (true on creation and after every reschedule/
+  cancel — nothing else in this class ever clears it, since core has no
+  idea whether any calendar vendor is even configured). `listPendingCalendarSync()`
+  is the sync engine's entire read side; `recordCalendarSync()` is its
+  write-back, restricted to the `"system"` role the same way
+  `confirmDeadline` requires it for a `calendar_system` source — this is
+  a machine recording sync metadata about itself, not a human changing
+  what the appointment actually is. An old snapshot with no
+  `calendarSyncPending` field defaults to pending, so turning this on
+  for the first time catches up on every existing appointment rather
+  than silently treating "never recorded" as "already synced."
+- `integrations/calendar-event-publisher.ts` — `CalendarEventPublisher`,
+  the vendor-agnostic seam for the write direction (deliberately a
+  separate interface from `CalendarEventsSource`, which only reads —
+  a vendor could reasonably support one without the other).
+  `google-calendar.ts`'s `GoogleCalendarEventPublisher` is the only
+  implementation, reusing the same service-account JWT flow as the read
+  side. `buildAppointmentEventBody()` is exported standalone for the
+  same reason `parseDeadlineEvent()` is: the event-shape rules are the
+  part actually worth unit-testing without a live Google Calendar.
+  Structured data (`extendedProperties.private`: `appointmentId`,
+  `matterId`, `attorneyId`, `type`), not the free-text summary, is what
+  a future read would key on if one's ever added.
+- `integrations/appointment-calendar-sync.ts` — `AppointmentCalendarSync`,
+  the vendor-agnostic engine, same shape as `CalendarDeadlineSync` in the
+  other direction: it reads `GET /api/appointments?pendingCalendarSync=true`
+  and writes back through `POST /api/appointments/:id/calendar-sync`,
+  both using the `x-system-api-key` credential like any other API
+  client — never a shortcut straight into `SchedulingService`. A
+  cancelled appointment with a recorded event gets that event deleted
+  and its id cleared; one that was cancelled before ever being synced
+  just gets marked done, with nothing to delete. A per-appointment
+  failure is recorded rather than aborting the whole run, same as the
+  deadline sync.
+- `sync-appointments-to-calendar.ts` — the standalone entry point
+  (`npm run sync:calendar:push`), deliberately its own process rather
+  than running inside the main server, same reasoning as
+  `sync-calendar-deadlines.ts`. Configured via the same
+  `GOOGLE_SERVICE_ACCOUNT_EMAIL`/`GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`/
+  `GOOGLE_CALENDAR_ID` and `DOCKET_BASE_URL`/`DOCKET_SYSTEM_API_KEY` —
+  `GOOGLE_CALENDAR_ID` may point at the same calendar the inbound sync
+  reads from, or a different one; this project doesn't assume either
+  way.
+
+What this doesn't do: read anything back from the events it creates (no
+"did someone move this on the calendar" reconciliation — the calendar
+event is a one-way projection of Docket's own record, which stays the
+source of truth), or push anything for a `"completed"` appointment
+beyond keeping its existing event current — there's no notion of
+marking an event as historical on the calendar side.
 
 ## Voicebox voice integration (§8 build order step 6's remaining piece — resolved)
 
@@ -2015,6 +2073,7 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 # FIRM_CONFIG_FILE=./data/firm-config.json npm run start:review-ui        # enable scheduling business-hours/attorney-assignment/branding, and the invoice letterhead (firmName + letterhead.addressLines/phone/billingEmail/paymentInstructions)
 # CALENDAR_SYSTEM_API_KEY=... npm run start:review-ui                     # pin the calendar-integration key instead of auto-generating one
 GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
+# ... && npm run sync:calendar:push                                       # one-shot: push pending appointments out to Google Calendar (same env vars; the other sync direction)
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit

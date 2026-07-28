@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDeadlineEvent } from "../src/integrations/google-calendar.js";
+import { parseDeadlineEvent, buildAppointmentEventBody } from "../src/integrations/google-calendar.js";
 
 describe("parseDeadlineEvent", () => {
   it("parses a valid all-day event", () => {
@@ -49,5 +49,48 @@ describe("parseDeadlineEvent", () => {
   it("rejects an event with no extendedProperties", () => {
     const event = parseDeadlineEvent({ id: "evt_6", start: { date: "2026-09-01" } });
     expect(event).toBeUndefined();
+  });
+});
+
+describe("buildAppointmentEventBody", () => {
+  it("computes the end time from start + duration, and labels a consultation", () => {
+    const body = buildAppointmentEventBody("appt_1", {
+      matterId: "m1",
+      attorneyId: "a1",
+      type: "consultation",
+      startTime: "2026-09-01T14:00:00.000Z",
+      durationMinutes: 30,
+    });
+    expect(body.summary).toBe("Consultation — matter m1");
+    expect(body.start).toEqual({ dateTime: "2026-09-01T14:00:00.000Z" });
+    expect(body.end).toEqual({ dateTime: "2026-09-01T14:30:00.000Z" });
+  });
+
+  it("labels a follow-up distinctly", () => {
+    const body = buildAppointmentEventBody("appt_2", {
+      matterId: "m2",
+      attorneyId: "a1",
+      type: "follow_up",
+      startTime: "2026-09-01T14:00:00.000Z",
+      durationMinutes: 15,
+    });
+    expect(body.summary).toBe("Follow-up — matter m2");
+  });
+
+  it("carries structured data a future read could key on, not just the free-text summary", () => {
+    const body = buildAppointmentEventBody("appt_3", {
+      matterId: "m1",
+      attorneyId: "a7",
+      type: "consultation",
+      startTime: "2026-09-01T14:00:00.000Z",
+      durationMinutes: 30,
+    });
+    expect(body.extendedProperties.private).toEqual({
+      docketAppointment: "true",
+      appointmentId: "appt_3",
+      matterId: "m1",
+      attorneyId: "a7",
+      type: "consultation",
+    });
   });
 });

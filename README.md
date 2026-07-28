@@ -120,7 +120,11 @@ altered. `npm run anchor:audit` runs it on a schedule. See CLAUDE.md's
 "Transport & session security" for the details, and its "Not yet built"
 section for what's still ahead
 (the one-time Twilio console step of pointing a real phone number at
-this, Google Calendar key rotation/vendor due-diligence). Sign-in
+this, Google Calendar key rotation/vendor due-diligence). The calendar
+integration now runs both directions — `npm run sync:calendar` reads
+deadline confirmations in, `npm run sync:calendar:push` pushes booked
+appointments out as events, each its own standalone, cron-friendly
+process using the same service-account credentials. Sign-in
 supports TOTP two-factor authentication with single-use recovery codes —
 enrolled per-person from the Security panel, reset by an attorney only
 as a last resort, and audited when they do. It can also be made

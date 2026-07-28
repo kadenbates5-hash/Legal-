@@ -274,4 +274,49 @@ describe("appointments HTTP API", () => {
 
     await new Promise<void>((resolve) => hookServer.close(() => resolve()));
   });
+
+  it("filters to only appointments pending a calendar sync", async () => {
+    const appt = scheduling.scheduleConsultation({ id: "r1", role: "receptionist" }, {
+      matterId: "m1",
+      startTime: new Date("2026-08-01T15:00:00Z"),
+      attorneyId: "a1",
+    });
+    auth.setSystemApiKey("test-system-key-1234567890");
+    scheduling.recordCalendarSync({ id: "sys", role: "system" }, appt.id, "gcal-1");
+
+    const stillPending = scheduling.scheduleConsultation({ id: "r1", role: "receptionist" }, {
+      matterId: "m1",
+      startTime: new Date("2026-08-01T16:00:00Z"),
+      attorneyId: "a1",
+    });
+
+    const res = await fetch(`${baseUrl}/api/appointments?pendingCalendarSync=true`, withCookie(receptionistCookie));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ id: string }>;
+    expect(body.map((a) => a.id)).toEqual([stillPending.id]);
+  });
+
+  it("restricts recording a calendar sync to the system credential", async () => {
+    const appt = scheduling.scheduleConsultation({ id: "r1", role: "receptionist" }, {
+      matterId: "m1",
+      startTime: new Date("2026-08-01T15:00:00Z"),
+      attorneyId: "a1",
+    });
+
+    const denied = await fetch(
+      `${baseUrl}/api/appointments/${appt.id}/calendar-sync`,
+      withCookie(receptionistCookie, { method: "POST", body: JSON.stringify({ calendarEventId: "gcal-1" }) }),
+    );
+    expect(denied.status).toBe(403);
+
+    auth.setSystemApiKey("test-system-key-1234567890");
+    const allowed = await fetch(`${baseUrl}/api/appointments/${appt.id}/calendar-sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-system-api-key": "test-system-key-1234567890" },
+      body: JSON.stringify({ calendarEventId: "gcal-1" }),
+    });
+    expect(allowed.status).toBe(200);
+    expect(scheduling.get(appt.id)?.calendarEventId).toBe("gcal-1");
+    expect(scheduling.get(appt.id)?.calendarSyncPending).toBe(false);
+  });
 });
