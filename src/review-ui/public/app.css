@@ -583,6 +583,65 @@ pre.mono {
   margin-bottom: 1rem;
 }
 
+/* ---------- Toasts ----------
+   Confirmation for a mutation that used to be silent: an approve, a
+   booking, a saved draft previously gave no feedback beyond the list
+   re-rendering (easy to miss) or, on failure, the shared #error banner.
+   Toasts close that gap for the success side without touching #error's
+   existing behavior for failures. Stacked bottom-right, newest on top,
+   auto-dismissing but always closable by hand. */
+.toast-container {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 50;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.6rem;
+  max-width: min(360px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  padding: 0.7rem 0.8rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  animation: toast-in 0.25s var(--ease);
+}
+.toast.leaving { animation: toast-out 0.18s var(--ease) forwards; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(4px) scale(0.97); } }
+.toast::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 0.3rem;
+  flex-shrink: 0;
+  background: var(--accent);
+}
+.toast.success::before { background: var(--ok); }
+.toast.error::before { background: var(--danger); }
+.toast .msg { flex: 1; min-width: 0; word-break: break-word; }
+.toast .close {
+  all: unset;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.1rem;
+  flex-shrink: 0;
+}
+.toast .close:hover { color: var(--text); }
+
 /* ---------- Small screens ----------
    A 22-item sidebar plus a 224px reservation doesn't fit a tablet in
    portrait, let alone a phone — it used to just get silently clipped.

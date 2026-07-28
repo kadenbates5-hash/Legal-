@@ -56,6 +56,38 @@ function showError(message) {
   document.getElementById("error").textContent = message || "";
 }
 
+const TOAST_DEFAULT_MS = 4000;
+
+/**
+ * Success/info/error feedback for actions that used to be silent — the
+ * list re-rendering was the only sign anything happened, easy to miss.
+ * Deliberately separate from showError()/#error: that banner is for
+ * request-blocking failures the user needs to read before continuing,
+ * this is a passing confirmation that clears itself.
+ */
+function showToast(message, kind) {
+  if (!message) return;
+  const container = document.getElementById("toasts");
+  const toast = document.createElement("div");
+  toast.className = `toast ${kind || "success"}`;
+  const msg = document.createElement("span");
+  msg.className = "msg";
+  msg.textContent = message;
+  const close = document.createElement("button");
+  close.className = "close";
+  close.type = "button";
+  close.setAttribute("aria-label", "Dismiss");
+  close.textContent = "×";
+  const dismiss = () => {
+    toast.classList.add("leaving");
+    toast.addEventListener("animationend", () => toast.remove(), { once: true });
+  };
+  close.addEventListener("click", dismiss);
+  toast.append(msg, close);
+  container.append(toast);
+  setTimeout(dismiss, TOAST_DEFAULT_MS);
+}
+
 let currentRole = null;
 let currentActorId = null;
 
@@ -273,6 +305,7 @@ document.getElementById("mfaConfirmBtn").addEventListener("click", async () => {
     // Clears the firm-policy banner immediately, without waiting for the
     // next full page load, if this enrollment is what it was waiting on.
     document.getElementById("mfaSetupBanner").hidden = true;
+    showToast("Two-factor authentication enabled.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -286,6 +319,7 @@ document.getElementById("mfaRegenerateBtn").addEventListener("click", async () =
     const { recoveryCodes } = await api("/api/mfa/recovery-codes", { method: "POST", body: JSON.stringify({ password }) });
     showRecoveryCodes(recoveryCodes);
     await loadMfaStatus();
+    showToast("New recovery codes issued — the old ones no longer work.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -662,12 +696,22 @@ function mkButton(label, onClick) {
   return btn;
 }
 
+const REVIEW_ACTION_LABEL = {
+  approve: "Approved.",
+  reject: "Rejected.",
+  "request-revision": "Sent back for revision.",
+  release: "Released.",
+  "clear-flag": "Flag cleared.",
+};
+
 async function act(path, body, id) {
   showError("");
   try {
     await api(path, { method: "POST", body: JSON.stringify(body) });
     await loadQueue();
     await loadDetail(id);
+    const action = path.split("/").pop();
+    showToast(REVIEW_ACTION_LABEL[action] || "Done.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -728,6 +772,7 @@ async function confirmDeadline() {
       }),
     });
     await checkDeadline();
+    showToast("Deadline confirmation recorded.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -773,6 +818,7 @@ async function bookAppointment() {
     document.getElementById("scheduleListMatterId").value = document.getElementById("apptMatterId").value;
     await loadAppointments();
     await loadDueReminders();
+    showToast("Appointment booked.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -794,13 +840,23 @@ async function loadAppointments() {
       if (appt.status === "scheduled" || appt.status === "rescheduled") {
         const cancelBtn = mkButton("Cancel", async () => {
           const reason = prompt("Cancellation reason (optional)?") || undefined;
-          await api(`/api/appointments/${appt.id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
-          await loadAppointments();
+          try {
+            await api(`/api/appointments/${appt.id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
+            await loadAppointments();
+            showToast("Appointment cancelled.", "success");
+          } catch (err) {
+            showError(err.message);
+          }
         });
         cancelBtn.classList.add("danger");
         const completeBtn = mkButton("Complete", async () => {
-          await api(`/api/appointments/${appt.id}/complete`, { method: "POST", body: "{}" });
-          await loadAppointments();
+          try {
+            await api(`/api/appointments/${appt.id}/complete`, { method: "POST", body: "{}" });
+            await loadAppointments();
+            showToast("Appointment marked complete.", "success");
+          } catch (err) {
+            showError(err.message);
+          }
         });
         li.appendChild(document.createElement("br"));
         li.append(cancelBtn, completeBtn);
@@ -954,6 +1010,7 @@ async function loadDraftDetail(id) {
           });
           await loadMatterDrafts();
           await loadDraftDetail(id);
+          showToast("Revision saved.", "success");
         } catch (err) {
           showError(err.message);
         }
@@ -967,6 +1024,7 @@ async function loadDraftDetail(id) {
           });
           await loadMatterDrafts();
           await loadDraftDetail(id);
+          showToast("Submitted to the Review Queue.", "success");
         } catch (err) {
           showError(err.message);
         }
@@ -998,6 +1056,7 @@ async function createTemplateDraft() {
     document.getElementById("draftTemplateContent").value = "";
     document.getElementById("draftDeadlineDate").value = "";
     await loadMatterDrafts();
+    showToast("Draft created.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -1018,6 +1077,7 @@ async function createResearchDraft() {
     document.getElementById("researchContent").value = "";
     document.getElementById("researchCitations").value = "";
     await loadMatterDrafts();
+    showToast("Research summary drafted.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -1032,6 +1092,7 @@ async function createBillingDraft() {
     });
     document.getElementById("billingContent").value = "";
     await loadMatterDrafts();
+    showToast("Billing narrative drafted.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -1182,6 +1243,7 @@ async function loadCaseDetail(matterId) {
             body: JSON.stringify({ visible: !doc.visibleToClient }),
           });
           await loadCaseDetail(matterId);
+          showToast(doc.visibleToClient ? "No longer shared with client." : "Shared with client.", "success");
         } catch (err) {
           showError(err.message);
         }
@@ -1194,6 +1256,7 @@ async function loadCaseDetail(matterId) {
             draftReportBtn.disabled = true;
             await api(`/api/pdf-reports/matters/${encodeURIComponent(matterId)}/${doc.id}/draft-report`, { method: "POST" });
             await loadCaseDetail(matterId);
+            showToast("Report drafted from PDF.", "success");
           } catch (err) {
             showError(err.message);
           } finally {
@@ -1253,6 +1316,7 @@ async function loadCaseDetail(matterId) {
         });
         await loadCases();
         await loadCaseDetail(matterId);
+        showToast("Document uploaded.", "success");
       } catch (err) {
         showError(err.message);
       }
@@ -1295,6 +1359,7 @@ async function searchResearch() {
             }),
           });
           await loadResearchMatter();
+          showToast("Saved to matter.", "success");
         } catch (err) {
           showError(err.message);
         }
@@ -1328,6 +1393,7 @@ async function loadResearchMatter() {
         try {
           await api(`/api/research/matters/${encodeURIComponent(matterId)}/${ref.id}`, { method: "DELETE" });
           await loadResearchMatter();
+          showToast("Reference removed.", "success");
         } catch (err) {
           showError(err.message);
         }
@@ -1542,6 +1608,7 @@ document.getElementById("setScheduleEntry").addEventListener("click", async () =
       body: JSON.stringify({ date, status, ...(note ? { note } : {}) }),
     });
     document.getElementById("scheduleNote").value = "";
+    showToast("Schedule entry saved.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -1611,6 +1678,7 @@ document.getElementById("logBillingHours").addEventListener("click", async () =>
     document.getElementById("billingDescription").value = "";
     await loadBillingMatter();
     await loadMyBillingHours();
+    showToast("Hours logged.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -1723,6 +1791,7 @@ async function loadAccounts() {
         try {
           await api(`/api/accounts/${acct.id}/${acct.disabled ? "enable" : "disable"}`, { method: "POST", body: "{}" });
           await loadAccounts();
+          showToast(acct.disabled ? `${acct.username} enabled.` : `${acct.username} disabled.`, "success");
         } catch (err) {
           showError(err.message);
         }
@@ -1735,6 +1804,7 @@ async function loadAccounts() {
         try {
           await api(`/api/accounts/${acct.id}/reset-password`, { method: "POST", body: JSON.stringify({ newPassword }) });
           await loadAccounts();
+          showToast(`Password reset for ${acct.username}.`, "success");
         } catch (err) {
           showError(err.message);
         }
@@ -1753,6 +1823,7 @@ async function loadAccounts() {
             try {
               await api(`/api/accounts/${acct.id}/reset-mfa`, { method: "POST", body: "{}" });
               await loadAccounts();
+              showToast(`Two-factor authentication reset for ${acct.username}.`, "success");
             } catch (err) {
               showError(err.message);
             }
@@ -1773,6 +1844,7 @@ async function loadAccounts() {
               body: JSON.stringify({ matterId: matterInput.value }),
             });
             await loadAccounts();
+            showToast(`${acct.username} assigned to ${matterInput.value}.`, "success");
           } catch (err) {
             showError(err.message);
           }
@@ -1784,6 +1856,7 @@ async function loadAccounts() {
             try {
               await api(`/api/accounts/${acct.id}/unassign-matter`, { method: "POST", body: "{}" });
               await loadAccounts();
+              showToast(`${acct.username} unassigned.`, "success");
             } catch (err) {
               showError(err.message);
             }
@@ -1811,6 +1884,7 @@ async function loadAccounts() {
             try {
               await api(`/api/accounts/${acct.id}/revoke-matter-access`, { method: "POST", body: JSON.stringify({ matterId }) });
               await loadAccounts();
+              showToast(`Access to ${matterId} revoked.`, "success");
             } catch (err) {
               showError(err.message);
             }
@@ -1828,12 +1902,14 @@ async function loadAccounts() {
           showError("");
           if (!matterInput.value.trim()) return;
           try {
+            const grantedMatterId = matterInput.value.trim();
             await api(`/api/accounts/${acct.id}/grant-matter-access`, {
               method: "POST",
-              body: JSON.stringify({ matterId: matterInput.value.trim() }),
+              body: JSON.stringify({ matterId: grantedMatterId }),
             });
             matterInput.value = "";
             await loadAccounts();
+            showToast(`Access to ${grantedMatterId} granted.`, "success");
           } catch (err) {
             showError(err.message);
           }
@@ -1860,6 +1936,7 @@ async function createAccount() {
     document.getElementById("newAccountDisplayName").value = "";
     document.getElementById("newAccountPassword").value = "";
     await loadAccounts();
+    showToast(`Account created for ${username}.`, "success");
   } catch (err) {
     showError(err.message);
   }
@@ -2470,6 +2547,8 @@ async function matterAction(matterId, action, body) {
     // the attorney should know they've just left behind.
     if (result.warnings?.length) {
       showError(`Matter closed, but note: ${result.warnings.join(" ")}`);
+    } else {
+      showToast(action === "close" ? "Matter closed." : "Matter reopened.", "success");
     }
   } catch (err) {
     showError(err.message);
@@ -2538,7 +2617,7 @@ async function saveMatterRecord() {
     });
     await loadMatterList();
     await refreshMatterOptions();
-    showError("Matter record saved.");
+    showToast("Matter record saved.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -2636,6 +2715,7 @@ async function loadTrustLedger() {
               body: JSON.stringify({ reason }),
             });
             await loadTrustLedger();
+            showToast("Entry reversed.", "success");
           } catch (err) {
             showError(err.message);
           }
@@ -2680,6 +2760,7 @@ document.getElementById("recordTrustEntry").addEventListener("click", async () =
     document.getElementById("trustDescription").value = "";
     document.getElementById("trustReference").value = "";
     await loadTrustLedger();
+    showToast("Trust entry recorded.", "success");
   } catch (err) {
     showError(err.message);
   }
@@ -2763,6 +2844,7 @@ async function sendReminder(row) {
       body: "{}",
     });
     await loadOutstanding();
+    showToast(`Reminder sent to ${who}.`, "success");
   } catch (err) {
     showError(err.message);
   }
@@ -2945,6 +3027,7 @@ async function showInvoice(matterId, invoiceId) {
           try {
             await api(`/api/invoices/matters/${encodeURIComponent(matterId)}/${invoiceId}/lines/${l.id}`, { method: "DELETE" });
             await showInvoice(matterId, invoiceId);
+            showToast("Line removed.", "success");
           } catch (err) { showError(err.message); }
         });
         rm.classList.add("danger");
@@ -2966,6 +3049,16 @@ async function showInvoice(matterId, invoiceId) {
     }
     if (inv.payments.length === 0) pays.innerHTML = '<li class="static empty">Nothing received yet.</li>';
 
+    const INVOICE_ACTION_LABEL = {
+      send: "Invoice sent to client.",
+      void: "Invoice voided.",
+      lines: "Line added.",
+      "add-time": "Logged time added.",
+      payments: "Payment recorded.",
+      "pay-from-trust": "Applied from trust.",
+      charge: "Card charged.",
+      email: "Invoice emailed.",
+    };
     const actions = document.getElementById("invoiceActions");
     const act = async (path, body) => {
       showError("");
@@ -2977,6 +3070,7 @@ async function showInvoice(matterId, invoiceId) {
         await loadInvoices();
         await loadOutstanding();
         await showInvoice(matterId, invoiceId);
+        showToast(INVOICE_ACTION_LABEL[path] || "Done.", "success");
       } catch (err) { showError(err.message); }
     };
     if (isDraft && currentRole === "attorney") {
@@ -3110,6 +3204,7 @@ document.getElementById("newInvoice").addEventListener("click", async () => {
     const inv = await api(`/api/invoices/matters/${encodeURIComponent(matterId)}`, { method: "POST", body: "{}" });
     await loadInvoices();
     await showInvoice(matterId, inv.id);
+    showToast("Draft invoice created.", "success");
   } catch (err) { showError(err.message); }
 });
 
@@ -3181,6 +3276,7 @@ document.getElementById("recordWorkedHours").addEventListener("click", async () 
     document.getElementById("payrollHours").value = "";
     document.getElementById("payrollDescription").value = "";
     await loadWorkedHours();
+    showToast("Hours recorded.", "success");
   } catch (err) { showError(err.message); }
 });
 
@@ -3196,6 +3292,7 @@ document.getElementById("setPayRate").addEventListener("click", async () => {
     });
     document.getElementById("payRateAmount").value = "";
     await loadPayRates();
+    showToast("Pay rate set.", "success");
   } catch (err) { showError(err.message); }
 });
 
@@ -3416,6 +3513,7 @@ async function correctShift(s) {
     });
     await loadTimesheet();
     await loadClockSummary();
+    showToast("Punch corrected.", "success");
   } catch (err) { showError(err.message); }
 }
 
@@ -3425,6 +3523,7 @@ async function postShiftToPayroll(s) {
   try {
     await api(`/api/time-clock/shifts/${encodeURIComponent(s.id)}/post-to-payroll`, { method: "POST", body: "{}" });
     await loadTimesheet();
+    showToast("Posted to payroll.", "success");
   } catch (err) { showError(err.message); }
 }
 
@@ -3457,6 +3556,7 @@ async function punch(action) {
     await loadClockSummary();
     await loadTimesheet();
     if (currentRole === "attorney") await loadOnTheClock();
+    showToast(action === "clock-in" ? "Clocked in." : "Clocked out.", "success");
   } catch (err) { showError(err.message); }
 }
 
