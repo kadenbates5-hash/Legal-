@@ -54,12 +54,27 @@
 
 <div id="toasts" class="toast-container" aria-live="polite" aria-atomic="false"></div>
 
+<div id="commandPalette" class="palette-overlay hidden" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <input id="paletteInput" class="palette-input" type="text" placeholder="Jump to a panel…" autocomplete="off" aria-label="Jump to a panel" />
+    <ul id="paletteResults" class="palette-results"></ul>
+    <div class="palette-hint">
+      <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate</span>
+      <span><kbd>&crarr;</kbd> select</span>
+      <span><kbd>esc</kbd> close</span>
+    </div>
+  </div>
+</div>
+
 <div class="main">
   <div class="topbar">
     <h1 id="panelTitle">Home</h1>
     <div class="who">
       <input id="globalSearch" class="global-search" type="search" placeholder="Search matters, drafts, files…" hidden
              autocomplete="off" aria-label="Search everything you can see" />
+      <button class="btn palette-trigger" id="paletteTrigger" type="button" aria-label="Open command palette" title="Jump to a panel">
+        Jump to… <kbd id="paletteTriggerKey">Ctrl K</kbd>
+      </button>
       <span id="whoami"></span>
       <button class="btn" id="changePasswordBtn">Change password</button>
       <button class="btn" id="logout">Log out</button>

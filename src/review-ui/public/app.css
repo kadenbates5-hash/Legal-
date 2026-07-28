@@ -642,6 +642,102 @@ pre.mono {
 }
 .toast .close:hover { color: var(--text); }
 
+/* ---------- kbd ---------- */
+kbd {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  color: var(--text-muted);
+}
+
+/* ---------- Command palette ----------
+   With 20+ panels behind a sidebar (or a scrolling horizontal bar on
+   mobile), clicking there every time is slower than typing a few
+   letters. Cmd/Ctrl+K opens this over whatever panel is showing;
+   Escape or a click on the backdrop closes it without navigating. */
+.palette-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.palette-trigger kbd { font-size: 0.68rem; }
+.palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: min(14vh, 120px);
+  background: rgba(10, 12, 18, 0.5);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  animation: palette-backdrop-in 0.15s var(--ease);
+}
+.palette-overlay.hidden { display: none; }
+@keyframes palette-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+.palette {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 1rem;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  animation: palette-in 0.18s var(--ease);
+}
+@keyframes palette-in { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+.palette-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 0.95rem 1.1rem;
+  font-size: 1rem;
+  color: var(--text);
+  background: transparent;
+}
+.palette-input:focus { outline: none; }
+.palette-results {
+  list-style: none;
+  margin: 0;
+  padding: 0.4rem;
+  max-height: min(50vh, 380px);
+  overflow-y: auto;
+}
+.palette-results li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.palette-results li .palette-group { color: var(--text-muted); font-size: 0.75rem; margin-left: auto; }
+.palette-results li.active { background: var(--accent-soft); color: var(--accent); }
+.palette-results li.active .palette-group { color: var(--accent); opacity: 0.75; }
+.palette-results .palette-empty { color: var(--text-muted); cursor: default; }
+.palette-hint {
+  display: flex;
+  gap: 1rem;
+  padding: 0.55rem 1.1rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.palette-hint span { display: flex; align-items: center; gap: 0.3rem; }
+
 /* ---------- Small screens ----------
    A 22-item sidebar plus a 224px reservation doesn't fit a tablet in
    portrait, let alone a phone — it used to just get silently clipped.
@@ -672,4 +768,6 @@ pre.mono {
   .topbar { padding: 0.75rem 1rem; flex-wrap: wrap; }
   .content { padding: 1.1rem; }
   .global-search { min-width: 0; flex: 1 1 160px; }
+  .palette-trigger kbd { display: none; }
+  .palette-overlay { padding-top: 8vh; }
 }

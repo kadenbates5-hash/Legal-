@@ -37,6 +37,124 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
   });
 }
 
+/* ===== Command palette =====
+   With 20+ panels behind a sidebar (a horizontally-scrolling bar on
+   mobile), clicking there every time is slower than typing a few
+   letters. Cmd/Ctrl+K opens this over whatever panel is showing;
+   Escape or a click on the backdrop closes it without navigating.
+   Built from the *visible* nav buttons at open time rather than a
+   static list, so it automatically matches whatever a role can
+   currently reach — a client account still only sees My Matters and
+   Security, same as the sidebar itself. */
+let paletteAllItems = [];
+let paletteFiltered = [];
+let paletteActiveIndex = 0;
+let paletteLastFocused = null;
+
+function buildPaletteItems() {
+  const items = [];
+  let currentGroup = "";
+  for (const el of document.querySelectorAll("nav.nav > *")) {
+    if (el.classList.contains("nav-group")) {
+      if (!el.hidden) currentGroup = el.textContent.trim();
+      continue;
+    }
+    if (el.tagName === "BUTTON" && !el.hidden) {
+      items.push({ label: el.textContent.trim(), group: currentGroup, action: () => el.click() });
+    }
+  }
+  items.push({ label: "Change password", group: "Account", action: () => document.getElementById("changePasswordBtn").click() });
+  items.push({ label: "Log out", group: "Account", action: () => document.getElementById("logout").click() });
+  return items;
+}
+
+function filterPaletteItems(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return paletteAllItems;
+  return paletteAllItems.filter((item) => item.label.toLowerCase().includes(q) || item.group.toLowerCase().includes(q));
+}
+
+function renderPaletteResults() {
+  const list = document.getElementById("paletteResults");
+  list.innerHTML = "";
+  if (paletteFiltered.length === 0) {
+    list.innerHTML = '<li class="palette-empty">No matching panel.</li>';
+    return;
+  }
+  paletteFiltered.forEach((item, i) => {
+    const li = document.createElement("li");
+    li.className = i === paletteActiveIndex ? "active" : "";
+    li.innerHTML = `<span>${escapeHtml(item.label)}</span>${item.group ? `<span class="palette-group">${escapeHtml(item.group)}</span>` : ""}`;
+    li.addEventListener("mouseenter", () => {
+      paletteActiveIndex = i;
+      renderPaletteResults();
+    });
+    li.addEventListener("click", () => activatePaletteItem(i));
+    list.appendChild(li);
+  });
+}
+
+function activatePaletteItem(i) {
+  const item = paletteFiltered[i];
+  if (!item) return;
+  closePalette();
+  item.action();
+}
+
+function openPalette() {
+  paletteLastFocused = document.activeElement;
+  paletteAllItems = buildPaletteItems();
+  paletteFiltered = paletteAllItems;
+  paletteActiveIndex = 0;
+  document.getElementById("paletteInput").value = "";
+  renderPaletteResults();
+  document.getElementById("commandPalette").classList.remove("hidden");
+  document.getElementById("paletteInput").focus();
+}
+
+function closePalette() {
+  document.getElementById("commandPalette").classList.add("hidden");
+  if (paletteLastFocused && typeof paletteLastFocused.focus === "function") paletteLastFocused.focus();
+}
+
+document.getElementById("paletteTriggerKey").textContent = navigator.platform.toUpperCase().includes("MAC") ? "⌘K" : "Ctrl K";
+document.getElementById("paletteTrigger").addEventListener("click", openPalette);
+document.getElementById("commandPalette").addEventListener("click", (e) => {
+  if (e.target.id === "commandPalette") closePalette();
+});
+document.getElementById("paletteInput").addEventListener("input", (e) => {
+  paletteFiltered = filterPaletteItems(e.target.value);
+  paletteActiveIndex = 0;
+  renderPaletteResults();
+});
+document.getElementById("paletteInput").addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    paletteActiveIndex = Math.min(paletteActiveIndex + 1, paletteFiltered.length - 1);
+    renderPaletteResults();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    paletteActiveIndex = Math.max(paletteActiveIndex - 1, 0);
+    renderPaletteResults();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    activatePaletteItem(paletteActiveIndex);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closePalette();
+  }
+});
+document.addEventListener("keydown", (e) => {
+  const modifierPressed = navigator.platform.toUpperCase().includes("MAC") ? e.metaKey : e.ctrlKey;
+  if (modifierPressed && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    if (document.getElementById("commandPalette").classList.contains("hidden")) openPalette();
+    else closePalette();
+  } else if (e.key === "Escape" && !document.getElementById("commandPalette").classList.contains("hidden")) {
+    closePalette();
+  }
+});
+
 async function api(path, options) {
   const res = await fetch(path, {
     ...options,
