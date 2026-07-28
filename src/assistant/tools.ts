@@ -254,9 +254,9 @@ export function createAssistantTools(deps: AssistantToolDependencies): Assistant
         description: "List consultations/follow-ups, optionally filtered to one matter.",
         input_schema: { type: "object", properties: { matterId: { type: "string" } } },
       },
-      execute: async (_actor, input) => {
+      execute: async (actor, input) => {
         const matterId = typeof input["matterId"] === "string" ? input["matterId"] : undefined;
-        return matterId ? deps.scheduling.listByMatter(matterId) : deps.scheduling.listAll();
+        return matterId ? deps.scheduling.listByMatter(actor, matterId) : deps.scheduling.listAll(actor);
       },
     },
     {

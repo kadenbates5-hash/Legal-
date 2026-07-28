@@ -184,10 +184,31 @@ the rest of core:
   poll and actually send (email/SMS is a vendor integration, deliberately
   out of scope, same reasoning as `voice-agent.ts` staying vendor-agnostic
   for STT/TTS).
-- Optionally enforces `AccessControl`'s existing `"scheduling"` category
-  when constructed with one — receptionist role is already scoped to
+- Enforces `AccessControl`'s existing `"scheduling"` category when
+  constructed with one — receptionist role is already scoped to
   `intake`/`scheduling` fields (§5), so this reuses that gate rather than
-  inventing a new one.
+  inventing a new one. `system-state.ts` wires the canonical, persisted
+  `AccessControl` instance into `SchedulingService.fromSnapshot` by
+  default (the same instance `DraftingService`/`AccountsService` share),
+  so real paralegal assignments and client grants apply to scheduling the
+  same as everywhere else — this was **not** always true: for a period
+  `start.ts` never passed an `AccessControl` to scheduling at all, so
+  every appointment read and mutation (book/reschedule/cancel/complete/
+  list/get) was completely unauthorized for every role, made materially
+  worse once the client role existed (any client account could see or
+  cancel any other client's or matter's appointments firm-wide). Fixed by
+  wiring the default and by giving every read method actor-based
+  filtering it never had: `get()`/`listByMatter()` throw
+  `AccessDeniedError` for a matter the actor can't reach (a caller asking
+  about one specific id/matter gets a clear denial, not a confusing empty
+  result); `listAll()`/`listByAttorney()` — cross-matter views by nature —
+  silently omit inaccessible matters instead, the same
+  don't-confirm-what-exists reasoning `CasesService`/`SearchService`
+  already use; `listPendingCalendarSync()` is restricted to the
+  `"system"` role outright, since the sync engine's whole point is a
+  firm-wide read no per-matter filtering makes sense for. `toSnapshot()`
+  still reads the raw, unscoped map directly — persistence is not an
+  actor.
 - `toSnapshot()`/`fromSnapshot()` follow the same persistence pattern as
   every other stateful core object — wired into `system-state.ts` and the
   dashboard's "Scheduling" panel.

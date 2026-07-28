@@ -2438,12 +2438,12 @@ async function handleAppointmentsRequest(
     const attorneyId = url.searchParams.get("attorneyId");
     const result =
       url.searchParams.get("pendingCalendarSync") === "true"
-        ? scheduling.listPendingCalendarSync()
+        ? scheduling.listPendingCalendarSync(actor)
         : matterId
-          ? scheduling.listByMatter(matterId)
+          ? scheduling.listByMatter(actor, matterId)
           : attorneyId
-            ? scheduling.listByAttorney(attorneyId)
-            : scheduling.listAll();
+            ? scheduling.listByAttorney(actor, attorneyId)
+            : scheduling.listAll(actor);
     sendJson(res, 200, result);
     return;
   }
@@ -2471,7 +2471,7 @@ async function handleAppointmentsRequest(
   }
 
   if (segments.length === 1 && req.method === "GET") {
-    const appointment = scheduling.get(id);
+    const appointment = scheduling.get(actor, id);
     if (!appointment) {
       sendJson(res, 404, { error: `no appointment '${id}'` });
       return;
@@ -2519,7 +2519,7 @@ async function handleAppointmentsRequest(
 
   if (segments.length === 3 && segments[1] === "reminders" && req.method === "POST") {
     scheduling.markReminderSent(id, segments[2]!);
-    sendJson(res, 200, scheduling.get(id));
+    sendJson(res, 200, scheduling.get(actor, id));
     onMutated?.();
     return;
   }

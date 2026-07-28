@@ -86,7 +86,7 @@ export interface SystemState {
   deadlineTracker: DeadlineTracker;
   scheduling: SchedulingService;
   auth: AuthService;
-  /** The canonical, persisted AccessControl instance — shared by DraftingService and AccountsService's matter-assignment feature. Distinct from `LoadSystemStateOptions.accessControl`, which is only an optional external gate for SchedulingService. */
+  /** The canonical, persisted AccessControl instance — shared by DraftingService, AccountsService's matter-assignment feature, and (by default) SchedulingService. */
   accessControl: AccessControl;
   documentStore: DocumentStore;
   researchLibrary: ResearchLibrary;
@@ -104,6 +104,7 @@ export interface SystemState {
 
 export interface LoadSystemStateOptions {
   firmConfig?: FirmConfig;
+  /** Overrides the `AccessControl` `scheduling` is built with — mainly for tests that want an isolated instance. Production wiring defaults to the canonical, persisted one below, so paralegal/client grants apply to scheduling the same as everywhere else. */
   accessControl?: AccessControl;
 }
 
@@ -144,9 +145,12 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const utilization = UtilizationTracker.fromSnapshot(snapshot.utilization);
   const workProductStore = WorkProductStore.fromSnapshot(snapshot.workProducts, auditLog);
   const deadlineTracker = DeadlineTracker.fromSnapshot(snapshot.deadlines ?? []);
-  const scheduling = SchedulingService.fromSnapshot(snapshot.appointments ?? [], options);
   const auth = AuthService.fromSnapshot(snapshot.auth ?? { users: [], sessions: [] });
   const accessControl = AccessControl.fromSnapshot(auditLog, snapshot.paralegalAssignments ?? [], snapshot.clientMatterAccess ?? []);
+  // Built before `scheduling` specifically so it can be wired in below —
+  // the same canonical, persisted instance every other service uses,
+  // not a separate one that would miss real paralegal/client grants.
+  const scheduling = SchedulingService.fromSnapshot(snapshot.appointments ?? [], { ...options, accessControl: options?.accessControl ?? accessControl });
   const documentStore = DocumentStore.fromSnapshot(snapshot.documents ?? []);
   const researchLibrary = ResearchLibrary.fromSnapshot(snapshot.savedReferences ?? []);
   const messaging = MessagingStore.fromSnapshot(snapshot.messaging ?? { conversations: [], messages: [] });

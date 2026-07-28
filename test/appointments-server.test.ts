@@ -290,7 +290,9 @@ describe("appointments HTTP API", () => {
       attorneyId: "a1",
     });
 
-    const res = await fetch(`${baseUrl}/api/appointments?pendingCalendarSync=true`, withCookie(receptionistCookie));
+    const res = await fetch(`${baseUrl}/api/appointments?pendingCalendarSync=true`, {
+      headers: { "x-system-api-key": "test-system-key-1234567890" },
+    });
     expect(res.status).toBe(200);
     const body = (await res.json()) as Array<{ id: string }>;
     expect(body.map((a) => a.id)).toEqual([stillPending.id]);
@@ -316,7 +318,7 @@ describe("appointments HTTP API", () => {
       body: JSON.stringify({ calendarEventId: "gcal-1" }),
     });
     expect(allowed.status).toBe(200);
-    expect(scheduling.get(appt.id)?.calendarEventId).toBe("gcal-1");
-    expect(scheduling.get(appt.id)?.calendarSyncPending).toBe(false);
+    expect(scheduling.get({ id: "r1", role: "receptionist" }, appt.id)?.calendarEventId).toBe("gcal-1");
+    expect(scheduling.get({ id: "r1", role: "receptionist" }, appt.id)?.calendarSyncPending).toBe(false);
   });
 });

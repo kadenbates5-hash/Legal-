@@ -61,8 +61,8 @@ describe("AppointmentCalendarSync", () => {
 
     expect(result).toEqual({ pushed: 1, deleted: 0, failures: [] });
     expect(publisher.upserts).toEqual([{ appointmentId: appt.id, existingEventId: undefined, draft: expect.objectContaining({ matterId: "m1" }) }]);
-    expect(scheduling.get(appt.id)?.calendarSyncPending).toBe(false);
-    expect(scheduling.get(appt.id)?.calendarEventId).toBe("gcal-1");
+    expect(scheduling.get(receptionist, appt.id)?.calendarSyncPending).toBe(false);
+    expect(scheduling.get(receptionist, appt.id)?.calendarEventId).toBe("gcal-1");
   });
 
   it("a second run with nothing changed pushes nothing", async () => {
@@ -90,7 +90,7 @@ describe("AppointmentCalendarSync", () => {
 
     expect(result.pushed).toBe(1);
     expect(publisher.upserts[1]).toMatchObject({ appointmentId: appt.id, existingEventId: "gcal-1" });
-    expect(scheduling.get(appt.id)?.calendarEventId).toBe("gcal-1");
+    expect(scheduling.get(receptionist, appt.id)?.calendarEventId).toBe("gcal-1");
   });
 
   it("cancelling a synced appointment deletes its event and clears the id", async () => {
@@ -104,8 +104,8 @@ describe("AppointmentCalendarSync", () => {
 
     expect(result).toEqual({ pushed: 0, deleted: 1, failures: [] });
     expect(publisher.deletes).toEqual(["gcal-1"]);
-    expect(scheduling.get(appt.id)?.calendarEventId).toBeUndefined();
-    expect(scheduling.get(appt.id)?.calendarSyncPending).toBe(false);
+    expect(scheduling.get(receptionist, appt.id)?.calendarEventId).toBeUndefined();
+    expect(scheduling.get(receptionist, appt.id)?.calendarSyncPending).toBe(false);
   });
 
   it("cancelling an appointment that was never synced records the cancellation without deleting anything", async () => {
@@ -118,7 +118,7 @@ describe("AppointmentCalendarSync", () => {
 
     expect(result).toEqual({ pushed: 0, deleted: 0, failures: [] });
     expect(publisher.deletes).toEqual([]);
-    expect(scheduling.get(appt.id)?.calendarSyncPending).toBe(false);
+    expect(scheduling.get(receptionist, appt.id)?.calendarSyncPending).toBe(false);
   });
 
   it("records a failure per appointment rather than aborting the whole run", async () => {

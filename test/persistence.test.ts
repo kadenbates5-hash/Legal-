@@ -175,7 +175,7 @@ describe("system-state persistence integration", () => {
     await saveSystemState(filePath, state);
 
     const reloaded = await loadSystemState(filePath);
-    const reloadedAppt = reloaded.scheduling.get(appt.id);
+    const reloadedAppt = reloaded.scheduling.get(receptionist, appt.id);
     expect(reloadedAppt?.status).toBe("scheduled");
     expect(reloadedAppt?.attorneyId).toBe("a1");
 

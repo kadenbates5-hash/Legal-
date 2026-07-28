@@ -180,9 +180,19 @@ export class SchedulingService {
    * current state — new, rescheduled, cancelled, or never pushed at
    * all. The sync engine's whole read side; nothing here knows or cares
    * whether any calendar vendor is even configured.
+   *
+   * Restricted to the `"system"` role, same as `recordCalendarSync` —
+   * this is inherently a firm-wide, cross-matter read (the sync engine
+   * has to see every pending appointment in one pass), which no other
+   * role's matter-scoping is meant to allow. Per-matter filtering would
+   * silently return nothing to the one caller that's supposed to see
+   * everything.
    */
-  listPendingCalendarSync(): Appointment[] {
-    return this.listAll().filter((a) => a.calendarSyncPending);
+  listPendingCalendarSync(actor: Actor): Appointment[] {
+    if (actor.role !== "system") {
+      throw new AccessDeniedError(`listing pending calendar syncs requires the system credential (got role '${actor.role}')`);
+    }
+    return [...this.#appointments.values()].filter((a) => a.calendarSyncPending);
   }
 
   /**
@@ -204,20 +214,34 @@ export class SchedulingService {
     return appointment;
   }
 
-  get(id: string): Appointment | undefined {
-    return this.#appointments.get(id);
+  /** Throws if this actor can't reach the appointment's matter — a caller named one specific id, so a filtered-away result would just be confusing, not protective. */
+  get(actor: Actor, id: string): Appointment | undefined {
+    const appointment = this.#appointments.get(id);
+    if (!appointment) return undefined;
+    this.#authorize(actor, appointment.matterId);
+    return appointment;
   }
 
-  listByMatter(matterId: string): Appointment[] {
+  /** Throws if this actor can't reach the named matter at all — same reasoning as `get`. */
+  listByMatter(actor: Actor, matterId: string): Appointment[] {
+    this.#authorize(actor, matterId);
     return [...this.#appointments.values()].filter((a) => a.matterId === matterId);
   }
 
-  listByAttorney(attorneyId: string): Appointment[] {
-    return [...this.#appointments.values()].filter((a) => a.attorneyId === attorneyId);
+  /**
+   * Spans matters by design (an attorney's whole calendar), so a matter
+   * this actor can't reach is silently omitted rather than raising —
+   * the same "don't leak which matters exist" reasoning `CasesService`/
+   * `SearchService` use, since erroring on the first inaccessible one
+   * would defeat the point of an attorney-wide view.
+   */
+  listByAttorney(actor: Actor, attorneyId: string): Appointment[] {
+    return [...this.#appointments.values()].filter((a) => a.attorneyId === attorneyId && this.#canSee(actor, a.matterId));
   }
 
-  listAll(): Appointment[] {
-    return [...this.#appointments.values()];
+  /** Every matter this actor can reach — silently omitting ones it can't, same as `listByAttorney`. */
+  listAll(actor: Actor): Appointment[] {
+    return [...this.#appointments.values()].filter((a) => this.#canSee(actor, a.matterId));
   }
 
   /** Reminders whose due time has passed, haven't been sent, and belong to a still-active appointment. */
@@ -243,8 +267,9 @@ export class SchedulingService {
     reminder.sentAt = at.toISOString();
   }
 
+  /** Persistence's own read, unscoped by design — it has to see every appointment regardless of any actor, the same reasoning `getDueReminders`/`#assertNoOverlap` already iterate the raw map directly. */
   toSnapshot(): Appointment[] {
-    return this.listAll().map((a) => ({
+    return [...this.#appointments.values()].map((a) => ({
       ...a,
       reminders: a.reminders.map((r) => ({ ...r })),
       history: a.history.map((h) => ({ ...h })),
@@ -272,6 +297,17 @@ export class SchedulingService {
 
   #authorize(actor: Actor, matterId: string): void {
     this.#accessControl?.authorize({ actor, matterId, category: "scheduling" });
+  }
+
+  /** Same check as `#authorize`, as a boolean for filtering a list rather than rejecting a single request. */
+  #canSee(actor: Actor, matterId: string): boolean {
+    if (!this.#accessControl) return true;
+    try {
+      this.#accessControl.authorize({ actor, matterId, category: "scheduling" });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   #assertBusinessHours(at: Date, allowOutsideBusinessHours?: boolean): void {

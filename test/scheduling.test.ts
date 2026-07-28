@@ -238,6 +238,53 @@ describe("SchedulingService — access control", () => {
       service.scheduleConsultation(paralegal, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" }),
     ).toThrow(AccessDeniedError);
   });
+
+  it("throws from get()/listByMatter() for a matter the actor can't reach", () => {
+    const auditLog = new AuditLog();
+    const accessControl = new AccessControl(auditLog);
+    const service = new SchedulingService({ firmConfig: makeFirmConfig(), accessControl });
+    const appt = service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
+
+    // Unassigned paralegal has no scheduling access to m1 at all.
+    expect(() => service.get(paralegal, appt.id)).toThrow(AccessDeniedError);
+    expect(() => service.listByMatter(paralegal, "m1")).toThrow(AccessDeniedError);
+
+    accessControl.assignParalegal(paralegal.id, "m1");
+    expect(service.get(paralegal, appt.id)?.id).toBe(appt.id);
+    expect(service.listByMatter(paralegal, "m1")).toHaveLength(1);
+  });
+
+  it("silently omits inaccessible matters from listAll()/listByAttorney() rather than throwing", () => {
+    const auditLog = new AuditLog();
+    const accessControl = new AccessControl(auditLog);
+    const service = new SchedulingService({ firmConfig: makeFirmConfig(), accessControl });
+    service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
+    service.scheduleConsultation(receptionist, {
+      matterId: "m2",
+      startTime: new Date(DURING_BUSINESS_HOURS.getTime() + 60 * 60_000),
+      attorneyId: "a1",
+    });
+
+    accessControl.assignParalegal(paralegal.id, "m1");
+    expect(service.listAll(paralegal).map((a) => a.matterId)).toEqual(["m1"]);
+    expect(service.listByAttorney(paralegal, "a1").map((a) => a.matterId)).toEqual(["m1"]);
+
+    // An attorney has no matter-scoping restriction, so it sees both.
+    const attorney: Actor = { id: "a1", role: "attorney" };
+    expect(service.listAll(attorney)).toHaveLength(2);
+  });
+
+  it("denies a client actor scheduling access entirely", () => {
+    const auditLog = new AuditLog();
+    const accessControl = new AccessControl(auditLog);
+    const service = new SchedulingService({ firmConfig: makeFirmConfig(), accessControl });
+    const appt = service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
+
+    const client: Actor = { id: "c1", role: "client" };
+    accessControl.grantClientAccess(client.id, "m1");
+    expect(() => service.get(client, appt.id)).toThrow(AccessDeniedError);
+    expect(service.listAll(client)).toEqual([]);
+  });
 });
 
 describe("SchedulingService — reminders", () => {
@@ -319,9 +366,9 @@ describe("SchedulingService — listing and snapshots", () => {
       attorneyId: "a2",
     });
 
-    expect(service.listByMatter("m1")).toHaveLength(2);
-    expect(service.listByAttorney("a1")).toHaveLength(2);
-    expect(service.listAll()).toHaveLength(3);
+    expect(service.listByMatter(receptionist, "m1")).toHaveLength(2);
+    expect(service.listByAttorney(receptionist, "a1")).toHaveLength(2);
+    expect(service.listAll(receptionist)).toHaveLength(3);
   });
 
   it("round-trips through a snapshot, preserving status/reminders/history exactly", () => {
@@ -335,7 +382,7 @@ describe("SchedulingService — listing and snapshots", () => {
     service.markReminderSent(appt.id, appt.reminders[0]!.id);
 
     const restored = SchedulingService.fromSnapshot(service.toSnapshot(), { firmConfig: config });
-    const restoredAppt = restored.get(appt.id);
+    const restoredAppt = restored.get(receptionist, appt.id);
     expect(restoredAppt?.status).toBe("scheduled");
     expect(restoredAppt?.reminders[0]?.sentAt).toBeDefined();
     expect(restoredAppt?.history).toEqual(appt.history);
@@ -354,7 +401,7 @@ describe("SchedulingService — calendar sync", () => {
     const service = new SchedulingService({ firmConfig: makeFirmConfig() });
     const appt = service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
     expect(appt.calendarSyncPending).toBe(true);
-    expect(service.listPendingCalendarSync().map((a) => a.id)).toEqual([appt.id]);
+    expect(service.listPendingCalendarSync(system).map((a) => a.id)).toEqual([appt.id]);
   });
 
   it("recordCalendarSync clears the pending flag and stores the vendor event id", () => {
@@ -363,7 +410,7 @@ describe("SchedulingService — calendar sync", () => {
     const updated = service.recordCalendarSync(system, appt.id, "gcal-event-1");
     expect(updated.calendarSyncPending).toBe(false);
     expect(updated.calendarEventId).toBe("gcal-event-1");
-    expect(service.listPendingCalendarSync()).toEqual([]);
+    expect(service.listPendingCalendarSync(system)).toEqual([]);
   });
 
   it("rescheduling or cancelling marks it pending again, even after a previous sync", () => {
@@ -372,13 +419,13 @@ describe("SchedulingService — calendar sync", () => {
     service.recordCalendarSync(system, appt.id, "gcal-event-1");
 
     service.reschedule(receptionist, appt.id, { newStartTime: new Date(DURING_BUSINESS_HOURS.getTime() + 3_600_000) });
-    expect(service.get(appt.id)?.calendarSyncPending).toBe(true);
+    expect(service.get(receptionist, appt.id)?.calendarSyncPending).toBe(true);
     // The old event id is preserved until the sync engine overwrites it — a reschedule updates the same event, it doesn't lose track of it.
-    expect(service.get(appt.id)?.calendarEventId).toBe("gcal-event-1");
+    expect(service.get(receptionist, appt.id)?.calendarEventId).toBe("gcal-event-1");
 
     service.recordCalendarSync(system, appt.id, "gcal-event-1");
     service.cancel(receptionist, appt.id);
-    expect(service.get(appt.id)?.calendarSyncPending).toBe(true);
+    expect(service.get(receptionist, appt.id)?.calendarSyncPending).toBe(true);
   });
 
   it("restricts recordCalendarSync to the system role", () => {
@@ -396,6 +443,6 @@ describe("SchedulingService — calendar sync", () => {
 
     const legacySnapshot = service.toSnapshot().map(({ calendarSyncPending: _drop, ...rest }) => rest);
     const restored = SchedulingService.fromSnapshot(legacySnapshot as never, { firmConfig: config });
-    expect(restored.listPendingCalendarSync().map((a) => a.id)).toEqual([appt.id]);
+    expect(restored.listPendingCalendarSync(system).map((a) => a.id)).toEqual([appt.id]);
   });
 });
