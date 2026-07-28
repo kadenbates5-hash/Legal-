@@ -1,15 +1,19 @@
 :root {
-    --bg: #14171f;
+    --bg: #0c0e14;
     --surface: #ffffff;
     --border: #e3e5ea;
     --text: #1a1d24;
     --text-muted: #6b7280;
     --accent: #3454d1;
+    --accent-2: #6f5ce6;
     --accent-hover: #2a44ac;
+    --accent-soft: #eef1fb;
+    --accent-glow: rgba(52, 84, 209, 0.35);
     --danger: #c02b3a;
     --danger-soft: #fbe9eb;
   }
   * { box-sizing: border-box; }
+  html { color-scheme: dark; }
   body {
     margin: 0;
     min-height: 100vh;
@@ -17,47 +21,109 @@
     align-items: center;
     justify-content: center;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
     background: var(--bg);
-    background-image: radial-gradient(circle at 20% 20%, #1c2030 0%, #14171f 55%);
     color: var(--text);
+    overflow: hidden;
+    position: relative;
   }
+
+  /* Two slow-drifting color fields rather than a static radial gradient —
+     the first impression of the app should feel alive, not like a flat
+     screenshot. Pure CSS, no images/webfonts, so it costs nothing over
+     the network and respects the CSP (no external resources at all). */
+  .aurora {
+    position: fixed;
+    inset: -20%;
+    z-index: 0;
+    pointer-events: none;
+    filter: blur(60px);
+  }
+  .aurora::before, .aurora::after {
+    content: "";
+    position: absolute;
+    width: 55vmax;
+    height: 55vmax;
+    border-radius: 50%;
+    opacity: 0.55;
+  }
+  .aurora::before {
+    top: -10%;
+    left: -10%;
+    background: radial-gradient(circle, var(--accent-2), transparent 65%);
+    animation: drift-a 22s ease-in-out infinite;
+  }
+  .aurora::after {
+    bottom: -15%;
+    right: -10%;
+    background: radial-gradient(circle, var(--accent), transparent 65%);
+    animation: drift-b 26s ease-in-out infinite;
+  }
+  @keyframes drift-a {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(6vmax, 4vmax) scale(1.08); }
+  }
+  @keyframes drift-b {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(-5vmax, -5vmax) scale(1.05); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .aurora::before, .aurora::after { animation: none; }
+  }
+
   .card {
+    position: relative;
+    z-index: 1;
     width: 100%;
-    max-width: 360px;
+    max-width: 380px;
     background: var(--surface);
-    border-radius: 14px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-    padding: 2rem 2rem 1.75rem;
+    border-radius: 18px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+    padding: 2.1rem 2.1rem 1.85rem;
+    animation: card-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
   }
-  .brand { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; }
+  @keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+
+  .brand { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 1.5rem; }
   .brand .mark {
-    width: 30px; height: 30px; border-radius: 8px;
-    background: linear-gradient(155deg, var(--accent), var(--accent-hover));
+    width: 32px; height: 32px; border-radius: 9px;
+    background: linear-gradient(155deg, var(--accent-2), var(--accent) 55%, var(--accent-hover));
     display: inline-flex; align-items: center; justify-content: center;
-    color: #fff; font-weight: 700; font-size: 0.95rem;
+    color: #fff; font-weight: 700; font-size: 0.98rem;
+    box-shadow: 0 6px 16px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.3);
   }
-  .brand .name { font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; }
-  p.tagline { color: var(--text-muted); font-size: 0.85rem; margin: -1rem 0 1.5rem; line-height: 1.5; }
-  label { display: block; margin-top: 1rem; font-size: 0.82rem; color: var(--text-muted); }
+  .brand .name { font-weight: 700; font-size: 1.2rem; letter-spacing: -0.015em; }
+  p.tagline { color: var(--text-muted); font-size: 0.85rem; margin: -1rem 0 1.5rem; line-height: 1.55; }
+  label { display: block; margin-top: 1rem; font-size: 0.8rem; font-weight: 500; color: var(--text-muted); }
   input[type="text"], input[type="password"] {
-    width: 100%; padding: 0.55rem 0.65rem; margin-top: 0.3rem; box-sizing: border-box;
-    border: 1px solid var(--border); border-radius: 8px; font-size: 0.92rem;
+    width: 100%; padding: 0.6rem 0.7rem; margin-top: 0.35rem; box-sizing: border-box;
+    border: 1px solid var(--border); border-radius: 9px; font-size: 0.92rem;
+    color: var(--text); background: #fff;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
-  input[type="text"]:focus, input[type="password"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .remember { display: flex; align-items: center; gap: 0.45rem; margin-top: 1.1rem; }
-  .remember input { width: auto; }
-  .remember label { display: inline; margin: 0; font-size: 0.85rem; color: var(--text); }
+  input[type="text"]:hover, input[type="password"]:hover { border-color: #c7cbd4; }
+  input[type="text"]:focus, input[type="password"]:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .remember { display: flex; align-items: center; gap: 0.45rem; margin-top: 1.15rem; }
+  .remember input { width: auto; accent-color: var(--accent); }
+  .remember label { display: inline; margin: 0; font-size: 0.85rem; color: var(--text); font-weight: 400; }
   button.submit {
     all: unset; box-sizing: border-box; display: block;
-    margin-top: 1.5rem; padding: 0.6rem 1rem; width: 100%;
-    background: var(--accent); color: #fff; text-align: center;
-    border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer;
-    transition: background 0.15s ease;
+    margin-top: 1.6rem; padding: 0.68rem 1rem; width: 100%;
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: #fff; text-align: center;
+    border-radius: 9px; font-weight: 600; font-size: 0.92rem; cursor: pointer;
+    box-shadow: 0 6px 18px -4px var(--accent-glow);
+    transition: box-shadow 0.15s ease, transform 0.1s ease, filter 0.15s ease;
   }
-  button.submit:hover { background: var(--accent-hover); }
-  .error { color: var(--danger); background: var(--danger-soft); border-radius: 8px; padding: 0.5rem 0.7rem; margin-top: 1rem; font-size: 0.85rem; display: none; }
+  button.submit:hover { box-shadow: 0 8px 24px -4px var(--accent-glow); filter: brightness(1.05); }
+  button.submit:active { transform: translateY(1px); }
+  .error { color: var(--danger); background: var(--danger-soft); border-radius: 9px; padding: 0.55rem 0.75rem; margin-top: 1rem; font-size: 0.85rem; display: none; }
   .error:not(:empty) { display: block; }
   /* "Enter the code from your app" is a step in the flow, not a failure —
      showing it in the red error box tells people they did something wrong
      at the exact moment they didn't. */
-  .error.notice { color: var(--text); background: var(--accent-soft, #eef1fb); }
+  .error.notice { color: var(--text); background: var(--accent-soft); }

@@ -65,6 +65,11 @@ async function loadWhoami() {
     currentRole = me.role;
     currentActorId = me.id;
     document.getElementById("whoami").textContent = `Signed in as ${me.username || me.id} (${me.role})`;
+    const name = me.username || me.id;
+    document.getElementById("sidebarUserAvatar").textContent = name.slice(0, 2).toUpperCase();
+    document.getElementById("sidebarUserName").textContent = name;
+    document.getElementById("sidebarUserRole").textContent = me.role;
+    document.getElementById("sidebarUser").hidden = false;
     if (me.mustChangePassword) {
       showError("An attorney reset your password — please change it (top right) to one only you know.");
     }
