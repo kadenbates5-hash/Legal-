@@ -322,7 +322,12 @@ async function loadUpcomingDeadlines() {
     list.innerHTML = "";
     for (const d of due) list.appendChild(listRow(deadlineRowHtml(d)));
     if (due.length === 0) {
-      list.innerHTML = `<li class="static empty">Nothing due in the next ${withinDays} days. Deadlines only appear here once someone has recorded one.</li>`;
+      list.innerHTML = emptyHero(
+        ICON_CHECK,
+        `Nothing due in the next ${withinDays} days`,
+        "Deadlines only appear here once someone has recorded one.",
+        { ok: true },
+      );
     }
   } catch (err) {
     showError(err.message);
@@ -481,7 +486,11 @@ async function loadMyMatters() {
       list.appendChild(li);
     }
     if (matters.length === 0) {
-      list.innerHTML = '<li class="static empty">No matters on file for you yet. If you were expecting to see one here, ask the firm to grant portal access.</li>';
+      list.innerHTML = emptyHero(
+        ICON_TRAY,
+        "Nothing on file yet",
+        "If you were expecting to see a matter here, ask the firm to grant portal access.",
+      );
     } else if (matters.length === 1) {
       // The common case — a client with one matter shouldn't have to click through to it.
       openMyMatter(matters[0].matterId);
@@ -713,7 +722,9 @@ async function loadQueue() {
       li.addEventListener("click", () => loadDetail(item.id));
       list.appendChild(li);
     }
-    if (items.length === 0) list.innerHTML = '<li class="static empty">No work product pending review.</li>';
+    if (items.length === 0) {
+      list.innerHTML = emptyHero(ICON_CHECK, "All caught up", "Nothing is waiting for your review right now.", { ok: true });
+    }
   } catch (err) {
     showError(err.message);
   }
@@ -788,6 +799,35 @@ function escapeHtml(value) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
+}
+
+/**
+ * Small monochrome (currentColor) inline SVGs for the rich empty states
+ * below — kept as markup rather than an icon font or emoji so they match
+ * this app's line-drawn visual language and cost nothing over the
+ * network (no external font/image request, which the CSP wouldn't allow
+ * anyway).
+ */
+const ICON_TRAY =
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13h4l2 3h4l2-3h4"/><path d="M5.5 6h13l1.5 7v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-6l1.5-7Z"/></svg>';
+const ICON_CHECK =
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.5 2.5L16 9.5"/></svg>';
+const ICON_SEARCH =
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+
+/**
+ * A rich empty state, reserved for the handful of top-level "nothing
+ * here" moments a person actually lands on — see the CSS comment on
+ * .empty-hero for why the many small inline ones stay plain text.
+ * Returns a full <li> so it drops straight into a `ul.list`'s innerHTML
+ * the same way every plain-text empty row already does.
+ */
+function emptyHero(icon, title, body, { ok = false } = {}) {
+  return `<li class="static empty-hero-row"><div class="empty-hero">
+    <div class="empty-hero-icon${ok ? " ok" : ""}">${icon}</div>
+    <h4>${escapeHtml(title)}</h4>
+    ${body ? `<p>${escapeHtml(body)}</p>` : ""}
+  </div></li>`;
 }
 
 /**
@@ -1241,7 +1281,9 @@ async function loadCases() {
       li.addEventListener("click", () => loadCaseDetail(item.matterId));
       list.appendChild(li);
     }
-    if (items.length === 0) list.innerHTML = '<li class="static empty">No cases yet — draft something or upload a document to a matter.</li>';
+    if (items.length === 0) {
+      list.innerHTML = emptyHero(ICON_TRAY, "No cases yet", "Draft something or upload a document to a matter to see it here.");
+    }
   } catch (err) {
     showError(err.message);
   }
@@ -2225,7 +2267,17 @@ document.getElementById("navAudit").addEventListener("click", () => {
    not blank out the rest of the page. */
 function goToPanel(panel) {
   const btn = document.querySelector(`nav.nav button[data-panel="${panel}"]`);
-  if (btn) btn.click();
+  if (btn) {
+    btn.click();
+    return;
+  }
+  // "search" has no sidebar button at all (it's reached only via the
+  // top-bar box or a deep link from a search hit) — without this
+  // fallback, every caller of goToPanel("search") silently did nothing,
+  // making the whole Search panel unreachable from the UI.
+  for (const b of document.querySelectorAll("nav.nav button")) b.classList.remove("active");
+  for (const s of document.querySelectorAll("section.panel")) s.classList.toggle("active", s.id === `panel-${panel}`);
+  document.getElementById("panelTitle").textContent = PANEL_TITLES[panel] || "";
 }
 
 function statTile(n, label, { tone = "", panel = null } = {}) {
@@ -2268,9 +2320,12 @@ async function loadHome() {
     ? `Signed in as ${me.displayName}. Here's what needs you.`
     : "Everything that needs you, in one place.";
 
-  stats.innerHTML = "";
-  attention.innerHTML = '<li class="static empty">Loading…</li>';
-  today.innerHTML = '<li class="static empty">Loading…</li>';
+  // Shaped like what's about to arrive rather than a blank panel or the
+  // word "Loading…" — sets the expectation that something is coming,
+  // not that the page is stuck.
+  stats.innerHTML = Array.from({ length: 4 }, () => '<div class="stat skeleton"><div class="n">&nbsp;</div><div class="k">&nbsp;</div></div>').join("");
+  attention.innerHTML = Array.from({ length: 2 }, () => '<li class="static skeleton-row"></li>').join("");
+  today.innerHTML = Array.from({ length: 2 }, () => '<li class="static skeleton-row"></li>').join("");
 
   const isAttorney = currentRole === "attorney";
   const canDraft = isAttorney || currentRole === "paralegal";
@@ -2287,6 +2342,7 @@ async function loadHome() {
     canDraft ? tryApi("/api/invoices/outstanding") : null,
   ]);
 
+  stats.innerHTML = "";
   if (pending) stats.appendChild(statTile(pending.length, "awaiting your review", { tone: pending.length ? "alert" : "ok", panel: "queue" }));
   if (upcoming) {
     // Counts what's actually at risk, not everything on the calendar: a
@@ -2371,9 +2427,12 @@ async function loadHome() {
     );
   }
   if (attention.children.length === 0) {
-    attention.innerHTML = `<li class="static empty">${
-      isAttorney ? "Nothing pending — the review queue is clear." : "Nothing assigned to you right now."
-    }</li>`;
+    attention.innerHTML = emptyHero(
+      ICON_CHECK,
+      "All caught up",
+      isAttorney ? "The review queue is clear." : "Nothing assigned to you right now.",
+      { ok: true },
+    );
   }
 
   /* --- Today --- */
@@ -2477,7 +2536,7 @@ async function runSearch(query) {
       list.appendChild(li);
     }
     if (results.hits.length === 0) {
-      list.innerHTML = '<li class="static empty">No matches. Matters you aren\'t assigned to are never included.</li>';
+      list.innerHTML = emptyHero(ICON_SEARCH, "Nothing found", "Matters you aren't assigned to are never included.");
     }
   } catch (err) {
     showError(err.message);

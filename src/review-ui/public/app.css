@@ -360,7 +360,85 @@
   }
   .error:not(:empty) { display: block; }
 
-  .empty { color: var(--text-muted); font-size: 0.85rem; padding: 0.5rem 0; }
+  .empty { color: var(--text-muted); font-size: 0.85rem; padding: 0.5rem 0; line-height: 1.5; }
+
+  /* ---------- Rich empty states ----------
+     Reserved for the handful of top-level "nothing here" moments a
+     person actually lands on (an empty queue, no search results) — the
+     dozens of small inline ones ("No lines yet" inside an open invoice
+     draft) stay plain text on purpose, since a big icon treatment on
+     every minor sub-list would be visual noise, not polish. */
+  ul.list li.empty-hero-row {
+    border: none;
+    cursor: default;
+    background: transparent;
+    padding: 0;
+  }
+  ul.list li.empty-hero-row:hover { border: none; box-shadow: none; transform: none; }
+  .empty-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.5rem;
+    padding: 2.25rem 1.5rem;
+    color: var(--text-muted);
+  }
+  .empty-hero-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+  }
+  .empty-hero-icon.ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+  .empty-hero h4 { margin: 0; font-size: 0.95rem; font-weight: 600; color: var(--text); }
+  .empty-hero p { margin: 0; font-size: 0.85rem; max-width: 38ch; line-height: 1.55; }
+
+  /* ---------- Loading skeletons ----------
+     A panel used to either stay blank for a beat or show the word
+     "Loading…" as a plain list row — both read as unfinished rather
+     than as "working on it". A shimmering placeholder shaped like the
+     content that's about to arrive sets the right expectation instead. */
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .skeleton {
+    background-image: linear-gradient(100deg, var(--surface-2) 30%, var(--border) 50%, var(--surface-2) 70%);
+    background-size: 250% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+    color: transparent !important;
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; }
+  }
+  /* .stat's own `background: var(--panel)` shorthand would otherwise
+     reset background-image back to none and cancel the shimmer —
+     restate it here at matching specificity so it wins regardless of
+     source order. */
+  .stat.skeleton {
+    border-color: transparent;
+    box-shadow: none;
+    background-image: linear-gradient(100deg, var(--surface-2) 30%, var(--border) 50%, var(--surface-2) 70%);
+    background-size: 250% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  }
+  .stat.skeleton::before { display: none; }
+  ul.list li.skeleton-row {
+    background-image: linear-gradient(100deg, var(--surface-2) 30%, var(--border) 50%, var(--surface-2) 70%);
+    background-size: 250% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+    border-color: transparent;
+    height: 3.1rem;
+    cursor: default;
+  }
+  ul.list li.skeleton-row:hover { box-shadow: none; transform: none; border-color: transparent; }
 
   /* ---------- Intake demo chat ---------- */
   .chat-window {
