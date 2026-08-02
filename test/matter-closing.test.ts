@@ -211,3 +211,32 @@ describe("MattersService.listRetentionDue", () => {
     expect(() => service.listRetentionDue(paralegal)).toThrow(AccessDeniedError);
   });
 });
+
+describe("MattersService.clientEmailFor", () => {
+  const system: Actor = { id: "sys", role: "system" };
+
+  it("returns the client party's email for the system credential", () => {
+    const { service, store } = setup();
+    store.upsert("m-1", {
+      title: "State v. Ruiz",
+      parties: [{ name: "Carlos Ruiz", role: "client", note: undefined, email: "carlos@example.com" }],
+    });
+    expect(service.clientEmailFor(system, "m-1")).toBe("carlos@example.com");
+  });
+
+  it("returns undefined when no client party has an email on record", () => {
+    const { service } = setup();
+    expect(service.clientEmailFor(system, "m-1")).toBeUndefined();
+  });
+
+  it("returns undefined for a matter with no record at all, rather than throwing", () => {
+    const { service } = setup();
+    expect(service.clientEmailFor(system, "no-such-matter")).toBeUndefined();
+  });
+
+  it("denies every role but system, including attorney and paralegal", () => {
+    const { service } = setup();
+    expect(() => service.clientEmailFor(attorney, "m-1")).toThrow(AccessDeniedError);
+    expect(() => service.clientEmailFor(paralegal, "m-1")).toThrow(AccessDeniedError);
+  });
+});

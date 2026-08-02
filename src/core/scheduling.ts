@@ -244,11 +244,22 @@ export class SchedulingService {
     return [...this.#appointments.values()].filter((a) => this.#canSee(actor, a.matterId));
   }
 
-  /** Reminders whose due time has passed, haven't been sent, and belong to a still-active appointment. */
-  getDueReminders(now: Date = new Date()): Array<{ appointment: Appointment; reminder: ReminderRecord }> {
+  /**
+   * Reminders whose due time has passed, haven't been sent, and belong
+   * to a still-active appointment. Firm-wide by nature — a reminder-
+   * sending job needs to see every one in a single pass — so the
+   * `"system"` role sees everything unscoped, same as
+   * `listPendingCalendarSync`. Every other role gets the same
+   * matter-scoped, silently-omitting filter as `listAll`: this same
+   * method backs the in-app Scheduling panel's "Coming due" reminders
+   * card, which a receptionist or paralegal reads day to day.
+   */
+  getDueReminders(actor: Actor, now: Date = new Date()): Array<{ appointment: Appointment; reminder: ReminderRecord }> {
     const due: Array<{ appointment: Appointment; reminder: ReminderRecord }> = [];
+    const unscoped = actor.role === "system";
     for (const appointment of this.#appointments.values()) {
       if (appointment.status === "cancelled" || appointment.status === "completed") continue;
+      if (!unscoped && !this.#canSee(actor, appointment.matterId)) continue;
       for (const reminder of appointment.reminders) {
         if (!reminder.sentAt && Date.parse(reminder.dueAt) <= now.getTime()) {
           due.push({ appointment, reminder });
@@ -258,16 +269,31 @@ export class SchedulingService {
     return due;
   }
 
-  markReminderSent(appointmentId: string, reminderId: string, at: Date = new Date()): void {
+  /**
+   * Restricted to the `"system"` role, same as `recordCalendarSync` —
+   * this is the reminder-sending job's own write-back confirming a
+   * reminder actually went out. No human role has a "mark sent" button
+   * anywhere in the UI; the only legitimate caller is the process that
+   * just sent the email.
+   */
+  markReminderSent(actor: Actor, appointmentId: string, reminderId: string, at: Date = new Date()): Appointment {
+    if (actor.role !== "system") {
+      throw new AccessDeniedError(`marking a reminder sent requires the system credential (got role '${actor.role}')`);
+    }
     const appointment = this.#require(appointmentId);
     const reminder = appointment.reminders.find((r) => r.id === reminderId);
     if (!reminder) {
       throw new SchedulingError(`no reminder '${reminderId}' on appointment '${appointmentId}'`);
     }
     reminder.sentAt = at.toISOString();
+    // Returned directly rather than making the caller re-fetch via
+    // `get(actor, id)` — the system credential that's the only legitimate
+    // caller here has no `"scheduling"` grant in AccessControl, so that
+    // second lookup would deny exactly the actor that just succeeded.
+    return appointment;
   }
 
-  /** Persistence's own read, unscoped by design — it has to see every appointment regardless of any actor, the same reasoning `getDueReminders`/`#assertNoOverlap` already iterate the raw map directly. */
+  /** Persistence's own read, unscoped by design — it has to see every appointment regardless of any actor, the same reasoning `#assertNoOverlap` already iterates the raw map directly. */
   toSnapshot(): Appointment[] {
     return [...this.#appointments.values()].map((a) => ({
       ...a,

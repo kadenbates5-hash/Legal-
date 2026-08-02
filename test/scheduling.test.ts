@@ -7,6 +7,7 @@ import { AccessDeniedError, type Actor } from "../src/core/types.js";
 
 const receptionist: Actor = { id: "r1", role: "receptionist" };
 const paralegal: Actor = { id: "p1", role: "paralegal" };
+const system: Actor = { id: "sys", role: "system" };
 
 function makeFirmConfig(overrides?: Partial<FirmConfig>): FirmConfig {
   return {
@@ -316,14 +317,14 @@ describe("SchedulingService — reminders", () => {
     const service = new SchedulingService({ firmConfig: makeFirmConfig(), reminderOffsetsMinutes: [60, 5] });
     service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
 
-    const beforeAnyDue = service.getDueReminders(new Date(DURING_BUSINESS_HOURS.getTime() - 120 * 60_000));
+    const beforeAnyDue = service.getDueReminders(system, new Date(DURING_BUSINESS_HOURS.getTime() - 120 * 60_000));
     expect(beforeAnyDue).toHaveLength(0);
 
-    const afterFirstDue = service.getDueReminders(new Date(DURING_BUSINESS_HOURS.getTime() - 30 * 60_000));
+    const afterFirstDue = service.getDueReminders(system, new Date(DURING_BUSINESS_HOURS.getTime() - 30 * 60_000));
     expect(afterFirstDue).toHaveLength(1);
     expect(afterFirstDue[0]!.reminder.offsetMinutesBefore).toBe(60);
 
-    const afterBothDue = service.getDueReminders(DURING_BUSINESS_HOURS);
+    const afterBothDue = service.getDueReminders(system, DURING_BUSINESS_HOURS);
     expect(afterBothDue).toHaveLength(2);
   });
 
@@ -334,8 +335,8 @@ describe("SchedulingService — reminders", () => {
       startTime: DURING_BUSINESS_HOURS,
       attorneyId: "a1",
     });
-    service.markReminderSent(appt.id, appt.reminders[0]!.id);
-    const due = service.getDueReminders(DURING_BUSINESS_HOURS);
+    service.markReminderSent(system, appt.id, appt.reminders[0]!.id);
+    const due = service.getDueReminders(system, DURING_BUSINESS_HOURS);
     expect(due.some((d) => d.reminder.id === appt.reminders[0]!.id)).toBe(false);
   });
 
@@ -347,7 +348,32 @@ describe("SchedulingService — reminders", () => {
       attorneyId: "a1",
     });
     service.cancel(receptionist, appt.id);
-    expect(service.getDueReminders(DURING_BUSINESS_HOURS)).toHaveLength(0);
+    expect(service.getDueReminders(system, DURING_BUSINESS_HOURS)).toHaveLength(0);
+  });
+
+  it("denies marking a reminder sent for any role but system", () => {
+    const service = new SchedulingService({ firmConfig: makeFirmConfig() });
+    const appt = service.scheduleConsultation(receptionist, {
+      matterId: "m1",
+      startTime: DURING_BUSINESS_HOURS,
+      attorneyId: "a1",
+    });
+    expect(() => service.markReminderSent(receptionist, appt.id, appt.reminders[0]!.id)).toThrow(AccessDeniedError);
+    expect(() => service.markReminderSent({ id: "a1", role: "attorney" }, appt.id, appt.reminders[0]!.id)).toThrow(AccessDeniedError);
+  });
+
+  it("scopes getDueReminders to matters the actor can reach, unless the actor is system", () => {
+    const auditLog = new AuditLog();
+    const accessControl = new AccessControl(auditLog);
+    const service = new SchedulingService({ firmConfig: makeFirmConfig(), accessControl, reminderOffsetsMinutes: [60] });
+    service.scheduleConsultation(receptionist, { matterId: "m1", startTime: DURING_BUSINESS_HOURS, attorneyId: "a1" });
+    accessControl.assignParalegal(paralegal.id, "m2");
+    service.scheduleConsultation(receptionist, { matterId: "m2", startTime: DURING_BUSINESS_HOURS, attorneyId: "a2" });
+
+    // The paralegal is assigned to m2 only, so only that matter's reminder shows up.
+    expect(service.getDueReminders(paralegal, DURING_BUSINESS_HOURS).map((d) => d.appointment.matterId)).toEqual(["m2"]);
+    // system sees both, unscoped.
+    expect(service.getDueReminders(system, DURING_BUSINESS_HOURS)).toHaveLength(2);
   });
 });
 
@@ -379,7 +405,7 @@ describe("SchedulingService — listing and snapshots", () => {
       startTime: DURING_BUSINESS_HOURS,
       attorneyId: "a1",
     });
-    service.markReminderSent(appt.id, appt.reminders[0]!.id);
+    service.markReminderSent(system, appt.id, appt.reminders[0]!.id);
 
     const restored = SchedulingService.fromSnapshot(service.toSnapshot(), { firmConfig: config });
     const restoredAppt = restored.get(receptionist, appt.id);

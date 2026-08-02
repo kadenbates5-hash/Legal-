@@ -14,6 +14,7 @@
     "start:review-ui": "npm run build && node dist/review-ui/start.js",
     "sync:calendar": "npm run build && node dist/integrations/sync-calendar-deadlines.js",
     "sync:calendar:push": "npm run build && node dist/integrations/sync-appointments-to-calendar.js",
+    "send:reminders": "npm run build && node dist/integrations/send-appointment-reminders.js",
     "anchor:audit": "npm run build && node dist/integrations/anchor-audit.js",
     "test": "vitest run",
     "test:watch": "vitest",

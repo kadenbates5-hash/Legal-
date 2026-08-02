@@ -728,7 +728,7 @@ async function handleRequest(
         sendJson(res, 404, { error: "scheduling is not configured on this server" });
         return;
       }
-      await handleAppointmentsRequest(scheduling, req, res, actor, url, onMutated);
+      await handleAppointmentsRequest(scheduling, matters, req, res, actor, url, onMutated);
       return;
     }
 
@@ -2420,6 +2420,7 @@ async function handleVoiceRequest(
 
 async function handleAppointmentsRequest(
   scheduling: SchedulingService,
+  matters: MattersService | undefined,
   req: IncomingMessage,
   res: ServerResponse,
   actor: Actor,
@@ -2427,7 +2428,21 @@ async function handleAppointmentsRequest(
   onMutated?: () => void,
 ): Promise<void> {
   if (url.pathname === "/api/appointments/reminders/due" && req.method === "GET") {
-    sendJson(res, 200, scheduling.getDueReminders());
+    const due = scheduling.getDueReminders(actor);
+    // Enrichment only, and only for the system credential: the
+    // reminder-sending job needs somewhere to mail the reminder, but no
+    // human-facing view of this list currently shows it, so there's no
+    // reason to widen what a receptionist/paralegal session gets back.
+    // Best-effort — a matter with no client email on record (or no
+    // MattersService configured at all) just sends nothing for that item.
+    const enriched = due.map(({ appointment, reminder }) => ({
+      appointment:
+        actor.role === "system" && matters
+          ? { ...appointment, recipientEmail: matters.clientEmailFor(actor, appointment.matterId) }
+          : appointment,
+      reminder,
+    }));
+    sendJson(res, 200, enriched);
     return;
   }
 
@@ -2518,8 +2533,8 @@ async function handleAppointmentsRequest(
   }
 
   if (segments.length === 3 && segments[1] === "reminders" && req.method === "POST") {
-    scheduling.markReminderSent(id, segments[2]!);
-    sendJson(res, 200, scheduling.get(actor, id));
+    const appointment = scheduling.markReminderSent(actor, id, segments[2]!);
+    sendJson(res, 200, appointment);
     onMutated?.();
     return;
   }

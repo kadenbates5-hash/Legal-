@@ -231,10 +231,21 @@ describe("appointments HTTP API", () => {
     expect(Array.isArray(await dueRes.json())).toBe(true);
 
     const reminderId = created.reminders[0].id;
-    const markRes = await fetch(
+
+    // Marking a reminder sent is the sending job's own write-back —
+    // no human role has a "mark sent" button, so it's system-only.
+    const denied = await fetch(
       `${baseUrl}/api/appointments/${created.id}/reminders/${reminderId}`,
       withCookie(receptionistCookie, { method: "POST", body: "{}" }),
     );
+    expect(denied.status).toBe(403);
+
+    auth.setSystemApiKey("test-system-key-1234567890");
+    const markRes = await fetch(`${baseUrl}/api/appointments/${created.id}/reminders/${reminderId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-system-api-key": "test-system-key-1234567890" },
+      body: "{}",
+    });
     expect(markRes.status).toBe(200);
     const updated = await markRes.json();
     expect(updated.reminders.find((r: { id: string }) => r.id === reminderId).sentAt).toBeTruthy();

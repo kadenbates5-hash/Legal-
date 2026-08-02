@@ -1,7 +1,7 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AccessControl } from "../core/access-control.js";
 import { diffFields, type AuditLog } from "../core/audit.js";
-import { addYears, type Matter, type MatterInput, type MatterStore } from "../core/matters.js";
+import { addYears, billingEmailFor, type Matter, type MatterInput, type MatterStore } from "../core/matters.js";
 import type { TrustLedger } from "../core/trust-ledger.js";
 import type { InvoiceStore } from "../core/invoicing.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
@@ -133,6 +133,27 @@ export class MattersService {
     const matter = this.#store.get(matterId);
     if (!matter) throw new Error(`no matter '${matterId}'`);
     return matter;
+  }
+
+  /**
+   * The one client-facing address on record for a matter — restricted
+   * to the `"system"` machine credential, same gate as
+   * `SchedulingService.recordCalendarSync`/`confirmDeadline`'s
+   * calendar-system source. Exists solely so the appointment-reminder
+   * sending job has somewhere to mail a reminder without going through
+   * the ordinary paralegal/attorney `case_file` gate `get()` enforces —
+   * a client's email address is a narrower thing to hand a machine
+   * credential than the whole matter record (adverse parties, status,
+   * description). Never audited on its own, same as
+   * `InvoicingService`'s internal `#clientEmail` — it's supporting data
+   * for a read that's already accounted for, not a new disclosure
+   * surface.
+   */
+  clientEmailFor(actor: Actor, matterId: string): string | undefined {
+    if (actor.role !== "system") {
+      throw new AccessDeniedError(`reading a matter's client email requires the system credential (got role '${actor.role}')`);
+    }
+    return billingEmailFor(this.#store.get(matterId));
   }
 
   /**

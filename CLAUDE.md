@@ -180,10 +180,25 @@ the rest of core:
   a time slot that overlaps one of their existing (non-cancelled)
   appointments.
 - Computes reminder due-times (default: 24h and 1h before) as plain data —
-  `getDueReminders()` returns what's due right now for a host process to
-  poll and actually send (email/SMS is a vendor integration, deliberately
-  out of scope, same reasoning as `voice-agent.ts` staying vendor-agnostic
-  for STT/TTS).
+  `getDueReminders(actor)` returns what's due right now for a host
+  process to poll and actually send. Sending itself is a vendor
+  integration (email/SMS) — see "Appointment reminder emails" below for
+  the vendor now built, same reasoning as `voice-agent.ts` staying
+  vendor-agnostic for STT/TTS applies to `scheduling.ts` itself staying
+  vendor-agnostic here. Firm-wide by nature (a reminder-sending job needs
+  every due reminder in one pass), so the `"system"` role sees everything
+  unscoped, same as `listPendingCalendarSync()`; every other role gets
+  the same matter-scoped, silently-omitting filter as `listAll()` — this
+  same method also backs the in-app Scheduling panel's "Coming due" card,
+  which a receptionist or paralegal reads day to day, so it can't simply
+  be system-only the way `listPendingCalendarSync()` is.
+  `markReminderSent()` is restricted to the `"system"` role outright
+  (mirroring `recordCalendarSync()`) and returns the updated `Appointment`
+  directly rather than making the caller re-fetch it — the system
+  credential has no `"scheduling"` grant in `AccessControl`, so a
+  `get(actor, id)` afterward would deny the very actor that just
+  succeeded. Both were unscoped/unauthenticated for a period, closed
+  alongside the sending job below.
 - Enforces `AccessControl`'s existing `"scheduling"` category when
   constructed with one — receptionist role is already scoped to
   `intake`/`scheduling` fields (§5), so this reuses that gate rather than
@@ -212,6 +227,65 @@ the rest of core:
 - `toSnapshot()`/`fromSnapshot()` follow the same persistence pattern as
   every other stateful core object — wired into `system-state.ts` and the
   dashboard's "Scheduling" panel.
+
+### Appointment reminder emails (closing the "send it" gap)
+
+`src/integrations/appointment-reminders.ts` — `AppointmentReminderSender`,
+the vendor now behind the gap `scheduling.ts` always left open ("sending
+them is a vendor integration... deliberately out of scope"). Now that an
+`EmailSender` already exists for invoicing (see "Invoicing, payments, and
+staff payroll" below), closing it is the same shape as the calendar sync
+engines: a standalone process that reads from and writes back to
+Docket's own HTTP API using the `x-system-api-key` credential, never a
+shortcut straight into `SchedulingService`.
+
+- **Where the recipient address comes from.** A reminder has an
+  `attorneyId`/`matterId`, not a client contact — the client's email
+  lives on the matter's client party, the same field
+  `InvoicingService`/`billingEmailFor()` already use to mail an invoice.
+  `MattersService.clientEmailFor(actor, matterId)` is a new, narrow read
+  restricted to the `"system"` role (same gate as
+  `recordCalendarSync`/`confirmDeadline`'s calendar-system source) —
+  handing a machine credential the one address it needs is a smaller
+  grant than the ordinary `get()`'s full `case_file` category (adverse
+  parties, status, description). It's never audited on its own, same as
+  `InvoicingService`'s internal `#clientEmail` — supporting data for a
+  read that's already accounted for, not a new disclosure surface.
+- **The enrichment lives in the route, not the sender.**
+  `GET /api/appointments/reminders/due` attaches `recipientEmail` to
+  each entry only when the caller is the `"system"` role — a
+  receptionist/paralegal reading the same in-app "Coming due" card gets
+  the plain, unenriched list, since nothing in the UI has ever shown or
+  needed a client's email there. This keeps `clientEmailFor` itself
+  strict (no "trust the caller already scoped this" shortcut) while
+  still giving the one legitimate caller — the sending job — everything
+  it needs in a single request.
+- `AppointmentReminderSender.run()` fetches the enriched due list, skips
+  any entry with no recipient email (`result.skipped`, not a failure —
+  there's simply nothing to send), sends via the configured
+  `EmailSender`, and marks each one sent via
+  `POST /api/appointments/:id/reminders/:reminderId` on success. A
+  per-reminder failure is recorded rather than aborting the run, the
+  same pattern as `AppointmentCalendarSync`/`CalendarDeadlineSync`. A
+  mail failure after all is deliberately not distinguished from a
+  mark-sent failure: either way the reminder stays unsent and the next
+  run retries it — better to occasionally re-send a reminder than to
+  silently drop one. `renderReminderEmail()` is exported standalone for
+  the same reason `buildAppointmentEventBody()`/`parseDeadlineEvent()`
+  are: the wording is unit-testable without a live Docket instance or
+  mail transport.
+- `src/integrations/send-appointment-reminders.ts` is the standalone
+  entry point (`npm run send:reminders`), deliberately its own process
+  rather than running inside the main server — same reasoning as
+  `sync-calendar-deadlines.ts`. Configured via `SMTP_HOST`/`SMTP_FROM`
+  (plus the usual optional `SMTP_*` vars), `DOCKET_BASE_URL`/
+  `DOCKET_SYSTEM_API_KEY`, and an optional `FIRM_NAME` used in the
+  reminder's subject/body.
+
+What this doesn't do: SMS reminders (email only, for now — the same
+`EmailSender` seam this reuses has no SMS analogue in this project yet),
+or let a client reply to change the appointment — the email says so
+explicitly and points back to calling the office.
 
 ## Deadline redundancy (§7 open item #1 — resolved)
 
@@ -2095,6 +2169,7 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 # CALENDAR_SYSTEM_API_KEY=... npm run start:review-ui                     # pin the calendar-integration key instead of auto-generating one
 GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
 # ... && npm run sync:calendar:push                                       # one-shot: push pending appointments out to Google Calendar (same env vars; the other sync direction)
+# SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... FIRM_NAME="..." npm run send:reminders  # one-shot: email whichever appointment reminders are due right now (run on a schedule, e.g. cron every few minutes)
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
@@ -2158,8 +2233,6 @@ above). Still open:
   `CALENDAR_SYSTEM_API_KEY`), and §5's vendor due-diligence review of
   Google Calendar itself (zero-retention, storage jurisdiction, subpoena
   risk) — a firm decision, not a technical one
-- Syncing the other direction: `Appointment`s aren't pushed to Google
-  Calendar as events, only deadline confirmations flow in from it
 - The rest of account management: self-service (email-link) password
   reset, and self-service invites — attorney-initiated password reset,
   self-service password change, TOTP two-factor authentication, and
