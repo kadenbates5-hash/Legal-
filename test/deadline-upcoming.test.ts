@@ -144,9 +144,15 @@ describe("ReviewGateService.listUpcomingDeadlines — risk ranking", () => {
     expect(ranked[0]!.confirmationState).toBe("confirmed");
   });
 
-  it("stays attorney-only, like the rest of the deadline surface", () => {
+  it("stays attorney-only for other roles, like the rest of the deadline surface", () => {
     const tracker = trackerWith([{ matterId: "m-1", type: "other", date: "2026-07-30", source: "agent" }]);
     expect(() => service(tracker).listUpcomingDeadlines(paralegal)).toThrow(AccessDeniedError);
+  });
+
+  it("is also reachable by the system credential, for the deadline-alert sending job", () => {
+    const tracker = trackerWith([{ matterId: "m-1", type: "other", date: "2026-07-30", source: "agent" }]);
+    const system: Actor = { id: "sys", role: "system" };
+    expect(service(tracker).listUpcomingDeadlines(system, { today: TODAY })).toHaveLength(1);
   });
 
   it("returns an empty list rather than failing when no tracker is configured", () => {

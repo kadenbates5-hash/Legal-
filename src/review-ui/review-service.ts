@@ -234,12 +234,22 @@ export class ReviewGateService {
    *
    * `today` is a parameter so a caller can pass the firm's own local
    * date rather than the server's — same reasoning as the time clock.
+   *
+   * Also reachable by the `"system"` machine credential, on top of the
+   * ordinary attorney gate — see "Proactive deadline-risk alerts" in
+   * CLAUDE.md: the alert-sending job needs the same firm-wide, risk-ranked
+   * view an attorney sees on the Deadlines panel, not a second, weaker
+   * accessor. This is an inline check rather than a change to
+   * `requireAttorney()` itself, which every other method here still uses
+   * unmodified and must stay strictly attorney-only.
    */
   listUpcomingDeadlines(
     actor: Actor,
     options: { withinDays?: number; today?: string } = {},
   ): (UpcomingDeadline & { urgency: number })[] {
-    requireAttorney(actor);
+    if (actor.role !== "attorney" && actor.role !== "system") {
+      throw new AccessDeniedError(`review-gate UI is attorney-only (got role '${actor.role}')`);
+    }
     const today = options.today ?? new Date().toISOString().slice(0, 10);
     const withinDays = options.withinDays ?? DEFAULT_DEADLINE_HORIZON_DAYS;
     const upcoming = this.#deadlineTracker?.listUpcoming({ today, withinDays }) ?? [];

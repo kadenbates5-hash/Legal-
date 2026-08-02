@@ -287,6 +287,62 @@ What this doesn't do: SMS reminders (email only, for now — the same
 or let a client reply to change the appointment — the email says so
 explicitly and points back to calling the office.
 
+### Proactive deadline-risk alerts (closing the "somebody has to look" gap)
+
+`src/integrations/deadline-alerts.ts` — `DeadlineAlertSender`, the same
+"host process polls Docket's own API" shape as
+`AppointmentReminderSender`, aimed at the deadline side instead of
+appointments. The Deadlines panel's "Coming due" list (see "What's
+coming due" below) is only useful to someone who opens it, and per this
+project's own stated rationale, "missing a deadline is the most common
+malpractice claim there is" — a risk-ranked list nobody is looking at
+doesn't reduce that risk.
+
+- `ReviewGateService.listUpcomingDeadlines()` is now reachable by the
+  `"system"` machine credential in addition to an attorney — an inline
+  `actor.role !== "attorney" && actor.role !== "system"` check at that
+  one call site, not a change to the shared `requireAttorney()` helper
+  every other method on the class still uses unmodified and must stay
+  strictly attorney-only. `/api/deadlines/upcoming` needed no server.ts
+  change at all: it already passed `actor` straight through with no
+  route-level gate of its own.
+- **Deliberately a single firm-wide digest to one configured recipient,
+  not per-responsible-attorney routing.** Routing per attorney would
+  need an email field on `User`/staff accounts, which doesn't exist yet
+  and is a separate, larger change — see "Staff directory..." above,
+  where `displayName` was the equivalent addition for messaging. A firm
+  that wants several people to see it can point
+  `DEADLINE_ALERT_RECIPIENT` at a distribution list.
+- **No "mark sent" state, unlike appointment reminders.** An appointment
+  reminder is client-facing and must never double-send; this digest is
+  internal and reflects current system state on every run — resending
+  the same at-risk deadline on tomorrow's run is the point, not a bug,
+  since it's still at risk. `run()` sends nothing at all
+  (`{ sent: false, deadlineCount: 0 }`) when nothing is currently within
+  the horizon, rather than mailing an empty "all clear" digest daily.
+- `renderDeadlineDigest()` is exported standalone for the same reason
+  `renderReminderEmail()` is: the wording is unit-testable without a
+  live Docket instance or mail transport. It carries the matter id,
+  deadline type, date, and confirmation state for every entry, ordered
+  exactly as `listUpcomingDeadlines()` already ranks them (urgency, not
+  date — see "What's coming due" below) — the digest and the panel can't
+  disagree about what matters most since both read the same ranking.
+- `src/integrations/send-deadline-alerts.ts` is the standalone entry
+  point (`npm run send:deadline-alerts`), deliberately its own process
+  rather than running inside the main server — same reasoning as
+  `send-appointment-reminders.ts`. Configured via `SMTP_HOST`/`SMTP_FROM`
+  (plus the usual optional `SMTP_*` vars), `DOCKET_BASE_URL`/
+  `DOCKET_SYSTEM_API_KEY`, `DEADLINE_ALERT_RECIPIENT`, and optional
+  `FIRM_NAME`/`DEADLINE_ALERT_WITHIN_DAYS`. Meant to run on a daily
+  schedule (e.g. cron), not continuously.
+
+What this doesn't do: route to the actual responsible attorney per
+matter (see above — that needs staff email addresses, not built yet),
+suppress a deadline once someone has seen it (there's no acknowledgment
+state — the source of truth stays the Deadlines panel), or replace
+attorney judgment about which deadlines matter — it's a nudge to go
+look, not a substitute for looking.
+
 ## Deadline redundancy (§7 open item #1 — resolved)
 
 ### What counts as an independent source
@@ -2170,6 +2226,7 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
 # ... && npm run sync:calendar:push                                       # one-shot: push pending appointments out to Google Calendar (same env vars; the other sync direction)
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... FIRM_NAME="..." npm run send:reminders  # one-shot: email whichever appointment reminders are due right now (run on a schedule, e.g. cron every few minutes)
+# SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... DEADLINE_ALERT_RECIPIENT=partners@firm.example npm run send:deadline-alerts  # one-shot: email a firm-wide digest of at-risk deadlines (run on a schedule, e.g. daily cron)
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
