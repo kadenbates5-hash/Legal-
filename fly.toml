@@ -1,0 +1,48 @@
+# Fly.io deploy config — an alternative to render.yaml.
+# `fly launch` will offer to generate one of these; this one is
+# pre-filled so `fly deploy` works with no prompts once `app` is set.
+#
+#   fly apps create <your-app-name>            # then set `app` below
+#   fly volumes create docket_data --size 1     # only if skipping Postgres — see [mounts]
+#   fly secrets set ATTORNEY_USERNAME=... ATTORNEY_PASSWORD=... TRUST_PROXY=true
+#   fly secrets set DATABASE_URL=...            # optional — Postgres instead of the file store; `fly postgres create` provisions one
+#   fly deploy
+
+app = "docket"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "3000"
+  STATE_FILE = "/app/data/system-state.json"
+
+[[services]]
+  internal_port = 3000
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.http_checks]]
+    path = "/login.html"
+    interval = "30s"
+    timeout = "5s"
+
+# Only needed if you're not using DATABASE_URL — gives the file-backed
+# store somewhere durable to write instead of the container's ephemeral
+# disk, which is wiped on every deploy.
+[mounts]
+  source = "docket_data"
+  destination = "/app/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

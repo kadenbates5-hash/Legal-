@@ -2211,6 +2211,11 @@ attorney clears them via `workProduct.clearFlag(...)`.
 
 ## Commands
 
+Deploying this as a publicly reachable website (Render/Fly.io/Docker
+Compose/plain Docker) is covered separately in `DEPLOY.md` — the
+`Dockerfile`, `render.yaml`, `fly.toml`, and `docker-compose.yml` at the
+repo root back those four paths.
+
 ```
 npm install
 npm run typecheck        # tsc --noEmit
