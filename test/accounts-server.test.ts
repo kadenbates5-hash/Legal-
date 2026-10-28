@@ -237,4 +237,40 @@ describe("accounts HTTP API", () => {
     );
     expect(res.status).toBe(403);
   });
+
+  it("creates a new account with an email", async () => {
+    const cookie = await loginCookie("attorney1", "correct-horse");
+    const res = await fetch(
+      `${baseUrl}/api/accounts`,
+      withCookie(cookie, {
+        method: "POST",
+        body: JSON.stringify({ username: "reception2", password: "correct-horse", role: "receptionist", email: "reception2@example.com" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).email).toBe("reception2@example.com");
+  });
+
+  it("sets an existing account's email via the set-email action", async () => {
+    const cookie = await loginCookie("attorney1", "correct-horse");
+    const created = await (
+      await fetch(`${baseUrl}/api/accounts`, withCookie(cookie, { method: "POST", body: JSON.stringify({ username: "reception3", password: "correct-horse", role: "receptionist" }) }))
+    ).json();
+
+    const res = await fetch(
+      `${baseUrl}/api/accounts/${created.id}/set-email`,
+      withCookie(cookie, { method: "POST", body: JSON.stringify({ email: "reception3@example.com" }) }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).email).toBe("reception3@example.com");
+  });
+
+  it("denies set-email to a non-attorney actor", async () => {
+    const paralegalCookie = await loginCookie("paralegal1", "correct-horse");
+    const res = await fetch(
+      `${baseUrl}/api/accounts/whatever/set-email`,
+      withCookie(paralegalCookie, { method: "POST", body: JSON.stringify({ email: "x@example.com" }) }),
+    );
+    expect(res.status).toBe(403);
+  });
 });

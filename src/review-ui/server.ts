@@ -719,7 +719,7 @@ async function handleRequest(
     }
 
     if (url.pathname.startsWith("/api/deadlines")) {
-      await handleDeadlineRequest(service, req, res, actor, url, onMutated);
+      await handleDeadlineRequest(service, matters, staff, req, res, actor, url, onMutated);
       return;
     }
 
@@ -1128,6 +1128,8 @@ async function handleLogin(
 
 async function handleDeadlineRequest(
   service: ReviewGateService,
+  matters: MattersService | undefined,
+  staff: StaffService | undefined,
   req: IncomingMessage,
   res: ServerResponse,
   actor: Actor,
@@ -1141,14 +1143,24 @@ async function handleDeadlineRequest(
 
   if (url.pathname === "/api/deadlines/upcoming" && req.method === "GET") {
     const withinDays = Number(url.searchParams.get("withinDays"));
-    sendJson(
-      res,
-      200,
-      service.listUpcomingDeadlines(actor, {
-        ...(Number.isFinite(withinDays) && withinDays > 0 ? { withinDays } : {}),
-        ...(url.searchParams.get("today") ? { today: url.searchParams.get("today")! } : {}),
-      }),
-    );
+    const upcoming = service.listUpcomingDeadlines(actor, {
+      ...(Number.isFinite(withinDays) && withinDays > 0 ? { withinDays } : {}),
+      ...(url.searchParams.get("today") ? { today: url.searchParams.get("today")! } : {}),
+    });
+    // Enrichment lives in the route, not the digest sender — same
+    // "system-only, same request" pattern as the appointment-reminders
+    // route's recipientEmail. A receptionist/paralegal/attorney reading
+    // the same list in the Deadlines panel has no use for a colleague's
+    // email address, so it's only ever attached for the sending job.
+    const enriched =
+      actor.role === "system" && matters && staff
+        ? upcoming.map((d) => {
+            const responsibleAttorneyId = matters.responsibleAttorneyIdFor(actor, d.matterId);
+            const responsibleAttorneyEmail = responsibleAttorneyId ? staff.emailForActorId(actor, responsibleAttorneyId) : undefined;
+            return responsibleAttorneyEmail ? { ...d, responsibleAttorneyEmail } : d;
+          })
+        : upcoming;
+    sendJson(res, 200, enriched);
     return;
   }
 
@@ -1237,6 +1249,7 @@ async function handleAccountsRequest(
       role: body["role"] as UserRole,
       ...(typeof body["actorId"] === "string" && body["actorId"] ? { actorId: body["actorId"] } : {}),
       ...(typeof body["displayName"] === "string" && body["displayName"] ? { displayName: body["displayName"] } : {}),
+      ...(typeof body["email"] === "string" && body["email"] ? { email: body["email"] } : {}),
     });
     sendJson(res, 200, result);
     onMutated?.();
@@ -1281,6 +1294,9 @@ async function handleAccountsRequest(
         break;
       case "revoke-matter-access":
         result = accounts.revokeMatterAccess(actor, id, String(body["matterId"] ?? ""));
+        break;
+      case "set-email":
+        result = accounts.setEmail(actor, id, String(body["email"] ?? ""));
         break;
       default:
         sendJson(res, 404, { error: "not found" });

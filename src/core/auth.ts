@@ -28,6 +28,16 @@ export interface User {
   readonly actorId: string;
   /** A person's full name, for the Staff directory/messaging/schedule panels — falls back to `username` if never set. */
   readonly displayName: string;
+  /**
+   * A staff email address, for routing the deadline-risk digest (see
+   * `integrations/deadline-alerts.ts`) to the matter's actual
+   * responsible attorney instead of one firm-wide recipient. Optional
+   * and absent by default — unlike `displayName` there's no sane
+   * fallback for a missing email, so a routing lookup that finds none
+   * has to fall back to the digest's configured catch-all recipient
+   * rather than inventing an address.
+   */
+  readonly email?: string;
   /** Disabled accounts can never log in again and have every live session revoked immediately — see `setDisabled`. */
   readonly disabled: boolean;
   /** Set by `resetPassword()` (an attorney set a temporary password on this user's behalf); cleared by `changePassword()`. Surfaced via `/api/me` and the Accounts panel — there's no forced-change flow yet, just a flag the UI can nudge on. */
@@ -172,7 +182,14 @@ export class AuthService {
   }
 
   /** Creates a login-capable account. Never overwrites an existing username. */
-  createUser(params: { username: string; password: string; role: UserRole; actorId?: string; displayName?: string }): User {
+  createUser(params: {
+    username: string;
+    password: string;
+    role: UserRole;
+    actorId?: string;
+    displayName?: string;
+    email?: string;
+  }): User {
     const key = params.username.trim().toLowerCase();
     if (!key) throw new AuthError("username must not be empty");
     if (params.password.length < 8) throw new AuthError("password must be at least 8 characters");
@@ -180,6 +197,7 @@ export class AuthService {
       throw new AuthError(`username '${params.username}' already exists`);
     }
     const salt = randomBytes(16).toString("hex");
+    const email = params.email?.trim();
     const user: User = {
       id: nextUserId(),
       username: params.username,
@@ -190,10 +208,29 @@ export class AuthService {
       displayName: params.displayName?.trim() || params.username,
       disabled: false,
       mustChangePassword: false,
+      ...(email ? { email } : {}),
     };
     this.#usersById.set(user.id, user);
     this.#usersByUsername.set(key, user);
     return user;
+  }
+
+  /**
+   * Sets or clears a user's email, used for routing the deadline-risk
+   * digest to the actual responsible attorney (see `User.email`'s doc
+   * comment). An empty string clears it, same convention as a blank
+   * `displayName` falling back rather than being stored literally — but
+   * email has no sane fallback, so clearing it here means "no address
+   * on file," not "use something else."
+   */
+  setEmail(userId: string, email: string): User {
+    const user = this.#requireUser(userId);
+    const trimmed = email.trim();
+    const { email: _discard, ...rest } = user;
+    const updated: User = trimmed ? { ...rest, email: trimmed } : { ...rest };
+    this.#usersById.set(updated.id, updated);
+    this.#usersByUsername.set(updated.username.trim().toLowerCase(), updated);
+    return updated;
   }
 
   /**

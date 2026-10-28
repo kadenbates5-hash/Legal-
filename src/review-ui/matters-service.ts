@@ -157,6 +157,23 @@ export class MattersService {
   }
 
   /**
+   * Same gate and reasoning as `clientEmailFor`, for the other side of a
+   * matter: the deadline-alert digest (see `integrations/deadline-
+   * alerts.ts`) needs *who* is responsible for a matter to route to
+   * them, not the matter record's full contents (adverse parties,
+   * status, description). `responsibleAttorneyId` is a staff `actorId`,
+   * not an email — the sending job resolves that to an address itself
+   * via the staff directory, same as it already fetches a client's
+   * email separately from who the client is.
+   */
+  responsibleAttorneyIdFor(actor: Actor, matterId: string): string | undefined {
+    if (actor.role !== "system") {
+      throw new AccessDeniedError(`reading a matter's responsible attorney requires the system credential (got role '${actor.role}')`);
+    }
+    return this.#store.get(matterId)?.responsibleAttorneyId;
+  }
+
+  /**
    * Creating or editing a matter record — including who the client and
    * adverse parties are — is attorney-only. Those fields are the input to
    * every future conflicts check, so letting them be edited more widely

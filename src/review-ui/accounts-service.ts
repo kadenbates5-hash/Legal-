@@ -36,6 +36,8 @@ export interface AccountSummary {
   role: UserRole;
   actorId: string;
   displayName: string;
+  /** For routing the deadline-risk digest to this account's responsible matters (see `core/auth.ts`'s `User.email`). Absent until an attorney sets one. */
+  email?: string;
   disabled: boolean;
   /** Set after an attorney resets this account's password; cleared once the holder changes it themselves. */
   mustChangePassword: boolean;
@@ -111,6 +113,7 @@ export class AccountsService {
       role: user.role,
       actorId: user.actorId,
       displayName: user.displayName,
+      ...(user.email ? { email: user.email } : {}),
       disabled: user.disabled,
       mustChangePassword: user.mustChangePassword,
       mfaEnabled: user.mfa !== undefined,
@@ -125,12 +128,31 @@ export class AccountsService {
     return this.#auth.listUsers().map((u) => this.#summarize(u));
   }
 
-  create(actor: Actor, params: { username: string; password: string; role: UserRole; actorId?: string; displayName?: string }): AccountSummary {
+  create(
+    actor: Actor,
+    params: { username: string; password: string; role: UserRole; actorId?: string; displayName?: string; email?: string },
+  ): AccountSummary {
     requireAttorney(actor);
     const user = this.#auth.createUser(params);
     // Never the password, obviously — but who granted whom what role, and
     // when, is the first thing anyone reconstructing an incident wants.
     this.#audit(actor, "account_created", `user=${user.id} username=${user.username} role=${user.role} actorId=${user.actorId}`);
+    return this.#summarize(user);
+  }
+
+  /**
+   * Sets or clears a staff account's email — the one piece of contact
+   * info this project stores for a colleague, and solely so the
+   * deadline-risk digest can route to the actual responsible attorney
+   * instead of one firm-wide recipient (see `integrations/
+   * deadline-alerts.ts`). Not a general profile-editing surface: there
+   * is deliberately no username/role change here, same scope line the
+   * rest of this service already draws.
+   */
+  setEmail(actor: Actor, userId: string, email: string): AccountSummary {
+    requireAttorney(actor);
+    const user = this.#auth.setEmail(userId, email);
+    this.#audit(actor, "account_email_set", `user=${user.id} username=${user.username} email=${user.email ?? "(cleared)"}`);
     return this.#summarize(user);
   }
 

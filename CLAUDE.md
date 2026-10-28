@@ -306,13 +306,31 @@ doesn't reduce that risk.
   strictly attorney-only. `/api/deadlines/upcoming` needed no server.ts
   change at all: it already passed `actor` straight through with no
   route-level gate of its own.
-- **Deliberately a single firm-wide digest to one configured recipient,
-  not per-responsible-attorney routing.** Routing per attorney would
-  need an email field on `User`/staff accounts, which doesn't exist yet
-  and is a separate, larger change — see "Staff directory..." above,
-  where `displayName` was the equivalent addition for messaging. A firm
-  that wants several people to see it can point
-  `DEADLINE_ALERT_RECIPIENT` at a distribution list.
+- **Routed to each matter's actual responsible attorney**, not one
+  firm-wide digest to a single recipient (the original, simpler
+  design). This needed `User.email` (`core/auth.ts`) — an optional
+  staff email, set via `AccountsService.setEmail()`/`POST
+  /api/accounts/:id/set-email` or at account creation, surfaced in the
+  Accounts panel next to each account ("Set email"/"Change email").
+  `/api/deadlines/upcoming` attaches `responsibleAttorneyEmail` to each
+  entry only when the caller is the `"system"` role — the same
+  "enrichment lives in the route" pattern as the appointment-reminders
+  route's `recipientEmail` — by resolving the matter's
+  `responsibleAttorneyId` (`MattersService.responsibleAttorneyIdFor()`,
+  gated to `"system"` like `clientEmailFor`) to an address via
+  `StaffService.emailForActorId()` (the *opposite* gate of
+  `StaffService.list()`: restricted to `"system"` specifically, rather
+  than open to every staff human — handing the sending job one address
+  is a narrower grant than the whole directory).
+- `DeadlineAlertSender.run()` groups the deadlines it fetches by
+  `responsibleAttorneyEmail` and sends one digest per attorney — so an
+  attorney's digest is their own at-risk matters, not the whole firm's.
+  A deadline whose matter has no responsible attorney on record, or
+  whose attorney has no email on file, falls back to the optional
+  `catchAllEmail` (`DEADLINE_ALERT_RECIPIENT`, now optional — a
+  firm-wide distribution list still works there); with neither, that
+  deadline is counted in `skipped` rather than silently dropped or
+  blocking every other attorney's digest from sending.
 - **No "mark sent" state, unlike appointment reminders.** An appointment
   reminder is client-facing and must never double-send; this digest is
   internal and reflects current system state on every run — resending
@@ -336,12 +354,10 @@ doesn't reduce that risk.
   `FIRM_NAME`/`DEADLINE_ALERT_WITHIN_DAYS`. Meant to run on a daily
   schedule (e.g. cron), not continuously.
 
-What this doesn't do: route to the actual responsible attorney per
-matter (see above — that needs staff email addresses, not built yet),
-suppress a deadline once someone has seen it (there's no acknowledgment
-state — the source of truth stays the Deadlines panel), or replace
-attorney judgment about which deadlines matter — it's a nudge to go
-look, not a substitute for looking.
+What this doesn't do: suppress a deadline once someone has seen it
+(there's no acknowledgment state — the source of truth stays the
+Deadlines panel), or replace attorney judgment about which deadlines
+matter — it's a nudge to go look, not a substitute for looking.
 
 ## Deadline redundancy (§7 open item #1 — resolved)
 
@@ -793,6 +809,12 @@ each other, when they're in the office, and how they log billable time.
   name, defaulting to `username` if never set) via `createUser({..,
   displayName })`. Initials (for avatars in Staff/Messages) are always
   derived from it at read time, never stored — see `initialsFor()` below.
+  `User` later also gained an optional `email` (`setEmail`/
+  `createUser({.., email})`) — unlike `displayName` there's no sane
+  fallback, so it's simply absent until an attorney sets one via the
+  Accounts panel. Added solely to route the deadline-alert digest to a
+  matter's actual responsible attorney — see "Proactive deadline-risk
+  alerts" above — not a general contact-info field.
 - `review-ui/staff-service.ts` — `StaffService`, backing the "Staff"
   panel: a read-only directory of every account (username, display name,
   initials, role, disabled status, and a paralegal's current matter
@@ -2241,7 +2263,7 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
 # ... && npm run sync:calendar:push                                       # one-shot: push pending appointments out to Google Calendar (same env vars; the other sync direction)
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... FIRM_NAME="..." npm run send:reminders  # one-shot: email whichever appointment reminders are due right now (run on a schedule, e.g. cron every few minutes)
-# SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... DEADLINE_ALERT_RECIPIENT=partners@firm.example npm run send:deadline-alerts  # one-shot: email a firm-wide digest of at-risk deadlines (run on a schedule, e.g. daily cron)
+# SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run send:deadline-alerts  # one-shot: email each matter's responsible attorney their own at-risk deadlines (run on a schedule, e.g. daily cron); add DEADLINE_ALERT_RECIPIENT=partners@firm.example as a catch-all for matters with no responsible attorney/email on file
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit

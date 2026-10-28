@@ -80,3 +80,24 @@ describe("StaffService", () => {
     expect(paralegalEntry.matterAssignment).toBeUndefined();
   });
 });
+
+describe("StaffService.emailForActorId", () => {
+  it("is the opposite gate of list() — system-only", () => {
+    const { staff } = makeStaff();
+    expect(() => staff.emailForActorId(attorney, "a1")).toThrow(AccessDeniedError);
+    expect(() => staff.emailForActorId(system, "a1")).not.toThrow();
+  });
+
+  it("resolves a known actorId's email for the system credential", () => {
+    const { auth, staff } = makeStaff();
+    const ada = auth.listUsers().find((u) => u.actorId === "a1")!;
+    auth.setEmail(ada.id, "ada@example.com");
+    expect(staff.emailForActorId(system, "a1")).toBe("ada@example.com");
+  });
+
+  it("returns undefined for an actorId with no account, or no email on file", () => {
+    const { staff } = makeStaff();
+    expect(staff.emailForActorId(system, "no-such-actor")).toBeUndefined();
+    expect(staff.emailForActorId(system, "a1")).toBeUndefined();
+  });
+});

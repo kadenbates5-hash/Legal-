@@ -13,8 +13,8 @@ import { DeadlineAlertSender } from "./deadline-alerts.js";
  *  - SMTP_HOST / SMTP_FROM (plus optional SMTP_PORT/SMTP_USER/SMTP_PASSWORD/SMTP_ALLOW_INSECURE)
  *  - DOCKET_BASE_URL
  *  - DOCKET_SYSTEM_API_KEY
- *  - DEADLINE_ALERT_RECIPIENT
  * Optional:
+ *  - DEADLINE_ALERT_RECIPIENT (catch-all for a deadline whose matter has no responsible attorney on record, or whose attorney has no email on file — see deadline-alerts.ts. With neither, those deadlines are simply skipped.)
  *  - FIRM_NAME (used in the digest's subject/body; falls back to "the firm")
  *  - DEADLINE_ALERT_WITHIN_DAYS (falls back to the Deadlines panel's own default horizon)
  */
@@ -40,14 +40,10 @@ const sender = new DeadlineAlertSender({
   email,
   docketBaseUrl: requireEnv("DOCKET_BASE_URL"),
   systemApiKey: requireEnv("DOCKET_SYSTEM_API_KEY"),
-  recipientEmail: requireEnv("DEADLINE_ALERT_RECIPIENT"),
+  ...(process.env["DEADLINE_ALERT_RECIPIENT"] ? { catchAllEmail: process.env["DEADLINE_ALERT_RECIPIENT"] } : {}),
   ...(process.env["FIRM_NAME"] ? { firmName: process.env["FIRM_NAME"] } : {}),
   ...(process.env["DEADLINE_ALERT_WITHIN_DAYS"] ? { withinDays: Number(process.env["DEADLINE_ALERT_WITHIN_DAYS"]) } : {}),
 });
 
 const result = await sender.run();
-if (result.sent) {
-  console.log(`Sent a deadline-risk digest covering ${result.deadlineCount} deadline(s).`);
-} else {
-  console.log("No deadlines at risk — no digest sent.");
-}
+console.log(`Sent ${result.sent} digest(s) covering ${result.deadlineCount} deadline(s), skipped ${result.skipped} with no routable recipient.`);

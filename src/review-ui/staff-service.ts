@@ -70,4 +70,20 @@ export class StaffService {
         };
       });
   }
+
+  /**
+   * The opposite gate of `list()`: restricted to the `"system"` machine
+   * credential specifically, for the deadline-alert digest to resolve a
+   * matter's `responsibleAttorneyId` (see `MattersService
+   * .responsibleAttorneyIdFor`) to an address to mail. Handing the
+   * sending job one address is a narrower grant than the whole staff
+   * directory `list()` hands every logged-in human — same reasoning as
+   * `clientEmailFor` being its own method rather than widening `get()`.
+   */
+  emailForActorId(actor: Actor, actorId: string): string | undefined {
+    if (actor.role !== "system") {
+      throw new AccessDeniedError(`resolving a staff email by actor id requires the system credential (got role '${actor.role}')`);
+    }
+    return this.#auth.listUsers().find((u) => u.actorId === actorId)?.email;
+  }
 }

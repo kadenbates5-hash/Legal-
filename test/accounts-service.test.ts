@@ -130,4 +130,37 @@ describe("AccountsService (attorney-only surface)", () => {
       ).toThrow(AccessDeniedError);
     });
   });
+
+  describe("email", () => {
+    it("sets a staff account's email", () => {
+      const { accounts } = makeAccounts();
+      const created = accounts.create(attorney, { username: "paralegal1", password: "correct-horse", role: "paralegal" });
+      const updated = accounts.setEmail(attorney, created.id, "paralegal1@example.com");
+      expect(updated.email).toBe("paralegal1@example.com");
+    });
+
+    it("can be set at creation time too", () => {
+      const { accounts } = makeAccounts();
+      const created = accounts.create(attorney, {
+        username: "paralegal1",
+        password: "correct-horse",
+        role: "paralegal",
+        email: "paralegal1@example.com",
+      });
+      expect(created.email).toBe("paralegal1@example.com");
+    });
+
+    it("clears it with an empty string", () => {
+      const { accounts } = makeAccounts();
+      const created = accounts.create(attorney, { username: "paralegal1", password: "correct-horse", role: "paralegal", email: "p@example.com" });
+      const cleared = accounts.setEmail(attorney, created.id, "");
+      expect(cleared.email).toBeUndefined();
+    });
+
+    it("denies a non-attorney actor", () => {
+      const { accounts } = makeAccounts();
+      const created = accounts.create(attorney, { username: "paralegal1", password: "correct-horse", role: "paralegal" });
+      expect(() => accounts.setEmail(paralegal, created.id, "x@example.com")).toThrow(AccessDeniedError);
+    });
+  });
 });

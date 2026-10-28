@@ -240,3 +240,29 @@ describe("MattersService.clientEmailFor", () => {
     expect(() => service.clientEmailFor(paralegal, "m-1")).toThrow(AccessDeniedError);
   });
 });
+
+describe("MattersService.responsibleAttorneyIdFor", () => {
+  const system: Actor = { id: "sys", role: "system" };
+
+  it("returns the matter's responsible attorney id for the system credential", () => {
+    const { service, store } = setup();
+    store.upsert("m-1", { title: "State v. Ruiz", responsibleAttorneyId: "a1" });
+    expect(service.responsibleAttorneyIdFor(system, "m-1")).toBe("a1");
+  });
+
+  it("returns undefined when no responsible attorney is on record", () => {
+    const { service } = setup();
+    expect(service.responsibleAttorneyIdFor(system, "m-1")).toBeUndefined();
+  });
+
+  it("returns undefined for a matter with no record at all, rather than throwing", () => {
+    const { service } = setup();
+    expect(service.responsibleAttorneyIdFor(system, "no-such-matter")).toBeUndefined();
+  });
+
+  it("denies every role but system, including attorney and paralegal", () => {
+    const { service } = setup();
+    expect(() => service.responsibleAttorneyIdFor(attorney, "m-1")).toThrow(AccessDeniedError);
+    expect(() => service.responsibleAttorneyIdFor(paralegal, "m-1")).toThrow(AccessDeniedError);
+  });
+});

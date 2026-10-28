@@ -1945,7 +1945,8 @@ async function loadAccounts() {
         <span class="badge ${acct.disabled ? "rejected" : "approved"}">${acct.disabled ? "disabled" : "enabled"}</span>
         ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${escapeHtml(acct.matterAssignment.matterId)}</span>` : ""}
         ${acct.mustChangePassword ? `<span class="badge pending_review">password reset pending</span>` : ""}
-        ${acct.mfaEnabled ? `<span class="badge approved">2FA · ${acct.recoveryCodesRemaining} codes left</span>` : ""}`;
+        ${acct.mfaEnabled ? `<span class="badge approved">2FA · ${acct.recoveryCodesRemaining} codes left</span>` : ""}
+        ${acct.email ? `<span class="badge muted">${escapeHtml(acct.email)}</span>` : `<span class="badge muted">no email on file</span>`}`;
       const toggleBtn = mkButton(acct.disabled ? "Enable" : "Disable", async () => {
         showError("");
         try {
@@ -1969,8 +1970,24 @@ async function loadAccounts() {
           showError(err.message);
         }
       });
+      const emailBtn = mkButton(acct.email ? "Change email" : "Set email", async () => {
+        showError("");
+        // The deadline-alert digest (see CLAUDE.md's "Proactive deadline-risk alerts")
+        // routes to this address for whichever matters name this account as the
+        // responsible attorney — an empty value clears it rather than leaving the
+        // previous one behind.
+        const newEmail = prompt(`Email for ${acct.username}? (used to route the deadline-alert digest; leave blank to clear)`, acct.email || "");
+        if (newEmail === null) return;
+        try {
+          await api(`/api/accounts/${acct.id}/set-email`, { method: "POST", body: JSON.stringify({ email: newEmail }) });
+          await loadAccounts();
+          showToast(newEmail ? `Email set for ${acct.username}.` : `Email cleared for ${acct.username}.`, "success");
+        } catch (err) {
+          showError(err.message);
+        }
+      });
       li.appendChild(document.createElement("br"));
-      li.append(toggleBtn, resetBtn);
+      li.append(toggleBtn, resetBtn, emailBtn);
 
       // Only offered where there's something to clear. This is a real
       // bypass of someone else's second factor — the confirm spells that
@@ -2089,11 +2106,13 @@ async function createAccount() {
   try {
     const username = document.getElementById("newAccountUsername").value;
     const displayName = document.getElementById("newAccountDisplayName").value;
+    const email = document.getElementById("newAccountEmail").value;
     const password = document.getElementById("newAccountPassword").value;
     const role = document.getElementById("newAccountRole").value;
-    await api("/api/accounts", { method: "POST", body: JSON.stringify({ username, displayName, password, role }) });
+    await api("/api/accounts", { method: "POST", body: JSON.stringify({ username, displayName, email, password, role }) });
     document.getElementById("newAccountUsername").value = "";
     document.getElementById("newAccountDisplayName").value = "";
+    document.getElementById("newAccountEmail").value = "";
     document.getElementById("newAccountPassword").value = "";
     await loadAccounts();
     showToast(`Account created for ${username}.`, "success");

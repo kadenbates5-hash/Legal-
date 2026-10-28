@@ -284,4 +284,44 @@ describe("AuthService", () => {
       expect(restored.listUsers().find((u) => u.id === alice.id)?.mustChangePassword).toBe(true);
     });
   });
+
+  describe("email", () => {
+    it("is absent by default", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      expect(alice.email).toBeUndefined();
+    });
+
+    it("can be set at creation", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney", email: "alice@example.com" });
+      expect(alice.email).toBe("alice@example.com");
+    });
+
+    it("setEmail sets it after the fact, and trims whitespace", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      const updated = auth.setEmail(alice.id, "  alice@example.com  ");
+      expect(updated.email).toBe("alice@example.com");
+    });
+
+    it("setEmail with an empty string clears it", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney", email: "alice@example.com" });
+      const updated = auth.setEmail(alice.id, "   ");
+      expect(updated.email).toBeUndefined();
+    });
+
+    it("setEmail throws for an unknown user id", () => {
+      const auth = new AuthService();
+      expect(() => auth.setEmail("nope", "alice@example.com")).toThrow(/no user/);
+    });
+
+    it("round-trips through a snapshot", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney", email: "alice@example.com" });
+      const restored = AuthService.fromSnapshot(auth.toSnapshot());
+      expect(restored.listUsers().find((u) => u.id === alice.id)?.email).toBe("alice@example.com");
+    });
+  });
 });

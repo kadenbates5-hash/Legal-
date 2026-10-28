@@ -13,11 +13,18 @@ import { assertSafeEmailAddress } from "./email-sender.js";
  * `x-system-api-key` credential, never a shortcut straight into
  * `ReviewGateService`/`DeadlineTracker`.
  *
- * Deliberately a single firm-wide digest to one configured recipient,
- * not per-responsible-attorney routing — there is no email field on a
- * `User`/staff account yet, and adding one is a separate, larger change.
- * A firm can point `DEADLINE_ALERT_RECIPIENT` at a distribution list if
- * several people need it.
+ * **Routed per responsible attorney**, now that `User.email` exists (see
+ * `core/auth.ts`): each matter's `responsibleAttorneyId` resolves to a
+ * staff email via `/api/deadlines/upcoming`'s system-only enrichment
+ * (`responsibleAttorneyEmail`, same "enrichment lives in the route"
+ * pattern as the appointment-reminders route's `recipientEmail`), and
+ * that attorney gets exactly their own at-risk deadlines — not the
+ * whole firm's. A deadline whose matter has no responsible attorney on
+ * record, or whose responsible attorney has no email on file, falls
+ * back to the optional `catchAllEmail` (a firm-wide distinction list
+ * works fine there); with no catch-all configured, it's counted in
+ * `skipped` rather than silently dropped or blocking every other
+ * attorney's digest.
  *
  * Unlike appointment reminders, this has no "mark sent" state: every run
  * reflects current system state and is safe to resend on every scheduled
@@ -26,9 +33,11 @@ import { assertSafeEmailAddress } from "./email-sender.js";
  * would defeat the point.
  */
 export interface DeadlineAlertResult {
-  /** True if an email was sent — false when nothing was at risk, so no digest is needed. */
-  sent: boolean;
-  /** How many deadlines the digest covered, whether or not an email was sent. */
+  /** How many separate digest emails actually went out (one per recipient, attorneys plus an optional catch-all). */
+  sent: number;
+  /** Deadlines with no responsible attorney on record, or whose attorney has no email on file, and no `catchAllEmail` configured to fall back to. */
+  skipped: number;
+  /** How many deadlines the run covered in total, whether or not each one ended up in a sent digest. */
   deadlineCount: number;
 }
 
@@ -40,6 +49,8 @@ interface UpcomingDeadlineEntry {
   confirmationState: "unconfirmed" | "confirmed" | "conflict";
   overdue: boolean;
   urgency: number;
+  /** Only present when the system credential fetched this list and the matter's responsible attorney has an email on file — see server.ts's enrichment of this route. */
+  responsibleAttorneyEmail?: string;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -65,7 +76,8 @@ function describeTiming(deadline: UpcomingDeadlineEntry): string {
 
 /**
  * Pure so the wording is unit-testable without a live Docket instance or
- * mail transport, same reasoning as `renderReminderEmail()`.
+ * mail transport, same reasoning as `renderReminderEmail()`. Takes one
+ * recipient's slice of deadlines — the caller decides the grouping.
  */
 export function renderDeadlineDigest(
   deadlines: UpcomingDeadlineEntry[],
@@ -97,33 +109,50 @@ export class DeadlineAlertSender {
   #docketBaseUrl: string;
   #systemApiKey: string;
   #firmName: string;
-  #recipientEmail: string;
+  #catchAllEmail: string | undefined;
   #withinDays: number | undefined;
 
   constructor(params: {
     email: EmailSender;
     docketBaseUrl: string;
     systemApiKey: string;
-    recipientEmail: string;
+    /** Falls back for a deadline with no resolvable responsible-attorney email. Optional — omit it to simply skip those instead. */
+    catchAllEmail?: string;
     firmName?: string;
     withinDays?: number;
   }) {
     this.#email = params.email;
     this.#docketBaseUrl = params.docketBaseUrl.replace(/\/+$/, "");
     this.#systemApiKey = params.systemApiKey;
-    this.#recipientEmail = params.recipientEmail;
+    this.#catchAllEmail = params.catchAllEmail;
     this.#firmName = params.firmName ?? "the firm";
     this.#withinDays = params.withinDays;
   }
 
   async run(): Promise<DeadlineAlertResult> {
     const deadlines = await this.#fetchUpcoming();
-    if (deadlines.length === 0) {
-      return { sent: false, deadlineCount: 0 };
+    const byRecipient = new Map<string, UpcomingDeadlineEntry[]>();
+    let skipped = 0;
+
+    for (const deadline of deadlines) {
+      const recipient = deadline.responsibleAttorneyEmail ?? this.#catchAllEmail;
+      if (!recipient) {
+        skipped++;
+        continue;
+      }
+      const group = byRecipient.get(recipient) ?? [];
+      group.push(deadline);
+      byRecipient.set(recipient, group);
     }
-    const { subject, text } = renderDeadlineDigest(deadlines, this.#firmName);
-    await this.#email.send({ to: assertSafeEmailAddress(this.#recipientEmail), subject, text });
-    return { sent: true, deadlineCount: deadlines.length };
+
+    let sent = 0;
+    for (const [recipient, group] of byRecipient) {
+      const { subject, text } = renderDeadlineDigest(group, this.#firmName);
+      await this.#email.send({ to: assertSafeEmailAddress(recipient), subject, text });
+      sent++;
+    }
+
+    return { sent, skipped, deadlineCount: deadlines.length };
   }
 
   async #fetchUpcoming(): Promise<UpcomingDeadlineEntry[]> {
