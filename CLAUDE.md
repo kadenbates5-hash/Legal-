@@ -2131,7 +2131,19 @@ nav item is hidden except **My Matters** and **Security** — see below.
   the current role can read, so nothing 403s in the background, and each
   tile is best-effort so one unavailable surface can't blank the page.
   Before this, the app opened on the attorney-only Review Queue, so a
-  paralegal's first impression was the words "attorney-only"), the
+  paralegal's first impression was the words "attorney-only". Home also
+  carries an attorney-only **"Getting started" checklist**, derived
+  entirely from data the page already fetched for its other tiles (plus
+  one extra call, `/api/invoices/email-transport`, that nothing else on
+  Home needed): invite your team (`knownStaff.length > 1`), create your
+  first real matter (any `/api/cases` row not prefixed `demo-` — see
+  `DEMO_SEED` above), and connect email. It renders only while at least
+  one item is undone, and disappears on its own once all three are — no
+  separate "mark complete" action, since the underlying data already
+  says so. "Dismiss" hides it regardless of completion, stored in
+  `localStorage` as a per-viewer convenience — nothing the server needs
+  to know or that other sessions should share, same reasoning as the
+  rest of this project's few client-side-only preferences), the
   Review Queue (list/detail/approve/reject/request-revision/
   clear-flag/release), Deadlines (status check/independent confirmation/
   conflict list), Scheduling (book/list/reschedule/cancel/complete/

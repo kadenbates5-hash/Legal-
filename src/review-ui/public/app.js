@@ -2396,6 +2396,87 @@ function todayIso() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+const GETTING_STARTED_DISMISSED_KEY = "docket.gettingStartedDismissed";
+
+/**
+ * A fading onboarding checklist on Home, not a server-tracked feature —
+ * every item is derived from data the app already fetched for other
+ * tiles (no extra round trip but one: email-transport status, which
+ * nothing else on Home needed). Deliberately attorney-only: every item
+ * here is an attorney-gated setup task (inviting the team, connecting
+ * email) or reads as one (the firm's first real matter), so showing it
+ * to a paralegal/receptionist would just be a checklist they can't act
+ * on. Dismissal is stored in localStorage — a per-viewer convenience,
+ * never anything the server needs to know or that other sessions share.
+ */
+function renderGettingStarted({ isAttorney, cases, emailTransport }) {
+  const card = document.getElementById("gettingStartedCard");
+  if (!isAttorney) {
+    card.hidden = true;
+    return;
+  }
+  let dismissed = false;
+  try {
+    dismissed = localStorage.getItem(GETTING_STARTED_DISMISSED_KEY) === "true";
+  } catch {
+    // Private-window/blocked storage: just don't persist dismissal, never break the panel.
+  }
+  if (dismissed) {
+    card.hidden = true;
+    return;
+  }
+
+  const hasRealMatter = Array.isArray(cases) && cases.some((c) => !String(c.matterId).startsWith("demo-"));
+  const items = [
+    {
+      done: knownStaff.length > 1,
+      label: "Invite your team",
+      detail: "Add a login for a colleague.",
+      panel: "accounts",
+    },
+    {
+      done: hasRealMatter,
+      label: "Create your first matter",
+      detail: "Record who the client and adverse parties are — the input to conflicts screening.",
+      panel: "conflicts",
+    },
+    {
+      done: emailTransport ? emailTransport.canSend : false,
+      label: "Connect email",
+      detail: "Needed to send invoices, appointment reminders, and the deadline-risk digest.",
+      panel: null,
+    },
+  ];
+
+  if (items.every((i) => i.done)) {
+    card.hidden = true;
+    return;
+  }
+
+  card.hidden = false;
+  const list = document.getElementById("gettingStartedList");
+  list.innerHTML = "";
+  for (const item of items) {
+    const li = document.createElement("li");
+    li.classList.add("static");
+    li.innerHTML = `<span class="badge ${item.done ? "approved" : "muted"}">${item.done ? "done" : "to do"}</span> <strong>${escapeHtml(item.label)}</strong> <span class="muted">${escapeHtml(item.detail)}</span>`;
+    if (!item.done && item.panel) {
+      const goBtn = mkButton("Go", () => goToPanel(item.panel));
+      li.appendChild(goBtn);
+    }
+    list.appendChild(li);
+  }
+}
+
+document.getElementById("dismissGettingStarted").addEventListener("click", () => {
+  try {
+    localStorage.setItem(GETTING_STARTED_DISMISSED_KEY, "true");
+  } catch {
+    // Nothing to fall back to — the card just won't remember the dismissal across a reload.
+  }
+  document.getElementById("gettingStartedCard").hidden = true;
+});
+
 async function loadHome() {
   const stats = document.getElementById("homeStats");
   const attention = document.getElementById("homeAttention");
@@ -2417,7 +2498,7 @@ async function loadHome() {
   const isAttorney = currentRole === "attorney";
   const canDraft = isAttorney || currentRole === "paralegal";
 
-  const [pending, conflicts, upcoming, cases, myHours, announcements, schedule, clock, outstanding] = await Promise.all([
+  const [pending, conflicts, upcoming, cases, myHours, announcements, schedule, clock, outstanding, emailTransport] = await Promise.all([
     isAttorney ? tryApi("/api/work-products?status=pending_review") : null,
     isAttorney ? tryApi("/api/deadlines/conflicts") : null,
     isAttorney ? tryApi("/api/deadlines/upcoming?withinDays=14") : null,
@@ -2427,7 +2508,10 @@ async function loadHome() {
     tryApi(`/api/staff-schedule/date/${todayIso()}`),
     currentActorId ? tryApi(`/api/time-clock/actor/${encodeURIComponent(currentActorId)}/summary`) : null,
     canDraft ? tryApi("/api/invoices/outstanding") : null,
+    canDraft ? tryApi("/api/invoices/email-transport") : null,
   ]);
+
+  renderGettingStarted({ isAttorney, cases, emailTransport });
 
   stats.innerHTML = "";
   if (pending) stats.appendChild(statTile(pending.length, "awaiting your review", { tone: pending.length ? "alert" : "ok", panel: "queue" }));
