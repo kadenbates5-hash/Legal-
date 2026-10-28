@@ -269,6 +269,7 @@
     transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease), border-color 0.2s var(--ease);
   }
   .card h3 { margin: 0 0 0.75rem; font-size: 0.95rem; letter-spacing: -0.005em; }
+  .card h4 { margin: 1rem 0 0.5rem; font-size: 0.82rem; color: var(--text-muted); font-weight: 600; }
 
   .field-row { display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: flex-end; margin-bottom: 0.5rem; }
   .field { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; color: var(--text-muted); }

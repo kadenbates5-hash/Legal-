@@ -1598,6 +1598,58 @@ between a limitation and a trap. (Drafting a report from a PDF extracts
 its text into work product, which *is* searchable.) `server.ts` wires
 `GET /api/search?q=`; 404 without a `SearchService`.
 
+## Analytics
+
+`review-ui/analytics-service.ts` — `AnalyticsService`, backing the
+"Analytics" panel: a read-only rollup of data every other panel already
+produces, answering a different kind of question than any one of them
+does on its own — who's carrying the most open matters, how much is
+overdue and by how much, is AI-drafting/billable time trending up or
+down. No new fact about the firm lives here and no write path does
+either.
+
+**Deliberately attorney-only**, same reasoning as `AuditService`/
+`AccountsService` rather than `InvoicingService.listOutstanding()`'s
+silently-omit-what-you-can't-reach pattern: a firm-wide rollup has no
+narrower version that would mean anything, so rather than invent a
+partial one it's restricted to the role that already sees everything.
+A paralegal wanting their own caseload already has it on the Cases
+panel, scoped the normal way. It reads `MatterStore`/`InvoiceStore`/
+`BillingHoursStore`/`UtilizationTracker` directly rather than through
+`MattersService`/`InvoicingService`/etc. — the same choice
+`AuditService` makes over the raw `AuditLog` — because every one of
+those wrapping services exists specifically to add matter-level
+`AccessControl` scoping this panel doesn't want.
+
+Four reports:
+
+- `caseloadByAttorney()` — open/closed matter counts per
+  `responsibleAttorneyId`, including an explicit `"(unassigned)"`
+  bucket rather than silently dropping an unowned matter from the
+  count.
+- `matterStatusCounts()` — the panel's headline tiles.
+- `invoiceAging()` — every unpaid, non-void, sent invoice bucketed by
+  days overdue (`current`/`1-30`/`31-60`/`61-90`/`90+`). Deliberately
+  duplicates (rather than imports) `InvoicingService.listOutstanding()`'s
+  balance/overdue math, since that method's job is per-matter-scoped
+  delivery and this one's is a firm-wide rollup — the two should never
+  silently disagree about what "overdue" means by sharing a code path
+  that later changes for one reason and not the other.
+- `utilizationTrend()` / `billableHoursTrend()` — finished AI-agent
+  minutes and logged billable hours, by day, over a configurable
+  trailing window (default 30 days). Both bucket by when the entry
+  *started*, same convention `TimeClock` uses for an overnight shift;
+  an AI-utilization entry still open (no `endedAt`) contributes
+  nothing yet, same as an open time-clock shift never counting toward
+  a total.
+
+`server.ts` wires `GET /api/analytics/caseload`, `/matter-status`,
+`/invoice-aging`, `/utilization-trend`, and `/billable-hours-trend`
+(the latter two taking `?withinDays=`); 404 without an
+`AnalyticsService`. Nav item hidden unless role is `attorney`, same
+client-side-convenience-only caveat as Accounts/Audit Log — the real
+gate is server-side in `AnalyticsService` itself.
+
 ## Transport & session security
 
 Hardening that applies to every route, independent of any one panel.
@@ -1990,12 +2042,13 @@ message-shaped surface in this project.
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over twenty-three panels — Home, My Matters, Search,
+between sections) over twenty-four panels — Home, My Matters, Search,
 Review Queue, Deadlines,
 Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Trust, Invoices,
 Time Clock, Payroll, Research, Assistant,
-Staff, Messages, Schedule, Billing, Security, Accounts, and Audit Log (Drafting/
-Cases/Research/Assistant/Billing and Accounts/Audit Log hidden from the
+Staff, Messages, Schedule, Billing, Security, Analytics, Accounts, and
+Audit Log (Drafting/
+Cases/Research/Assistant/Billing and Analytics/Accounts/Audit Log hidden from the
 nav for roles that can't use them; Staff/Messages/Schedule are open to
 every logged-in *staff* human so they're never hidden **for a staff
 role** — a client account is denied those surfaces server-side, see
@@ -2040,6 +2093,8 @@ nav item is hidden except **My Matters** and **Security** — see below.
   / `billing-hours-service.ts` — backing the "Staff", "Messages",
   "Schedule", and "Billing" panels respectively — see "Staff directory,
   messaging, staff schedule, and billing hours" above for what each does.
+- `analytics-service.ts` — `AnalyticsService`, backing the "Analytics"
+  panel — see "Analytics" above for what it does.
 - `audit-service.ts` — `AuditService`, backing the "Audit Log" panel.
   `AuditLog.read()` already takes an explicit counsel-aware reader role
   (`"attorney"` vs. `"system_admin_no_content"`), but that's a parameter
@@ -2056,11 +2111,13 @@ nav item is hidden except **My Matters** and **Security** — see below.
   it. `/api/intake/*`, `/api/accounts*`, `/api/drafting/*`,
   `/api/documents/*`, `/api/cases*`, `/api/audit*`, `/api/research/*`,
   `/api/assistant/*`, `/api/staff`, `/api/messages/*`,
-  `/api/staff-schedule/*`, `/api/billing-hours/*`, and `/api/pdf-reports/*`
+  `/api/staff-schedule/*`, `/api/billing-hours/*`, `/api/pdf-reports/*`,
+  and `/api/analytics/*`
   are 404 if no `IntakeDemoSessions`/`AccountsService`/`DraftingService`/
   `DocumentsService`/`CasesService`/`AuditService`/`ResearchService`/
   `AssistantService`/`StaffService`/`MessagingService`/
-  `StaffScheduleService`/`BillingHoursService`/`PdfReportService` was
+  `StaffScheduleService`/`BillingHoursService`/`PdfReportService`/
+  `AnalyticsService` was
   passed to `createReviewServer`, respectively. `npm run build` copies
   `public/` into `dist/` since `tsc` only compiles `.ts` files.
 - `public/login.html` — Docket-branded sign-in: username/password + a
@@ -2105,16 +2162,22 @@ nav item is hidden except **My Matters** and **Security** — see below.
   date or one actor's upcoming entries — also never hidden), Billing (log
   hours against a matter with a date/hours/description, view a matter's
   logged hours with a running total, and view your own hours across every
-  matter — same role gate as Drafting), Accounts (add a login with a
-  username/full name/temporary password/role, disable/re-enable one, and
+  matter — same role gate as Drafting), Analytics (matters-by-status
+  tiles, caseload by attorney, invoice aging, and billable-hours/
+  AI-utilization trends over a selectable window — all read-only, see
+  "Analytics" above; nav item hidden unless role is `attorney`),
+  Accounts (add a login with a
+  username/full name/email/temporary password/role, disable/re-enable
+  one, set or change an account's email, and
   for paralegal accounts specifically, assign/unassign a matter — nav
   item hidden unless role is `attorney`), and Audit Log (every access
   grant/denial and work-product transition, append-only, optionally
   filtered by matter id — nav item hidden unless role is `attorney`). The
-  Drafting/Cases/Research/Assistant/Billing and Accounts/Audit Log hides
+  Drafting/Cases/Research/Assistant/Billing and Analytics/Accounts/Audit Log hides
   are client-side convenience only; the real gate is server-side in
   `AccountsService`/`DraftingService`/`DocumentsService`/`CasesService`/
-  `ResearchService`/`AssistantService`/`BillingHoursService`/`AuditService`.
+  `ResearchService`/`AssistantService`/`BillingHoursService`/`AuditService`/
+  `AnalyticsService`.
   Any `401` from the API redirects the browser back to `/login.html`.
   Every field that names a person is a `<select>` populated from
   `GET /api/staff` (showing display names, defaulting to you, and

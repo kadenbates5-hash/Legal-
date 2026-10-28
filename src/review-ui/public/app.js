@@ -244,6 +244,7 @@ async function loadWhoami() {
     if (me.role === "attorney") {
       document.getElementById("navAccounts").hidden = false;
       document.getElementById("navAudit").hidden = false;
+      document.getElementById("navAnalytics").hidden = false;
     }
     if (me.role === "attorney" || me.role === "paralegal") {
       document.getElementById("globalSearch").hidden = false;
@@ -2124,6 +2125,73 @@ async function createAccount() {
 document.getElementById("createAccount").addEventListener("click", createAccount);
 document.getElementById("refreshAccounts").addEventListener("click", loadAccounts);
 document.getElementById("navAccounts").addEventListener("click", loadAccounts);
+
+/* ===== Analytics ===== */
+function minutesLabel(minutes) {
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  return `${(minutes / 60).toFixed(1)}h`;
+}
+
+async function loadAnalytics() {
+  showError("");
+  try {
+    const withinDays = document.getElementById("analyticsTrendDays").value;
+
+    const [statusCounts, caseload, aging, hoursTrend, utilizationTrend] = await Promise.all([
+      api("/api/analytics/matter-status"),
+      api("/api/analytics/caseload"),
+      api("/api/analytics/invoice-aging"),
+      api(`/api/analytics/billable-hours-trend?withinDays=${withinDays}`),
+      api(`/api/analytics/utilization-trend?withinDays=${withinDays}`),
+    ]);
+
+    const statusEl = document.getElementById("analyticsMatterStatus");
+    statusEl.innerHTML = ["open", "prospective", "closed"]
+      .map((status) => `<div class="stat"><div class="n">${statusCounts[status] ?? 0}</div><div class="k">${status}</div></div>`)
+      .join("");
+
+    const caseloadList = document.getElementById("analyticsCaseloadList");
+    caseloadList.innerHTML = caseload.length
+      ? caseload
+          .map(
+            (row) =>
+              `<li class="static"><strong>${escapeHtml(row.displayName)}</strong> <span class="badge">${row.openMatters} open</span> <span class="badge muted">${row.closedMatters} closed</span></li>`,
+          )
+          .join("")
+      : '<li class="static empty">No matters on file.</li>';
+
+    const agingList = document.getElementById("analyticsAgingList");
+    agingList.innerHTML = aging
+      .map(
+        (b) =>
+          `<li class="static"><strong>${b.bucket === "current" ? "Not yet due" : `${b.bucket} days overdue`}</strong> <span class="badge ${b.bucket === "current" ? "approved" : b.count > 0 ? "rejected" : "muted"}">${b.count} invoice(s)</span> <span class="badge">${escapeHtml(centsToDollars(b.totalCents))}</span></li>`,
+      )
+      .join("");
+
+    const hoursList = document.getElementById("analyticsHoursTrendList");
+    hoursList.innerHTML = hoursTrend.length
+      ? hoursTrend.map((d) => `<li class="static">${d.date} <span class="badge">${d.hours}h</span></li>`).join("")
+      : '<li class="static empty">No billable hours logged in this window.</li>';
+
+    const utilList = document.getElementById("analyticsUtilizationTrendList");
+    utilList.innerHTML = utilizationTrend.length
+      ? utilizationTrend
+          .map((d) => {
+            const badges = Object.entries(d.minutesByTaskType)
+              .map(([type, minutes]) => `<span class="badge">${type}: ${minutesLabel(minutes)}</span>`)
+              .join(" ");
+            return `<li class="static">${d.date} ${badges}</li>`;
+          })
+          .join("")
+      : '<li class="static empty">No completed AI-agent activity in this window.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("refreshAnalytics").addEventListener("click", loadAnalytics);
+document.getElementById("navAnalytics").addEventListener("click", loadAnalytics);
+document.getElementById("analyticsTrendDays").addEventListener("change", loadAnalytics);
 
 /* ===== Audit Log ===== */
 async function loadAudit() {

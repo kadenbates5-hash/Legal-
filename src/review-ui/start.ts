@@ -40,6 +40,7 @@ import { InvoicingService } from "./invoicing-service.js";
 import { ClientPortalService } from "./client-portal-service.js";
 import { ClientMessagingService } from "./client-messaging-service.js";
 import { PayrollService } from "./payroll-service.js";
+import { AnalyticsService } from "./analytics-service.js";
 import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
 import { UnconfiguredEmailSender, type EmailSender } from "../integrations/email-sender.js";
@@ -480,6 +481,19 @@ const search = new SearchService({
 const payroll = new PayrollService({ store: state.payroll, auditLog: state.auditLog });
 
 /**
+ * Backs the "Analytics" panel — a read-only, firm-wide rollup over data
+ * every other panel already produces. Attorney-only, same reasoning as
+ * AuditService/AccountsService — see analytics-service.ts.
+ */
+const analytics = new AnalyticsService({
+  matters: state.matters,
+  invoices: state.invoices,
+  billingHours: state.billingHours,
+  utilization: state.utilization,
+  auth: state.auth,
+});
+
+/**
  * Backs the "Time Clock" panel — the capture side of payroll.
  * `FIRM_TIME_ZONE` decides where a day starts: bucketing punches by UTC
  * would put an evening shift on the wrong day, and therefore in the
@@ -707,6 +721,7 @@ const server = createReviewServer(service, state.auth, {
   search,
   payroll,
   timeClock,
+  analytics,
   maxRequestBodyBytes,
   loginThrottle: state.loginThrottle,
   auditLog: state.auditLog,

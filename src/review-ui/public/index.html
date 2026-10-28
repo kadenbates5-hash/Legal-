@@ -39,6 +39,7 @@
 
     <p class="nav-group">Admin</p>
     <button data-panel="security"><span class="dot"></span>Security</button>
+    <button data-panel="analytics" id="navAnalytics" hidden><span class="dot"></span>Analytics</button>
     <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
     <button data-panel="audit" id="navAudit" hidden><span class="dot"></span>Audit Log</button>
   </nav>
@@ -776,6 +777,44 @@
           <button class="btn" id="refreshAccounts">Refresh</button>
         </div>
         <ul id="accountList" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- ===== Analytics (attorney-only, read-only) ===== -->
+    <section class="panel" id="panel-analytics">
+      <p class="subtitle">Attorney-only, read-only. A rollup of data every other panel already produces — nothing here is a new fact about the firm, just a different question answered across all of it at once.</p>
+
+      <div class="card">
+        <h3>Matters by status</h3>
+        <div id="analyticsMatterStatus" class="stat-grid"></div>
+      </div>
+
+      <div class="card">
+        <div class="field-row">
+          <h3 class="row-title">Caseload by attorney</h3>
+          <button class="btn" id="refreshAnalytics">Refresh</button>
+        </div>
+        <ul id="analyticsCaseloadList" class="list"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Invoice aging</h3>
+        <ul id="analyticsAgingList" class="list"></ul>
+      </div>
+
+      <div class="card">
+        <div class="field-row">
+          <h3 class="row-title">Trends</h3>
+          <label class="field">Over the last <select id="analyticsTrendDays">
+            <option value="7">7 days</option>
+            <option value="30" selected>30 days</option>
+            <option value="90">90 days</option>
+          </select></label>
+        </div>
+        <h4>Billable hours logged, per day</h4>
+        <ul id="analyticsHoursTrendList" class="list"></ul>
+        <h4>AI-agent time, per day and task type</h4>
+        <ul id="analyticsUtilizationTrendList" class="list"></ul>
       </div>
     </section>
 

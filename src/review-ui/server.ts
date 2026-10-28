@@ -31,6 +31,7 @@ import type { ClientPortalService } from "./client-portal-service.js";
 import type { ClientMessagingService } from "./client-messaging-service.js";
 import type { SearchService } from "./search-service.js";
 import type { PayrollService } from "./payroll-service.js";
+import type { AnalyticsService } from "./analytics-service.js";
 import type { TimeClockService } from "./time-clock-service.js";
 import { TimeClockError, type BucketKind } from "../core/time-clock.js";
 import { InvoicingError, type LineItemSource, type PaymentMethod } from "../core/invoicing.js";
@@ -437,6 +438,7 @@ export interface ReviewServerOptions {
   search?: SearchService;
   payroll?: PayrollService;
   timeClock?: TimeClockService;
+  analytics?: AnalyticsService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
   /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
@@ -533,6 +535,7 @@ async function handleRequest(
     search,
     payroll,
     timeClock,
+    analytics,
     voiceCalls,
     audioClips,
     twilio,
@@ -942,6 +945,15 @@ async function handleRequest(
         return;
       }
       await handlePayrollRequest(payroll, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/analytics")) {
+      if (!analytics) {
+        sendJson(res, 404, { error: "analytics is not configured on this server" });
+        return;
+      }
+      handleAnalyticsRequest(analytics, res, actor, url);
       return;
     }
 
@@ -1756,6 +1768,33 @@ async function handlePayrollRequest(
     }
   }
 
+  sendJson(res, 404, { error: "not found" });
+}
+
+function handleAnalyticsRequest(analytics: AnalyticsService, res: ServerResponse, actor: Actor, url: URL): void {
+  const withinDays = Number(url.searchParams.get("withinDays"));
+  const options = Number.isFinite(withinDays) && withinDays > 0 ? { withinDays } : {};
+
+  if (url.pathname === "/api/analytics/caseload") {
+    sendJson(res, 200, analytics.caseloadByAttorney(actor));
+    return;
+  }
+  if (url.pathname === "/api/analytics/matter-status") {
+    sendJson(res, 200, analytics.matterStatusCounts(actor));
+    return;
+  }
+  if (url.pathname === "/api/analytics/invoice-aging") {
+    sendJson(res, 200, analytics.invoiceAging(actor));
+    return;
+  }
+  if (url.pathname === "/api/analytics/utilization-trend") {
+    sendJson(res, 200, analytics.utilizationTrend(actor, options));
+    return;
+  }
+  if (url.pathname === "/api/analytics/billable-hours-trend") {
+    sendJson(res, 200, analytics.billableHoursTrend(actor, options));
+    return;
+  }
   sendJson(res, 404, { error: "not found" });
 }
 
