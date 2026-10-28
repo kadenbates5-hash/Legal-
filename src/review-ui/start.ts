@@ -10,7 +10,9 @@ import { AuditService } from "./audit-service.js";
 import { SearchService } from "./search-service.js";
 import { ResearchService } from "./research-service.js";
 import { CourtListenerClient } from "../integrations/courtlistener.js";
-import { loadSystemState, saveSystemState } from "../persistence/system-state.js";
+import { loadSystemState, saveSystemState, type SystemState } from "../persistence/system-state.js";
+import { WorkProduct } from "../core/review-gate.js";
+import type { Actor } from "../core/types.js";
 import { readJsonFile } from "../persistence/json-file-store.js";
 import { createPostgresStateStore } from "../persistence/postgres-store.js";
 import type { StateStore } from "../persistence/state-store.js";
@@ -80,18 +82,96 @@ const state = await loadSystemState(store, firmConfig ? { firmConfig } : {});
  * Accounts panel (see AccountsService below), which is attorney-gated
  * like everything else.
  */
-function bootstrapAccount(envPrefix: string, role: UserRole): void {
+/**
+ * Populates a handful of sample records across the panels a first-time
+ * visitor is most likely to click into — see the `DEMO_SEED` gate below
+ * for when this runs. Every id is prefixed `demo-` so it's obviously
+ * throwaway data, never mistaken for a real client's matter.
+ */
+function seedDemoData(state: SystemState, attorneyUsername: string): void {
+  const attorney: Actor = { id: attorneyUsername, role: "attorney" };
+  const inTwoWeeks = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+  const inThreeDays = new Date(Date.now() + 3 * 86_400_000);
+  inThreeDays.setUTCHours(15, 0, 0, 0);
+
+  state.matters.upsert("demo-criminal-1", {
+    title: "State v. Jordan Smith",
+    status: "open",
+    practiceAreaId: "criminal-law",
+    responsibleAttorneyId: attorneyUsername,
+    description: "Misdemeanor reckless driving — sample matter, safe to delete.",
+    parties: [
+      { name: "Jordan Smith", role: "client", note: undefined, email: undefined },
+      { name: "State of Example", role: "adverse", note: undefined, email: undefined },
+    ],
+  });
+  state.matters.upsert("demo-contract-1", {
+    title: "Acme Co. — Contract Dispute",
+    status: "open",
+    responsibleAttorneyId: attorneyUsername,
+    description: "Breach-of-contract dispute — sample matter, safe to delete.",
+    parties: [
+      { name: "Acme Co.", role: "client", note: undefined, email: undefined },
+      { name: "Rival Industries", role: "adverse", note: undefined, email: undefined },
+    ],
+  });
+
+  // Unconfirmed on purpose — a single agent-sourced calculation — so the
+  // Deadlines panel's redundant-verification story is visible on first
+  // login rather than something to read about.
+  state.deadlineTracker.record({
+    matterId: "demo-criminal-1",
+    type: "arraignment",
+    date: inTwoWeeks,
+    source: "agent",
+  });
+
+  state.scheduling.scheduleConsultation(attorney, {
+    matterId: "demo-contract-1",
+    attorneyId: attorneyUsername,
+    startTime: inThreeDays,
+    allowOutsideBusinessHours: true,
+  });
+
+  const draft = new WorkProduct(
+    { id: "demo-wp-1", matterId: "demo-criminal-1", kind: "motion", content: "DRAFT — Motion to suppress (sample content, safe to delete)." },
+    state.auditLog,
+  );
+  draft.submitForReview(attorney);
+  state.workProductStore.register(draft);
+
+  state.billingHours.log({
+    matterId: "demo-contract-1",
+    actorId: attorneyUsername,
+    date: new Date().toISOString().slice(0, 10),
+    hours: 1.5,
+    description: "Sample entry — initial client consultation.",
+  });
+
+  state.trustLedger.record({
+    matterId: "demo-contract-1",
+    type: "deposit",
+    amountCents: 150_000,
+    description: "Sample retainer deposit — safe to delete.",
+    recordedBy: attorneyUsername,
+  });
+}
+
+function bootstrapAccount(envPrefix: string, role: UserRole): string | undefined {
   const username = process.env[`${envPrefix}_USERNAME`];
   const password = process.env[`${envPrefix}_PASSWORD`];
   if (username && password) {
     state.auth.createUser({ username, password, role });
     console.log(`Seeded ${role} account '${username}' from ${envPrefix}_USERNAME/${envPrefix}_PASSWORD.`);
+    return username;
   }
+  return undefined;
 }
 
 let seeded = false;
+let freshAttorneyUsername: string | undefined;
 if (!state.auth.hasAnyUsers()) {
-  bootstrapAccount("ATTORNEY", "attorney");
+  freshAttorneyUsername = bootstrapAccount("ATTORNEY", "attorney");
   bootstrapAccount("PARALEGAL", "paralegal");
   bootstrapAccount("RECEPTIONIST", "receptionist");
   bootstrapAccount("STAFF", "staff");
@@ -103,6 +183,22 @@ if (!state.auth.hasAnyUsers()) {
   } else {
     seeded = true;
   }
+}
+
+/**
+ * `DEMO_SEED=true` — optional, first-boot-only sample data so a fresh
+ * deploy isn't a blank slate on first login (see DEPLOY.md: the single
+ * biggest friction point in "try this out" is logging into an empty
+ * dashboard with nothing to click on). Deliberately gated on the exact
+ * same condition as the account bootstrap above (no accounts existed
+ * yet this run) rather than "no matters exist" — the latter would
+ * re-seed forever on a system where every demo matter was deliberately
+ * deleted. A real firm's first deploy simply shouldn't set this.
+ */
+if (process.env["DEMO_SEED"] === "true" && freshAttorneyUsername) {
+  seedDemoData(state, freshAttorneyUsername);
+  seeded = true;
+  console.log("DEMO_SEED=true: populated sample matters, a deadline, an appointment, and a draft awaiting review.");
 }
 
 if (!state.auth.hasSystemApiKey()) {

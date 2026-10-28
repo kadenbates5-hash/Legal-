@@ -15,6 +15,12 @@ services:
         sync: false
       - key: TRUST_PROXY
         value: "true"
+      # Optional — set to "true" to populate sample matters/a deadline/an
+      # appointment/a draft on first boot, so first login isn't a blank
+      # page. See CLAUDE.md's "Commands" section / DEPLOY.md. Leave unset
+      # for a real firm's first deploy.
+      - key: DEMO_SEED
+        value: "true"
 
 databases:
   - name: docket-db

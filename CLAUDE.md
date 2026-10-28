@@ -2120,6 +2120,15 @@ nav item is hidden except **My Matters** and **Security** — see below.
   `state.accessControl` — the canonical, *persisted* instance (see
   "Persistence" below) — since one is where assignments are made and the
   other is where they're enforced.
+- `DEMO_SEED=true`, only meaningful on that same first-run condition
+  (no accounts exist yet), additionally populates two sample matters,
+  an unconfirmed deadline, a scheduled appointment, and a work-product
+  draft sitting in `pending_review` — see `seedDemoData()` in
+  `start.ts`. Exists purely to shorten the gap between "deploy this"
+  and "see something on screen" (see `DEPLOY.md`'s "Trying it out with
+  sample data") — a fresh instance with zero accounts and `DEMO_SEED`
+  unset behaves exactly as it always has, an empty system waiting for
+  its first real matter.
 
 `/api/appointments*` (see `scheduling.ts` above) is wired into the same
 server, gated by `SchedulingService`'s own optional `AccessControl`
@@ -2221,6 +2230,7 @@ npm install
 npm run typecheck        # tsc --noEmit
 npm test                  # vitest run — Postgres-backed persistence tests skip cleanly if TEST_DATABASE_URL / a local Postgres isn't reachable
 ATTORNEY_USERNAME=you ATTORNEY_PASSWORD=at-least-8-chars npm run start:review-ui   # first boot: seeds your login
+# ATTORNEY_USERNAME=you ATTORNEY_PASSWORD=at-least-8-chars DEMO_SEED=true npm run start:review-ui   # same, plus sample matters/deadline/appointment/draft to click around immediately — see DEPLOY.md
 npm run start:review-ui   # subsequent boots — attorney review-gate dashboard at http://localhost:3000
 # STATE_FILE=./data/system-state.json PORT=3000 npm run start:review-ui  # override the file-backed default
 # DATABASE_URL=postgres://user:pass@host:5432/docket npm run start:review-ui  # use Postgres instead of the file store

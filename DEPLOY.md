@@ -7,6 +7,10 @@ already have:
 
 ## Option A — Render (easiest, free Postgres included)
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/kadenbates5-hash/Legal-)
+
+Click the button (or do it by hand):
+
 1. Push this repo to GitHub (or your own git host) if it isn't already.
 2. In the Render dashboard: **New → Blueprint**, point it at the repo.
    Render reads `render.yaml` and provisions both the web service and a
@@ -14,6 +18,11 @@ already have:
 3. Render will prompt for `ATTORNEY_USERNAME`/`ATTORNEY_PASSWORD` (marked
    `sync: false` in `render.yaml` so they're entered once, not committed).
    These seed your first login — see "Real authentication" in CLAUDE.md.
+   `DEMO_SEED` is pre-set to `true` in `render.yaml`, so the very first
+   login already has two sample matters, a deadline, an appointment, and
+   a draft waiting in the Review Queue to click around — turn it off
+   (set it to anything else, or delete it) before using this for a real
+   firm. See "Trying it out with sample data" below.
 4. Deploy. Render builds the `Dockerfile` and gives you a public
    `https://docket-<random>.onrender.com` URL immediately — that's the
    whole thing.
@@ -90,3 +99,18 @@ documented with its own env vars in CLAUDE.md's "Commands" section. None
 of it is required for the core app (Review Queue, Deadlines, Scheduling,
 Drafting, Cases, Conflicts, Trust, Invoices, Staff, Messages, Accounts,
 Audit Log) to work on day one.
+
+## Trying it out with sample data
+
+Set `DEMO_SEED=true` alongside `ATTORNEY_USERNAME`/`ATTORNEY_PASSWORD` on
+**first boot only** (any option above — it's just another env var) and
+Docket populates itself with two sample matters, an unconfirmed deadline,
+a scheduled appointment, and a draft awaiting review, so the very first
+login has something to click into instead of an empty dashboard. It's
+gated on the exact same "no accounts exist yet" condition the account
+bootstrap itself uses, so it's a no-op on every restart after the first
+— setting it on a running system does nothing until you wipe the
+database/state file and start over. Everything it creates is prefixed
+`demo-`/"sample"/"safe to delete" so it's never mistaken for a real
+client's matter; delete it from the Cases/Conflicts panels once you're
+oriented. Leave it unset for a real firm's actual first deploy.
