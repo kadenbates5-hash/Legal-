@@ -43,6 +43,8 @@ import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { verifyTwilioSignature, twimlPlayThenRecord, twimlPlayThenHangup, downloadTwilioRecording } from "../integrations/twilio-voice.js";
 import type { UserRole } from "../core/auth.js";
+import type { EmailSender } from "../integrations/email-sender.js";
+import { assertSafeEmailAddress } from "../integrations/email-sender.js";
 
 /**
  * Attorney review-gate UI backend (§8 build order step 5): a small JSON API
@@ -404,6 +406,22 @@ export interface TwilioVoiceConfig {
 }
 
 /**
+ * Self-service "forgot password" (see `/api/forgot-password` and
+ * `/api/reset-password/confirm` below). A plain config object rather
+ * than its own service class — same shape as `TwilioVoiceConfig` —
+ * since the logic itself is a handful of lines over `AuthService`
+ * methods that already do the real work (`requestPasswordReset`/
+ * `resetPasswordWithToken`); this is just the vendor-specific bit
+ * (where the email goes, what link to put in it).
+ */
+export interface PasswordResetConfig {
+  email: EmailSender;
+  /** The externally reachable base URL the reset link points at (e.g. https://docket.example.com) — no trailing slash. */
+  baseUrl: string;
+  firmName?: string;
+}
+
+/**
  * `onMutated`/`scheduling`/etc. as an options object rather than a long
  * positional parameter list — this grew past a dozen optional pieces
  * (each gating a `/api/*` surface to 404 when absent) and a positional
@@ -449,6 +467,8 @@ export interface ReviewServerOptions {
   voiceCalls?: VoiceCallSessions;
   audioClips?: AudioClipStore;
   twilio?: TwilioVoiceConfig;
+  /** Absent means `/api/forgot-password` tells the requester self-service reset isn't set up, rather than silently failing — see `handleForgotPassword`. */
+  passwordReset?: PasswordResetConfig;
   /** See the module doc comment above — off by default, only enable behind a real TLS-terminating proxy. */
   trustProxy?: boolean;
   /** Names the firm inside an authenticator app's entry (`otpauth://` issuer). Cosmetic; falls back to "Docket". */
@@ -539,6 +559,7 @@ async function handleRequest(
     voiceCalls,
     audioClips,
     twilio,
+    passwordReset,
     trustProxy = false,
     maxRequestBodyBytes = DEFAULT_MAX_REQUEST_BODY_BYTES,
     loginThrottle,
@@ -559,6 +580,82 @@ async function handleRequest(
 
   if (url.pathname === "/api/login" && req.method === "POST") {
     await handleLogin(auth, req, res, { throttle: loginThrottle, auditLog }, onMutated, trustProxy);
+    return;
+  }
+
+  /**
+   * Self-service "forgot password" — step one. Public, unauthenticated,
+   * same bucket as `/api/login` itself. Always responds with the exact
+   * same message whether or not the username exists or has an email on
+   * file, same no-enumeration reasoning `handleLogin` already follows —
+   * the distinction is something `AuthService.requestPasswordReset()`
+   * itself knows, not something this route is allowed to leak.
+   */
+  if (url.pathname === "/api/forgot-password" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const username = String(body["username"] ?? "");
+    const GENERIC_MESSAGE = "If that account exists and has an email on file, a password reset link has been sent.";
+    if (!passwordReset) {
+      sendJson(res, 200, { message: "Self-service password reset isn't set up for this firm — ask an attorney to reset your password instead." });
+      return;
+    }
+    const result = auth.requestPasswordReset(username);
+    if (result?.user.email) {
+      const link = `${passwordReset.baseUrl}/reset-password.html?token=${encodeURIComponent(result.token)}`;
+      const firmName = passwordReset.firmName ?? "Docket";
+      try {
+        await passwordReset.email.send({
+          to: assertSafeEmailAddress(result.user.email),
+          subject: `${firmName} password reset`,
+          text: [
+            "Hello,",
+            "",
+            `A password reset was requested for your ${firmName} account.`,
+            "",
+            `${link}`,
+            "",
+            "This link expires in an hour and can only be used once. If you didn't request this, you can ignore this message — your password hasn't changed.",
+          ].join("\n"),
+        });
+        auditLog?.append({
+          actor: { id: result.user.actorId, role: "anonymous" },
+          matterId: undefined,
+          action: "password_reset_requested",
+          detail: `user=${result.user.id} username=${result.user.username}`,
+        });
+      } catch (err) {
+        // The link was already issued — not sending the email isn't a
+        // reason to invent a different response, but it is worth a
+        // loud server-side log, since the account holder now thinks
+        // one is coming.
+        console.error(`password reset email failed for user ${result.user.id}:`, err);
+      }
+    }
+    sendJson(res, 200, { message: GENERIC_MESSAGE });
+    onMutated?.();
+    return;
+  }
+
+  /**
+   * Step two: redeems the token from the emailed link. Public — the
+   * token itself is the authentication, same reasoning a password-reset
+   * link always has.
+   */
+  if (url.pathname === "/api/reset-password/confirm" && req.method === "POST") {
+    try {
+      const body = await readJsonBody(req);
+      const user = auth.resetPasswordWithToken(String(body["token"] ?? ""), String(body["newPassword"] ?? ""));
+      auditLog?.append({
+        actor: { id: user.actorId, role: "anonymous" },
+        matterId: undefined,
+        action: "password_reset_completed",
+        detail: `user=${user.id} username=${user.username}`,
+      });
+      sendJson(res, 200, { ok: true });
+      onMutated?.();
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+    }
     return;
   }
 

@@ -324,4 +324,101 @@ describe("AuthService", () => {
       expect(restored.listUsers().find((u) => u.id === alice.id)?.email).toBe("alice@example.com");
     });
   });
+
+  describe("self-service password reset (forgot password)", () => {
+    it("issues a token for a known username and redeems it", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      const requested = auth.requestPasswordReset("alice");
+      expect(requested?.user.id).toBe(alice.id);
+      expect(requested?.token).toBeTruthy();
+
+      const updated = auth.resetPasswordWithToken(requested!.token, "brand-new-password");
+      expect(updated.id).toBe(alice.id);
+      expect(() => auth.login("alice", "old-password", false)).toThrow(AuthError);
+      expect(() => auth.login("alice", "brand-new-password", false)).not.toThrow();
+    });
+
+    it("returns undefined for an unknown username, without throwing", () => {
+      const auth = new AuthService();
+      expect(auth.requestPasswordReset("nobody")).toBeUndefined();
+    });
+
+    it("returns undefined for a disabled account", () => {
+      const auth = new AuthService();
+      const bob = auth.createUser({ username: "bob", password: "correct-horse", role: "attorney" });
+      auth.createUser({ username: "backup-attorney", password: "correct-horse", role: "attorney" });
+      auth.setDisabled(bob.id, true);
+      expect(auth.requestPasswordReset("bob")).toBeUndefined();
+    });
+
+    it("rejects a wrong token", () => {
+      const auth = new AuthService();
+      auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      auth.requestPasswordReset("alice");
+      expect(() => auth.resetPasswordWithToken("not-the-real-token", "brand-new-password")).toThrow(/invalid or has expired/);
+    });
+
+    it("rejects a token that was already used once", () => {
+      const auth = new AuthService();
+      auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      const { token } = auth.requestPasswordReset("alice")!;
+      auth.resetPasswordWithToken(token, "brand-new-password");
+      expect(() => auth.resetPasswordWithToken(token, "another-password")).toThrow(/invalid or has expired/);
+    });
+
+    it("rejects an expired token", () => {
+      vi.useFakeTimers();
+      try {
+        const auth = new AuthService();
+        auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+        const { token } = auth.requestPasswordReset("alice", 60)!;
+        vi.advanceTimersByTime(61 * 60 * 1000);
+        expect(() => auth.resetPasswordWithToken(token, "brand-new-password")).toThrow(/invalid or has expired/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("rejects a short new password", () => {
+      const auth = new AuthService();
+      auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      const { token } = auth.requestPasswordReset("alice")!;
+      expect(() => auth.resetPasswordWithToken(token, "short")).toThrow(/must be at least 8 characters/);
+    });
+
+    it("revokes every live session on redemption, same as changePassword/resetPassword", () => {
+      const auth = new AuthService();
+      auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      const session = auth.login("alice", "old-password", false);
+      const { token } = auth.requestPasswordReset("alice")!;
+      auth.resetPasswordWithToken(token, "brand-new-password");
+      expect(auth.actorForToken(session.token)).toBeUndefined();
+    });
+
+    it("round-trips a pending token through a snapshot", () => {
+      const auth = new AuthService();
+      auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+      const { token } = auth.requestPasswordReset("alice")!;
+
+      const restored = AuthService.fromSnapshot(auth.toSnapshot());
+      expect(() => restored.resetPasswordWithToken(token, "brand-new-password")).not.toThrow();
+    });
+
+    it("drops an expired token on snapshot restore rather than keeping it redeemable", () => {
+      vi.useFakeTimers();
+      try {
+        const auth = new AuthService();
+        auth.createUser({ username: "alice", password: "old-password", role: "attorney" });
+        const { token } = auth.requestPasswordReset("alice", 60)!;
+        vi.advanceTimersByTime(61 * 60 * 1000);
+        const snapshot = auth.toSnapshot();
+
+        const restored = AuthService.fromSnapshot(snapshot);
+        expect(() => restored.resetPasswordWithToken(token, "brand-new-password")).toThrow(/invalid or has expired/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

@@ -1754,13 +1754,15 @@ accounts:
   restarts.
 
 This is still a real-vendor-shaped seed, not a finished identity system,
-though MFA *is* now built — see "Two-factor authentication" below.
-Password reset *is* now built (see below) —
-attorney-initiated, not the self-service email-link flow production auth
-usually means. Adding/disabling accounts after the one-time boot-time
+though MFA *is* now built — see "Two-factor authentication" below. Both
+attorney-initiated **and** self-service email-link password reset are
+now built — see "Password reset/change" below and "Self-service
+password reset" further down. Adding/disabling accounts after the
+one-time boot-time
 seed *is* built now — see `AccountsService` below — but it's
 attorney-gated, in-app account management, not a self-service flow (no
-email verification, no invite links). It replaces the *trust* gap
+invite links, no self-signup — a new account is still always created by
+an attorney). It replaces the *trust* gap
 (headers anyone could set) with a *real* one (credentialed sessions),
 which is the prerequisite §5/§6 called for, not the last word on
 production auth.
@@ -1921,6 +1923,71 @@ distinct trust levels:
   forced-change flow yet (the account can keep using Docket normally
   until they act on it), just a flag the login banner and Accounts panel
   nudge on.
+
+### Self-service password reset ("forgot password")
+
+A third path alongside the two above, for the case neither covers:
+nobody with attorney access is around (or available fast enough), and
+the account holder doesn't remember the current password to use
+`changePassword`. Same email-link shape most production auth means by
+"forgot password," built as the same kind of single-use, hashed,
+time-boxed secret `MfaRecoveryCode`/the system API key already are —
+not stored as plaintext anywhere, including in the persisted snapshot.
+
+- `AuthService.requestPasswordReset(username, ttlMinutes = 60)` issues
+  a token (returned once, in-memory, never logged) for a known, enabled
+  username — and `undefined` for an unknown or disabled one. The
+  distinction never leaves this method: the HTTP route
+  (`POST /api/forgot-password`, public/unauthenticated, same bucket as
+  `/api/login`) sends the *exact same* response either way, the same
+  no-enumeration reasoning `handleLogin` already follows for a wrong
+  password vs. an unknown username. Every call also prunes already-
+  expired requests from the list first, so a long-running server's
+  snapshot doesn't accumulate dead tokens forever; `fromSnapshot` does
+  the same pruning on load, so a token that expired while the process
+  was down can't come back as redeemable.
+- `AuthService.resetPasswordWithToken(token, newPassword)` redeems it —
+  single-use (`usedAt` marks it spent), rejecting a reused or expired
+  token with the same generic "invalid or expired" message either way
+  (no reason to tell a guesser which failure mode they hit). Needs no
+  proof of the *old* password, same as an attorney's `resetPassword()` —
+  holding a valid token already is the proof — but like
+  `changePassword()` it clears `mustChangePassword` (this is the account
+  holder choosing their own password) and revokes every live session.
+- **Where the email goes**: the account's own `User.email` (see "Staff
+  directory…" above — the same field added for deadline-alert routing).
+  No email on file means no link can be sent, so
+  `POST /api/forgot-password` still returns the identical generic
+  message (nothing it ever says distinguishes "no such account" from
+  "account exists but has no email") — the holder calls the office,
+  the same fallback this project already names for every other gap. If
+  the email transport itself fails *after* the token was already
+  issued, that's logged server-side rather than changing the response —
+  the token is real either way, so inventing a different answer because
+  the send failed would just be a second kind of lie.
+- `server.ts`'s `PasswordResetConfig` (a plain config object, same
+  shape as `TwilioVoiceConfig`) carries the `EmailSender` and the
+  externally-reachable base URL the reset link points at. Absent
+  (`passwordReset` not passed to `createReviewServer`),
+  `/api/forgot-password` still exists and responds — just by saying
+  self-service reset isn't set up for this firm, rather than silently
+  issuing a token nobody can retrieve. `start.ts` wires it whenever
+  `PUBLIC_BASE_URL` (the same var the Twilio integration already names)
+  and a real `EmailSender` are both configured.
+- `public/forgot-password.html`/`.js` and `public/reset-password.html`/
+  `.js` are new, unauthenticated static pages (reachable the same way
+  `login.html` already is, with no session required) — a "Forgot your
+  password?" link on the login page leads to the first; the emailed
+  link leads to the second, which reads `?token=` from its own URL. A
+  missing token shows an inline message rather than a broken form.
+
+What this doesn't do: email verification at signup (there is no
+self-service signup at all — an account is still always created by an
+attorney), rate-limit `/api/forgot-password` beyond the request-body
+ceiling every route already has (the token's 192 bits of entropy is the
+real defense against guessing, the same reasoning session tokens rely
+on without their own separate throttle), or support a second mail
+template/locale.
 
 ## Client portal
 
@@ -2361,6 +2428,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... FIRM_NAME="..." npm run send:reminders  # one-shot: email whichever appointment reminders are due right now (run on a schedule, e.g. cron every few minutes); add TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... TWILIO_SMS_FROM_NUMBER=... to also text them
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run send:deadline-alerts  # one-shot: email each matter's responsible attorney their own at-risk deadlines (run on a schedule, e.g. daily cron); add DEADLINE_ALERT_RECIPIENT=partners@firm.example as a catch-all for matters with no responsible attorney/email on file
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
+# SMTP_HOST=smtp.example.com SMTP_FROM=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable self-service "forgot password" email links (reuses PUBLIC_BASE_URL and whichever SMTP_* vars are already set for invoices — see "Self-service password reset")
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
 # ANTHROPIC_API_KEY=sk-ant-...  ANTHROPIC_MODEL=claude-sonnet-5  npm run start:review-ui  # enable the Assistant panel; ANTHROPIC_MODEL/ANTHROPIC_BASE_URL are optional overrides
@@ -2423,11 +2491,12 @@ above). Still open:
   `CALENDAR_SYSTEM_API_KEY`), and §5's vendor due-diligence review of
   Google Calendar itself (zero-retention, storage jurisdiction, subpoena
   risk) — a firm decision, not a technical one
-- The rest of account management: self-service (email-link) password
-  reset, and self-service invites — attorney-initiated password reset,
-  self-service password change, TOTP two-factor authentication, and
-  adding/disabling users after the one-time boot-time seed are all built
-  (see "Real authentication" above)
+- Self-service invites/signup (an account is still always created by
+  an attorney) — attorney-initiated password reset, self-service
+  password change, self-service email-link password reset, TOTP
+  two-factor authentication, and adding/disabling users after the
+  one-time boot-time seed are all built (see "Real authentication"
+  above)
 - A normalized relational schema for the Postgres adapter, if this ever
   needs to scale past what one JSON blob per deployment comfortably
   handles (see "Persistence" above) — a bigger redesign, deliberately not

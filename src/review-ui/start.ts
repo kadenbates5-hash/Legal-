@@ -669,6 +669,26 @@ const voiceOptions: Pick<ReviewServerOptions, "voiceCalls" | "audioClips" | "twi
     : {};
 
 /**
+ * Self-service "forgot password" needs the same externally-reachable
+ * base URL Twilio's webhook config already names (`PUBLIC_BASE_URL`) —
+ * reused here rather than a second env var meaning the same thing —
+ * plus a real mail transport. Without both, `/api/forgot-password`
+ * still exists and responds, just by telling the requester self-service
+ * reset isn't set up (see `handleForgotPassword` in server.ts) rather
+ * than issuing a token nobody can retrieve.
+ */
+const passwordResetOptions: Pick<ReviewServerOptions, "passwordReset"> =
+  PUBLIC_BASE_URL && emailSender.canSend
+    ? {
+        passwordReset: {
+          email: emailSender,
+          baseUrl: PUBLIC_BASE_URL.replace(/\/+$/, ""),
+          ...(firmConfig?.firmName ? { firmName: firmConfig.firmName } : {}),
+        },
+      }
+    : {};
+
+/**
  * Persisting after a mutation, serialized and non-fatal.
  *
  * Two things this must not do, both of which it previously did:
@@ -730,6 +750,7 @@ const server = createReviewServer(service, state.auth, {
   ...(mfaRequiredRoles?.size ? { mfaRequiredRoles } : {}),
   ...(assistant ? { assistant } : {}),
   ...voiceOptions,
+  ...passwordResetOptions,
 });
 
 const port = Number(process.env["PORT"] ?? 3000);

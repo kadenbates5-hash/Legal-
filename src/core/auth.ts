@@ -82,10 +82,27 @@ export interface SystemApiKeyRecord {
   readonly salt: string;
 }
 
+/**
+ * A self-service "forgot password" link's bearer token, stored the same
+ * way a recovery code is — hashed, never the plaintext — because it's
+ * the same shape of secret: whoever holds it can set a new password
+ * with no other proof of identity. `requestPasswordReset()` is the one
+ * moment the plaintext exists; after that only this hash does.
+ */
+export interface PasswordResetRequest {
+  readonly userId: string;
+  readonly hash: string;
+  readonly salt: string;
+  readonly expiresAt: string;
+  readonly usedAt?: string;
+}
+
 export interface AuthSnapshot {
   users: User[];
   sessions: Session[];
   systemApiKey?: SystemApiKeyRecord;
+  /** Optional so a snapshot saved before this existed still round-trips. */
+  passwordResetRequests?: PasswordResetRequest[];
 }
 
 export class AuthError extends Error {
@@ -175,6 +192,7 @@ export class AuthService {
   #usersById = new Map<string, User>();
   #usersByUsername = new Map<string, User>();
   #sessions = new Map<string, Session>();
+  #passwordResetRequests: PasswordResetRequest[] = [];
   #systemApiKey: SystemApiKeyRecord | undefined;
 
   hasAnyUsers(): boolean {
@@ -358,6 +376,68 @@ export class AuthService {
     if (newPassword.length < 8) throw new AuthError("password must be at least 8 characters");
     const updated = this.#applyNewPassword(user, newPassword, false);
     this.#revokeAllSessions(userId);
+    return updated;
+  }
+
+  /**
+   * Self-service "forgot password" — step one. Issues a single-use,
+   * time-boxed token for whoever controls the account's email, the
+   * self-service counterpart to an attorney's `resetPassword()`.
+   * Returns `undefined` for an unknown or disabled username — the
+   * caller (`PasswordResetConfig`'s route) must respond with the exact
+   * same message either way, same no-user-enumeration reasoning
+   * `login()` already follows, since *this* layer only refuses to leak
+   * the distinction, it doesn't hide it from itself.
+   *
+   * Every call also drops already-expired requests from the list
+   * first, so a server left running for months doesn't accumulate an
+   * ever-growing pile of dead tokens in the snapshot.
+   */
+  requestPasswordReset(username: string, ttlMinutes = 60): { user: User; token: string } | undefined {
+    const now = Date.now();
+    this.#passwordResetRequests = this.#passwordResetRequests.filter((r) => Date.parse(r.expiresAt) >= now);
+
+    const user = this.#usersByUsername.get(username.trim().toLowerCase());
+    if (!user || user.disabled) return undefined;
+
+    const token = randomBytes(24).toString("hex");
+    const salt = randomBytes(16).toString("hex");
+    this.#passwordResetRequests.push({
+      userId: user.id,
+      hash: hashSecret(token, salt),
+      salt,
+      expiresAt: new Date(now + ttlMinutes * 60_000).toISOString(),
+    });
+    return { user, token };
+  }
+
+  /**
+   * Step two: redeems the token from the emailed link. Same
+   * consequences as `changePassword()` — clears `mustChangePassword`
+   * (this *is* the account holder choosing a password, not an
+   * attorney's temporary one) and revokes every live session — but,
+   * like `resetPassword()`, needs no proof of the *old* password, since
+   * holding a valid, unused, unexpired token already is the proof.
+   */
+  resetPasswordWithToken(token: string, newPassword: string): User {
+    const now = Date.now();
+    const request = this.#passwordResetRequests.find(
+      (r) => !r.usedAt && Date.parse(r.expiresAt) >= now && timingSafeStringEqual(hashSecret(token, r.salt), r.hash),
+    );
+    if (!request) {
+      throw new AuthError("this password reset link is invalid or has expired — request a new one");
+    }
+    if (newPassword.length < 8) throw new AuthError("password must be at least 8 characters");
+
+    const user = this.#usersById.get(request.userId);
+    if (!user) {
+      throw new AuthError("this password reset link is invalid or has expired — request a new one");
+    }
+    this.#passwordResetRequests = this.#passwordResetRequests.map((r) =>
+      r === request ? { ...r, usedAt: new Date(now).toISOString() } : r,
+    );
+    const updated = this.#applyNewPassword(user, newPassword, false);
+    this.#revokeAllSessions(request.userId);
     return updated;
   }
 
@@ -600,6 +680,7 @@ export class AuthService {
       users: [...this.#usersById.values()].map((u) => ({ ...u })),
       sessions: [...this.#sessions.values()].map((s) => ({ ...s })),
       ...(this.#systemApiKey ? { systemApiKey: { ...this.#systemApiKey } } : {}),
+      ...(this.#passwordResetRequests.length > 0 ? { passwordResetRequests: this.#passwordResetRequests.map((r) => ({ ...r })) } : {}),
     };
   }
 
@@ -625,6 +706,9 @@ export class AuthService {
     if (snapshot.systemApiKey) {
       service.#systemApiKey = { ...snapshot.systemApiKey };
     }
+    service.#passwordResetRequests = (snapshot.passwordResetRequests ?? [])
+      .filter((r) => Date.parse(r.expiresAt) >= now)
+      .map((r) => ({ ...r }));
     return service;
   }
 }

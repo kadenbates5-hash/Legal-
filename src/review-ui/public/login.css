@@ -127,3 +127,6 @@
      showing it in the red error box tells people they did something wrong
      at the exact moment they didn't. */
   .error.notice { color: var(--text); background: var(--accent-soft); }
+  .footer-link { margin: 1.1rem 0 0; font-size: 0.82rem; text-align: center; }
+  .footer-link a { color: var(--accent); text-decoration: none; }
+  .footer-link a:hover { text-decoration: underline; }
