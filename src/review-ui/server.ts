@@ -2026,6 +2026,7 @@ async function handleMattersRequest(
             role: (party["role"] as PartyRole) ?? "related",
             note: typeof party["note"] === "string" && party["note"] ? party["note"] : undefined,
             email: typeof party["email"] === "string" && party["email"] ? party["email"] : undefined,
+            phone: typeof party["phone"] === "string" && party["phone"] ? party["phone"] : undefined,
           };
         })
       : undefined;
@@ -2493,7 +2494,11 @@ async function handleAppointmentsRequest(
     const enriched = due.map(({ appointment, reminder }) => ({
       appointment:
         actor.role === "system" && matters
-          ? { ...appointment, recipientEmail: matters.clientEmailFor(actor, appointment.matterId) }
+          ? {
+              ...appointment,
+              recipientEmail: matters.clientEmailFor(actor, appointment.matterId),
+              recipientPhone: matters.clientPhoneFor(actor, appointment.matterId),
+            }
           : appointment,
       reminder,
     }));

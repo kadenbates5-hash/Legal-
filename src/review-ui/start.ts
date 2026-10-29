@@ -102,8 +102,8 @@ function seedDemoData(state: SystemState, attorneyUsername: string): void {
     responsibleAttorneyId: attorneyUsername,
     description: "Misdemeanor reckless driving — sample matter, safe to delete.",
     parties: [
-      { name: "Jordan Smith", role: "client", note: undefined, email: undefined },
-      { name: "State of Example", role: "adverse", note: undefined, email: undefined },
+      { name: "Jordan Smith", role: "client", note: undefined, email: undefined, phone: undefined },
+      { name: "State of Example", role: "adverse", note: undefined, email: undefined, phone: undefined },
     ],
   });
   state.matters.upsert("demo-contract-1", {
@@ -112,8 +112,8 @@ function seedDemoData(state: SystemState, attorneyUsername: string): void {
     responsibleAttorneyId: attorneyUsername,
     description: "Breach-of-contract dispute — sample matter, safe to delete.",
     parties: [
-      { name: "Acme Co.", role: "client", note: undefined, email: undefined },
-      { name: "Rival Industries", role: "adverse", note: undefined, email: undefined },
+      { name: "Acme Co.", role: "client", note: undefined, email: undefined, phone: undefined },
+      { name: "Rival Industries", role: "adverse", note: undefined, email: undefined, phone: undefined },
     ],
   });
 

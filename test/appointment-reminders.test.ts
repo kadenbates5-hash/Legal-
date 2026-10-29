@@ -11,8 +11,9 @@ import { AuditLog } from "../src/core/audit.js";
 import { MatterStore } from "../src/core/matters.js";
 import { ConflictChecker } from "../src/core/conflicts.js";
 import { MattersService } from "../src/review-ui/matters-service.js";
-import { AppointmentReminderSender, renderReminderEmail } from "../src/integrations/appointment-reminders.js";
+import { AppointmentReminderSender, renderReminderEmail, renderReminderSms } from "../src/integrations/appointment-reminders.js";
 import type { EmailMessage, EmailResult, EmailSender } from "../src/integrations/email-sender.js";
+import type { SmsMessage, SmsResult, SmsSender } from "../src/integrations/sms-sender.js";
 import type { Actor } from "../src/core/types.js";
 
 const SYSTEM_API_KEY = "test-system-key-1234567890";
@@ -34,6 +35,19 @@ function fakeEmailSender(): EmailSender & { sent: EmailMessage[] } {
     async send(message: EmailMessage): Promise<EmailResult> {
       sent.push(message);
       return { messageId: `msg-${sent.length}` };
+    },
+  };
+}
+
+function fakeSmsSender(): SmsSender & { sent: SmsMessage[] } {
+  const sent: SmsMessage[] = [];
+  return {
+    name: "fake",
+    canSend: true,
+    sent,
+    async send(message: SmsMessage): Promise<SmsResult> {
+      sent.push(message);
+      return { messageId: `sms-${sent.length}` };
     },
   };
 }
@@ -173,5 +187,131 @@ describe("AppointmentReminderSender", () => {
     const sender = new AppointmentReminderSender({ email, docketBaseUrl: baseUrl, systemApiKey: "wrong-key" });
     await expect(sender.run()).rejects.toThrow(/401/);
     expect(email.sent).toEqual([]);
+  });
+});
+
+describe("renderReminderSms", () => {
+  it("names the appointment type and time, and stays short", () => {
+    const text = renderReminderSms(
+      {
+        appointment: { id: "appt1", matterId: "m1", attorneyId: "a1", type: "follow_up", startTime: "2026-09-01T14:00:00Z", durationMinutes: 30 },
+        reminder: { id: "r1", offsetMinutesBefore: 60, dueAt: "2026-09-01T13:00:00Z" },
+      },
+      "Acme Legal",
+    );
+    expect(text).toContain("Acme Legal");
+    expect(text).toContain("follow-up appointment");
+    expect(text.length).toBeLessThanOrEqual(160);
+  });
+});
+
+describe("AppointmentReminderSender — SMS channel", () => {
+  it("texts a client with only a phone on record (no email) when an SmsSender is configured", async () => {
+    matterStore.upsert("m1", { title: "State v. Ruiz", parties: [{ name: "Carlos Ruiz", role: "client", note: undefined, email: undefined, phone: "+15551234567" }] });
+    scheduleWithImmediatelyDueReminder("m1");
+
+    const email = fakeEmailSender();
+    const sms = fakeSmsSender();
+    const sender = new AppointmentReminderSender({ email, sms, docketBaseUrl: baseUrl, systemApiKey: SYSTEM_API_KEY, firmName: "Acme Legal" });
+    const result = await sender.run();
+
+    expect(result).toEqual({ sent: 1, skipped: 0, failures: [] });
+    expect(email.sent).toEqual([]);
+    expect(sms.sent).toHaveLength(1);
+    expect(sms.sent[0]?.to).toBe("+15551234567");
+  });
+
+  it("sends both email and SMS when a client has both on record", async () => {
+    matterStore.upsert("m1", {
+      title: "State v. Ruiz",
+      parties: [{ name: "Carlos Ruiz", role: "client", note: undefined, email: "carlos@example.com", phone: "+15551234567" }],
+    });
+    scheduleWithImmediatelyDueReminder("m1");
+
+    const email = fakeEmailSender();
+    const sms = fakeSmsSender();
+    const sender = new AppointmentReminderSender({ email, sms, docketBaseUrl: baseUrl, systemApiKey: SYSTEM_API_KEY });
+    const result = await sender.run();
+
+    expect(result).toEqual({ sent: 1, skipped: 0, failures: [] });
+    expect(email.sent).toHaveLength(1);
+    expect(sms.sent).toHaveLength(1);
+  });
+
+  it("skips (not fails) a phone-only client when no SmsSender is configured", async () => {
+    matterStore.upsert("m1", { title: "State v. Ruiz", parties: [{ name: "Carlos Ruiz", role: "client", note: undefined, email: undefined, phone: "+15551234567" }] });
+    scheduleWithImmediatelyDueReminder("m1");
+
+    const email = fakeEmailSender();
+    const sender = new AppointmentReminderSender({ email, docketBaseUrl: baseUrl, systemApiKey: SYSTEM_API_KEY });
+    const result = await sender.run();
+
+    expect(result).toEqual({ sent: 0, skipped: 1, failures: [] });
+  });
+
+  it("still delivers via email when the SMS attempt fails, and marks the reminder sent", async () => {
+    matterStore.upsert("m1", {
+      title: "State v. Ruiz",
+      parties: [{ name: "Carlos Ruiz", role: "client", note: undefined, email: "carlos@example.com", phone: "+15551234567" }],
+    });
+    scheduleWithImmediatelyDueReminder("m1");
+
+    const email = fakeEmailSender();
+    const failingSms: SmsSender = {
+      name: "flaky",
+      canSend: true,
+      async send(): Promise<SmsResult> {
+        throw new Error("carrier rejected");
+      },
+    };
+    const sender = new AppointmentReminderSender({ email, sms: failingSms, docketBaseUrl: baseUrl, systemApiKey: SYSTEM_API_KEY });
+    const result = await sender.run();
+
+    expect(result).toEqual({ sent: 1, skipped: 0, failures: [] });
+    expect(email.sent).toHaveLength(1);
+  });
+
+  it("records a failure when both channels fail", async () => {
+    matterStore.upsert("m1", {
+      title: "State v. Ruiz",
+      parties: [{ name: "Carlos Ruiz", role: "client", note: undefined, email: "carlos@example.com", phone: "+15551234567" }],
+    });
+    scheduleWithImmediatelyDueReminder("m1");
+
+    const failingEmail: EmailSender = {
+      name: "flaky",
+      canSend: true,
+      fromAddress: "firm@example.com",
+      async send(): Promise<EmailResult> {
+        throw new Error("mailbox rejected");
+      },
+    };
+    const failingSms: SmsSender = {
+      name: "flaky",
+      canSend: true,
+      async send(): Promise<SmsResult> {
+        throw new Error("carrier rejected");
+      },
+    };
+    const sender = new AppointmentReminderSender({ email: failingEmail, sms: failingSms, docketBaseUrl: baseUrl, systemApiKey: SYSTEM_API_KEY });
+    const result = await sender.run();
+
+    expect(result.sent).toBe(0);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]?.error).toContain("mailbox rejected");
+    expect(result.failures[0]?.error).toContain("carrier rejected");
+  });
+
+  it("enriches the due-reminders list with a recipient phone only for the system credential", async () => {
+    matterStore.upsert("m1", { title: "State v. Ruiz", parties: [{ name: "Carlos Ruiz", role: "client", note: undefined, email: undefined, phone: "+15551234567" }] });
+    scheduleWithImmediatelyDueReminder("m1");
+
+    const staffRes = await fetch(`${baseUrl}/api/appointments/reminders/due`, { headers: { Cookie: receptionistCookie } });
+    const staffView = (await staffRes.json()) as Array<{ appointment: { recipientPhone?: string } }>;
+    expect(staffView[0]?.appointment.recipientPhone).toBeUndefined();
+
+    const systemRes = await fetch(`${baseUrl}/api/appointments/reminders/due`, { headers: { "x-system-api-key": SYSTEM_API_KEY } });
+    const systemView = (await systemRes.json()) as Array<{ appointment: { recipientPhone?: string } }>;
+    expect(systemView[0]?.appointment.recipientPhone).toBe("+15551234567");
   });
 });

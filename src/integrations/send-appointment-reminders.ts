@@ -1,4 +1,5 @@
 import { SmtpEmailSender } from "./smtp-email.js";
+import { TwilioSmsSender } from "./twilio-sms.js";
 import { AppointmentReminderSender } from "./appointment-reminders.js";
 
 /**
@@ -16,6 +17,11 @@ import { AppointmentReminderSender } from "./appointment-reminders.js";
  *  - DOCKET_SYSTEM_API_KEY
  * Optional:
  *  - FIRM_NAME (used in the reminder's subject/body; falls back to "the firm")
+ *  - TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_SMS_FROM_NUMBER — set all
+ *    three to also text reminders to a matter's client phone (see
+ *    appointment-reminders.ts: SMS is a second channel alongside email, not
+ *    a replacement). The same TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN the voice
+ *    channel uses work here too.
  */
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -35,15 +41,24 @@ const email = new SmtpEmailSender({
   ...(process.env["SMTP_ALLOW_INSECURE"] === "true" ? { allowInsecurePlaintext: true } : {}),
 });
 
+const twilioAccountSid = process.env["TWILIO_ACCOUNT_SID"];
+const twilioAuthToken = process.env["TWILIO_AUTH_TOKEN"];
+const twilioSmsFromNumber = process.env["TWILIO_SMS_FROM_NUMBER"];
+const sms =
+  twilioAccountSid && twilioAuthToken && twilioSmsFromNumber
+    ? new TwilioSmsSender({ accountSid: twilioAccountSid, authToken: twilioAuthToken, fromNumber: twilioSmsFromNumber })
+    : undefined;
+
 const sender = new AppointmentReminderSender({
   email,
+  ...(sms ? { sms } : {}),
   docketBaseUrl: requireEnv("DOCKET_BASE_URL"),
   systemApiKey: requireEnv("DOCKET_SYSTEM_API_KEY"),
   ...(process.env["FIRM_NAME"] ? { firmName: process.env["FIRM_NAME"] } : {}),
 });
 
 const result = await sender.run();
-console.log(`Sent ${result.sent} reminder(s), skipped ${result.skipped} with no client email on file.`);
+console.log(`Sent ${result.sent} reminder(s)${sms ? " (email and/or SMS)" : ""}, skipped ${result.skipped} with no deliverable channel on file.`);
 if (result.failures.length > 0) {
   console.error(`${result.failures.length} reminder(s) failed to send:`);
   for (const failure of result.failures) {

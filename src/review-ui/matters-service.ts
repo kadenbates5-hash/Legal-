@@ -1,7 +1,7 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AccessControl } from "../core/access-control.js";
 import { diffFields, type AuditLog } from "../core/audit.js";
-import { addYears, billingEmailFor, type Matter, type MatterInput, type MatterStore } from "../core/matters.js";
+import { addYears, billingEmailFor, clientPhoneFor as clientPhoneForMatter, type Matter, type MatterInput, type MatterStore } from "../core/matters.js";
 import type { TrustLedger } from "../core/trust-ledger.js";
 import type { InvoiceStore } from "../core/invoicing.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
@@ -154,6 +154,18 @@ export class MattersService {
       throw new AccessDeniedError(`reading a matter's client email requires the system credential (got role '${actor.role}')`);
     }
     return billingEmailFor(this.#store.get(matterId));
+  }
+
+  /**
+   * Same gate and reasoning as `clientEmailFor`, for SMS appointment
+   * reminders (see `integrations/appointment-reminders.ts`) instead of
+   * email.
+   */
+  clientPhoneFor(actor: Actor, matterId: string): string | undefined {
+    if (actor.role !== "system") {
+      throw new AccessDeniedError(`reading a matter's client phone requires the system credential (got role '${actor.role}')`);
+    }
+    return clientPhoneForMatter(this.#store.get(matterId));
   }
 
   /**

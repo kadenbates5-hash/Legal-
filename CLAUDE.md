@@ -228,7 +228,7 @@ the rest of core:
   every other stateful core object — wired into `system-state.ts` and the
   dashboard's "Scheduling" panel.
 
-### Appointment reminder emails (closing the "send it" gap)
+### Appointment reminder emails and SMS (closing the "send it" gap)
 
 `src/integrations/appointment-reminders.ts` — `AppointmentReminderSender`,
 the vendor now behind the gap `scheduling.ts` always left open ("sending
@@ -261,31 +261,52 @@ shortcut straight into `SchedulingService`.
   still giving the one legitimate caller — the sending job — everything
   it needs in a single request.
 - `AppointmentReminderSender.run()` fetches the enriched due list, skips
-  any entry with no recipient email (`result.skipped`, not a failure —
-  there's simply nothing to send), sends via the configured
-  `EmailSender`, and marks each one sent via
+  any entry with no deliverable channel (`result.skipped`, not a
+  failure — there's simply nothing to send), sends via whichever of
+  `EmailSender`/`SmsSender` applies, and marks each one sent via
   `POST /api/appointments/:id/reminders/:reminderId` on success. A
   per-reminder failure is recorded rather than aborting the run, the
   same pattern as `AppointmentCalendarSync`/`CalendarDeadlineSync`. A
-  mail failure after all is deliberately not distinguished from a
+  mail/text failure after all is deliberately not distinguished from a
   mark-sent failure: either way the reminder stays unsent and the next
   run retries it — better to occasionally re-send a reminder than to
-  silently drop one. `renderReminderEmail()` is exported standalone for
-  the same reason `buildAppointmentEventBody()`/`parseDeadlineEvent()`
-  are: the wording is unit-testable without a live Docket instance or
-  mail transport.
+  silently drop one. `renderReminderEmail()`/`renderReminderSms()` are
+  exported standalone for the same reason
+  `buildAppointmentEventBody()`/`parseDeadlineEvent()` are: the wording
+  is unit-testable without a live Docket instance or mail/SMS transport.
+- **SMS is a second channel alongside email, not a replacement.**
+  `integrations/sms-sender.ts` is the vendor-agnostic `SmsSender`
+  interface (mirroring `EmailSender`'s shape exactly); `twilio-sms.ts`'s
+  `TwilioSmsSender` is the real implementation, reusing the *same*
+  `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` credential the voice channel
+  already authenticates with (see "Telephony integration — Twilio"
+  below) — a firm with Twilio already set up for voice needs only one
+  more var, `TWILIO_SMS_FROM_NUMBER`. `MatterParty` gained a `phone`
+  field alongside `email` (same "client party only, never adverse"
+  reasoning, exposed as `MattersService.clientPhoneFor()` and the route's
+  `recipientPhone` enrichment, both mirroring the email versions
+  exactly) — edited in the Conflicts panel's party textarea as
+  `Name <email@example.com> [+15551234567]`, the bracket an addition to
+  the existing `<email>` shape. A client with only a phone on record
+  still gets reminded once an `SmsSender` is configured, same as a
+  client with only an email always has; a reminder is marked sent the
+  moment *either* channel delivers it, and a phone on file with no
+  `SmsSender` configured is a skip, not a failure — it simply isn't a
+  channel this deployment can use yet.
 - `src/integrations/send-appointment-reminders.ts` is the standalone
   entry point (`npm run send:reminders`), deliberately its own process
   rather than running inside the main server — same reasoning as
   `sync-calendar-deadlines.ts`. Configured via `SMTP_HOST`/`SMTP_FROM`
   (plus the usual optional `SMTP_*` vars), `DOCKET_BASE_URL`/
   `DOCKET_SYSTEM_API_KEY`, and an optional `FIRM_NAME` used in the
-  reminder's subject/body.
+  reminder's subject/body, plus optional
+  `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_SMS_FROM_NUMBER` to
+  also text.
 
-What this doesn't do: SMS reminders (email only, for now — the same
-`EmailSender` seam this reuses has no SMS analogue in this project yet),
-or let a client reply to change the appointment — the email says so
-explicitly and points back to calling the office.
+What this doesn't do: let a client reply to change the appointment —
+the email/text both say so explicitly and point back to calling the
+office — or support any SMS carrier besides Twilio yet, though
+`SmsSender` is the seam a second one would implement.
 
 ### Proactive deadline-risk alerts (closing the "somebody has to look" gap)
 
@@ -2337,7 +2358,7 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 # CALENDAR_SYSTEM_API_KEY=... npm run start:review-ui                     # pin the calendar-integration key instead of auto-generating one
 GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
 # ... && npm run sync:calendar:push                                       # one-shot: push pending appointments out to Google Calendar (same env vars; the other sync direction)
-# SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... FIRM_NAME="..." npm run send:reminders  # one-shot: email whichever appointment reminders are due right now (run on a schedule, e.g. cron every few minutes)
+# SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... FIRM_NAME="..." npm run send:reminders  # one-shot: email whichever appointment reminders are due right now (run on a schedule, e.g. cron every few minutes); add TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... TWILIO_SMS_FROM_NUMBER=... to also text them
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run send:deadline-alerts  # one-shot: email each matter's responsible attorney their own at-risk deadlines (run on a schedule, e.g. daily cron); add DEADLINE_ALERT_RECIPIENT=partners@firm.example as a catch-all for matters with no responsible attorney/email on file
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice

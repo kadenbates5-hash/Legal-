@@ -2811,22 +2811,37 @@ async function runConflictCheck() {
 }
 
 /**
- * A party is written as `Name` or `Name <email@example.com>` — the same
- * shape as an email "To:" field, so it needs no explanation. The email
- * has to round-trip through this textarea: a save rebuilds the whole
- * party list, so anything the editor can't display it would silently
- * delete, and the client's address is what the Invoices panel emails a
- * bill to.
+ * A party is written as `Name`, `Name <email@example.com>`,
+ * `Name [+15551234567]`, or `Name <email@example.com> [+15551234567]`
+ * — the email part is the same shape as a mail "To:" field, and the
+ * bracketed part is the phone number the SMS appointment-reminder
+ * channel texts. Both have to round-trip through this textarea: a save
+ * rebuilds the whole party list, so anything the editor can't display
+ * it would silently delete. The client's address/number are what the
+ * Invoices panel emails a bill to and the reminder job texts.
  */
 function partyToLine(party) {
-  return party.email ? `${party.name} <${party.email}>` : party.name;
+  let line = party.name;
+  if (party.email) line += ` <${party.email}>`;
+  if (party.phone) line += ` [${party.phone}]`;
+  return line;
 }
 
 function lineToParty(line, role) {
-  const match = /^(.*?)\s*<([^>]+)>\s*$/.exec(line);
-  return match
-    ? { name: match[1].trim(), role, email: match[2].trim() }
-    : { name: line, role };
+  let rest = line.trim();
+  const party = { name: rest, role };
+  const phoneMatch = /^(.*?)\s*\[([^\]]+)\]\s*$/.exec(rest);
+  if (phoneMatch) {
+    party.phone = phoneMatch[2].trim();
+    rest = phoneMatch[1].trim();
+  }
+  const emailMatch = /^(.*?)\s*<([^>]+)>\s*$/.exec(rest);
+  if (emailMatch) {
+    party.email = emailMatch[2].trim();
+    rest = emailMatch[1].trim();
+  }
+  party.name = rest;
+  return party;
 }
 
 function partiesToTextareas(matter) {

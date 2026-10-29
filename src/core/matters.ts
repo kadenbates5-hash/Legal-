@@ -38,6 +38,14 @@ export interface MatterParty {
    * below will only ever return a client's.
    */
   email: string | undefined;
+  /**
+   * Same reasoning as `email`, for SMS appointment reminders (see
+   * `integrations/appointment-reminders.ts`) — only ever read for the
+   * client party via `clientPhoneFor()` below. Expected in E.164 format
+   * (`+15551234567`); `assertSafePhoneNumber()` in `sms-sender.ts` is
+   * where that's actually enforced, at send time.
+   */
+  phone: string | undefined;
 }
 
 /**
@@ -60,6 +68,11 @@ export function addYears(isoDate: string, years: number): string {
 
 export function billingEmailFor(matter: Matter | undefined): string | undefined {
   return matter?.parties.find((p) => p.role === "client" && p.email?.trim())?.email?.trim();
+}
+
+/** The phone number an SMS appointment reminder for this matter should go to — see `MatterParty.phone`'s doc comment for why only ever a client's. */
+export function clientPhoneFor(matter: Matter | undefined): string | undefined {
+  return matter?.parties.find((p) => p.role === "client" && p.phone?.trim())?.phone?.trim();
 }
 
 export interface Matter {

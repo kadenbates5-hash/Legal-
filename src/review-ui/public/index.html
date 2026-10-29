@@ -361,11 +361,11 @@
         </div>
         <div class="field-row">
           <label class="field grow">Client name(s), one per line
-            <textarea id="matterClients" rows="2" placeholder="Maria Ruiz &lt;maria@example.com&gt;"></textarea></label>
+            <textarea id="matterClients" rows="2" placeholder="Maria Ruiz &lt;maria@example.com&gt; [+15551234567]"></textarea></label>
           <label class="field grow">Adverse party name(s), one per line
             <textarea id="matterAdverse" rows="2" placeholder="The State"></textarea></label>
         </div>
-        <p class="meta-tight">Add a client's email as <code>Name &lt;email@example.com&gt;</code> — that's the address the Invoices panel bills to. Adverse parties are never emailed.</p>
+        <p class="meta-tight">Add a client's email as <code>Name &lt;email@example.com&gt;</code> — that's the address the Invoices panel bills to — and/or a phone number in E.164 as <code>Name [+15551234567]</code>, which the appointment-reminder job can text. Adverse parties are never emailed or texted.</p>
         <div class="field-row">
           <button class="btn primary" id="saveMatterRecord">Save matter record</button>
         </div>
