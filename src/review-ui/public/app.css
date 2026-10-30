@@ -199,6 +199,8 @@
   .sidebar-user-role { font-size: 0.72rem; color: #8b91a1; text-transform: capitalize; }
 
   .sidebar-footer { padding: 0.75rem 0.5rem 0.25rem; font-size: 0.72rem; color: #6b7280; line-height: 1.5; border-top: 1px solid var(--sidebar-border); margin-top: 0.75rem; }
+  .sidebar-credit { padding: 0.15rem 0.5rem 0.6rem; font-size: 0.68rem; color: #6b7280; opacity: 0.6; letter-spacing: 0.02em; }
+  .sidebar-credit strong { font-weight: 600; opacity: 0.9; }
 
   /* ---------- Main ---------- */
   .main {
@@ -843,7 +845,7 @@ kbd {
      in the horizontal mobile layout that same offset lands in the gap
      between adjacent buttons (or the brand) as a stray floating sliver. */
   nav.nav button.active::before { display: none; }
-  .sidebar-user, .sidebar-footer { display: none; }
+  .sidebar-user, .sidebar-footer, .sidebar-credit { display: none; }
   .topbar { padding: 0.75rem 1rem; flex-wrap: wrap; }
   .content { padding: 1.1rem; }
   .global-search { min-width: 0; flex: 1 1 160px; }

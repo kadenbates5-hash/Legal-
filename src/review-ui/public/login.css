@@ -130,3 +130,5 @@
   .footer-link { margin: 1.1rem 0 0; font-size: 0.82rem; text-align: center; }
   .footer-link a { color: var(--accent); text-decoration: none; }
   .footer-link a:hover { text-decoration: underline; }
+  .footer-credit { margin: 0.6rem 0 0; font-size: 0.72rem; text-align: center; opacity: 0.55; letter-spacing: 0.02em; }
+  .footer-credit strong { font-weight: 600; opacity: 0.85; }

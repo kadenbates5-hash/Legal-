@@ -435,8 +435,11 @@ const invoicing = new InvoicingService({
  * reasoning. `trust`/`invoicing` are optional there by design (a client
  * portal without invoicing configured just shows no billing section)
  * but both are always available in this deployment, so they're passed
- * through. `paymentInstructions` reuses the same letterhead field the
- * invoice itself prints, since there is no online payment path — see
+ * through. `maxUploadBytes` reuses the exact same cap as the staff-facing
+ * `DocumentsService` above, since both write into the same document
+ * store under the same persistence ceiling. `paymentInstructions` reuses
+ * the same letterhead field the invoice itself prints, since there is no
+ * online payment path — see
  * that service's doc comment for why.
  */
 const clientPortal = new ClientPortalService({
@@ -445,6 +448,8 @@ const clientPortal = new ClientPortalService({
   documents: state.documentStore,
   trust: state.trustLedger,
   invoicing,
+  auditLog: state.auditLog,
+  maxUploadBytes: documents.getMaxUploadBytes(),
   ...(firmConfig?.letterhead?.paymentInstructions ?? process.env["FIRM_PAYMENT_INSTRUCTIONS"]
     ? { paymentInstructions: firmConfig?.letterhead?.paymentInstructions ?? process.env["FIRM_PAYMENT_INSTRUCTIONS"]! }
     : {}),

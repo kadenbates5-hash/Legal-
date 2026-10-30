@@ -1108,7 +1108,7 @@ async function handleRequest(
         sendJson(res, 404, { error: "the client portal is not configured on this server" });
         return;
       }
-      await handleClientPortalRequest(clientPortal, req, res, actor, url);
+      await handleClientPortalRequest(clientPortal, req, res, actor, url, onMutated);
       return;
     }
 
@@ -2048,11 +2048,12 @@ async function handleTrustRequest(
 /**
  * `GET /api/client-portal/matters` (the client's own matter list),
  * `GET /api/client-portal/matters/:matterId` (one matter's detail — trust
- * balance, non-draft invoices, shared documents), and the two download
- * routes for an invoice PDF / a shared document's bytes. No POST routes
- * at all: the whole surface is read-only, since a client never creates
- * or changes anything through this API — see `ClientPortalService`'s
- * doc comment for why.
+ * balance, non-draft invoices, shared documents), the two download
+ * routes for an invoice PDF / a shared document's bytes, and
+ * `POST /api/client-portal/matters/:matterId/documents` — the one write
+ * path on this surface, letting a client submit a document to the firm.
+ * See `ClientPortalService.uploadDocument`'s doc comment for why this
+ * one write exists where nothing else here does.
  */
 async function handleClientPortalRequest(
   clientPortal: ClientPortalService,
@@ -2060,8 +2061,14 @@ async function handleClientPortalRequest(
   res: ServerResponse,
   actor: Actor,
   url: URL,
+  onMutated?: () => void,
 ): Promise<void> {
   const segments = url.pathname.replace(/^\/api\/client-portal\/?/, "").split("/").filter(Boolean);
+
+  if (segments.length === 1 && segments[0] === "limits" && req.method === "GET") {
+    sendJson(res, 200, { maxUploadBytes: clientPortal.getMaxUploadBytes() });
+    return;
+  }
 
   if (segments.length === 1 && segments[0] === "matters" && req.method === "GET") {
     sendJson(res, 200, clientPortal.listMyMatters(actor));
@@ -2093,6 +2100,18 @@ async function handleClientPortalRequest(
   if (segments.length === 4 && segments[2] === "documents" && req.method === "GET") {
     const doc = clientPortal.getDocument(actor, matterId, segments[3]!);
     sendBinary(res, doc.contentType || "application/octet-stream", doc.fileName, Buffer.from(doc.content, "base64"));
+    return;
+  }
+
+  if (segments.length === 3 && segments[2] === "documents" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = clientPortal.uploadDocument(actor, matterId, {
+      fileName: String(body["fileName"] ?? ""),
+      contentType: String(body["contentType"] ?? ""),
+      content: String(body["content"] ?? ""),
+    });
+    sendJson(res, 200, result);
+    onMutated?.();
     return;
   }
 

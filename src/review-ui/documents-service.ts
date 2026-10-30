@@ -36,6 +36,8 @@ export interface DocumentSummary {
   uploadedBy: string;
   uploadedAt: string;
   visibleToClient: boolean;
+  /** True for a document the client uploaded themselves through their own portal — see `core/document-store.ts`'s `CaseDocument.uploadedByClient`. */
+  uploadedByClient: boolean;
 }
 
 export interface DocumentWithContent extends DocumentSummary {
@@ -58,6 +60,7 @@ function summarize(doc: CaseDocument): DocumentSummary {
     uploadedBy: doc.uploadedBy,
     uploadedAt: doc.uploadedAt,
     visibleToClient: doc.visibleToClient,
+    uploadedByClient: doc.uploadedByClient,
   };
 }
 

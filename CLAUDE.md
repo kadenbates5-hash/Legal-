@@ -2141,12 +2141,13 @@ narrower view than staff, not the same data with a different login:**
 - `ClientPortalService` builds its own hand-picked projection rather
   than passing an internal record through: a matter is
   `{ matterId, title, status }` — never `description` or `parties` (a
-  `Matter`'s parties name the adverse side); a document only appears if
-  staff explicitly marked it `visibleToClient` on `core/document-store.ts`
-  (defaults to `false` on upload, same as a draft starting unreviewed —
-  `DocumentsService.setClientVisibility()` is the one write path, and
-  it's audited `document_shared_with_client`/`document_unshared_with_client`);
-  an invoice is exactly what `InvoicingService.emailInvoice()` already
+  `Matter`'s parties name the adverse side); a *staff-uploaded* document
+  only appears if staff explicitly marked it `visibleToClient` on
+  `core/document-store.ts` (defaults to `false` on upload, same as a
+  draft starting unreviewed — `DocumentsService.setClientVisibility()`
+  is the one write path, and it's audited
+  `document_shared_with_client`/`document_unshared_with_client`); an
+  invoice is exactly what `InvoicingService.emailInvoice()` already
   sent to this client's inbox (`listForClient`/`previewForClient`/
   `renderPdfForClient`, added to `InvoicingService` itself so the
   rendering logic isn't duplicated) — **never a draft**, since a client
@@ -2177,11 +2178,12 @@ narrower view than staff, not the same data with a different login:**
   staff-only — see the client-firm thread below, which is deliberately
   a *separate*, narrower store rather than a client being added to this
   one.
-- Server routes are entirely `GET`, under `/api/client-portal/*`
+- Server routes are mostly `GET`, under `/api/client-portal/*`
   (`matters`, `matters/:id`, `matters/:id/invoices/:id/preview`,
-  `matters/:id/invoices/:id/pdf`, `matters/:id/documents/:id`) — there
-  is no `POST` anywhere on this surface, since a client never creates or
-  changes anything through it. `AccountsService.grantMatterAccess()`/
+  `matters/:id/invoices/:id/pdf`, `matters/:id/documents/:id`, `limits`),
+  plus one `POST /api/client-portal/matters/:id/documents` — see
+  "Client document uploads" below for the one thing a client can
+  actually create through this surface. `AccountsService.grantMatterAccess()`/
   `revokeMatterAccess()` (attorney-only, audited
   `client_portal_access_granted`/`_revoked`) are how a client gets
   access to a matter in the first place, exposed as
@@ -2200,6 +2202,45 @@ matter beyond title/status/its own invoices and explicitly-shared
 documents, or a self-service signup —
 same as everywhere else in this project, an account is created by an
 attorney, not by the client themselves.
+
+### Client document uploads
+
+`ClientPortalService.uploadDocument()` is this surface's one write
+path — everything else in "My Matters" is read-only. A client who
+needs to send the firm something (a signed form, an ID scan, a
+requested record) previously had no way to do that except email or
+mail it in, even though they're already logged into a portal that
+shows them the matter.
+
+- Same per-file size cap as the staff-facing `DocumentsService.upload`
+  (reuses its exported `DEFAULT_MAX_UPLOAD_BYTES`, and `start.ts` wires
+  both services to the exact same configured limit so the two paths
+  into one document store never disagree about what's too big) —
+  `GET /api/client-portal/limits` surfaces it the same way
+  `GET /api/documents/limits` does for staff.
+- `core/document-store.ts`'s `CaseDocument` gained `uploadedByClient`
+  (defaults `false`, true only for this path). A client-submitted
+  document is the one case where `visibleToClient` defaults to `true`
+  instead of `false` at upload — hiding someone's own just-sent file
+  from them would be a confusing "did that even go through?" moment —
+  but it's still flagged `uploadedByClient` for staff, since nobody on
+  staff has reviewed it yet, the same "flag it, don't auto-trust it"
+  reasoning as `RESEARCH_REQUIRES_VERIFICATION_FLAG`. The Cases panel
+  shows a "submitted by client" badge on these so staff can tell at a
+  glance which documents came in unreviewed versus which the firm
+  itself put there.
+- Audited as `client_document_uploaded`, same pattern as
+  `document_uploaded` on the staff side.
+- The My Matters panel's "Documents shared with you" card gained a
+  file picker and an "Upload" button right below the document list,
+  mirroring the Cases panel's own upload control exactly (same
+  `FileReader`-to-base64 flow).
+
+What this doesn't do: let staff require or request a specific document
+(there's no "please upload X" prompt — a client uploads on their own
+initiative), or review/approve a client upload before it's visible to
+them — it's visible to the uploader immediately; only the staff-facing
+flag distinguishes it as unreviewed.
 
 ### Client-firm messaging
 

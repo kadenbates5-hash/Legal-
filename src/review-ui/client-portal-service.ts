@@ -5,6 +5,8 @@ import type { CaseDocument, DocumentStore } from "../core/document-store.js";
 import type { TrustLedger } from "../core/trust-ledger.js";
 import type { InvoicingService, InvoiceView } from "./invoicing-service.js";
 import type { RenderedInvoice } from "../core/invoice-render.js";
+import type { AuditLog } from "../core/audit.js";
+import { DEFAULT_MAX_UPLOAD_BYTES } from "./documents-service.js";
 
 /**
  * Backs Docket's client-facing "My Matters" surface — the one part of
@@ -23,10 +25,15 @@ import type { RenderedInvoice } from "../core/invoice-render.js";
  *
  *  - a matter is `{ matterId, title, status }` — never `description` or
  *    `parties`;
- *  - a document only appears if a paralegal/attorney explicitly marked
- *    it `visibleToClient` (see `DocumentsService.setClientVisibility`) —
- *    an upload defaults to private, the same as a draft starting
- *    unreviewed;
+ *  - a staff-uploaded document only appears if a paralegal/attorney
+ *    explicitly marked it `visibleToClient` (see `DocumentsService
+ *    .setClientVisibility`) — it defaults to private, the same as a
+ *    draft starting unreviewed. A document the *client* uploads
+ *    themselves (see `uploadDocument` below) is the one exception —
+ *    visible to that client immediately, since hiding someone's own
+ *    upload from them would be a confusing "did that even go through?"
+ *    experience — but still flagged `uploadedByClient` for staff, since
+ *    nobody on staff has looked at it yet;
  *  - an invoice is exactly what `InvoicingService.emailInvoice` already
  *    sent to this client's inbox (`listForClient`/`previewForClient`/
  *    `renderPdfForClient`), never a draft — a client seeing a
@@ -46,11 +53,14 @@ import type { RenderedInvoice } from "../core/invoice-render.js";
  * honestly, the same "say what's actually configured" pattern
  * `emailTransportReady()` already uses for the Invoices panel.
  *
- * There is also no messaging here yet — `core/messaging.ts` is a
- * staff-only directory-backed system, and a client is deliberately not
- * in that directory (see `StaffService`). A client-firm message thread
- * would be a reasonable next addition but is a distinct feature, not a
- * gap in this one.
+ * Client-firm messaging lives in a separate, narrower store
+ * (`core/client-messages.ts`/`review-ui/client-messaging-service.ts`),
+ * not here — `core/messaging.ts` itself stays staff-only.
+ *
+ * `uploadDocument` is this service's first write path (everything else
+ * here is read-only) — same per-file size cap and audit-logging pattern
+ * as the staff-facing `DocumentsService.upload`, reusing its exported
+ * `DEFAULT_MAX_UPLOAD_BYTES`.
  */
 export interface ClientMatterSummary {
   matterId: string;
@@ -101,6 +111,8 @@ export class ClientPortalService {
   #trust: TrustLedger | undefined;
   #invoicing: InvoicingService | undefined;
   #paymentInstructions: string | undefined;
+  #auditLog: AuditLog | undefined;
+  #maxUploadBytes: number;
 
   constructor(params: {
     accessControl: AccessControl;
@@ -111,6 +123,10 @@ export class ClientPortalService {
     /** Absent means the portal shows no invoices at all — same "absent config degrades, never gates" pattern as the rest of this project's optional integrations. */
     invoicing?: InvoicingService;
     paymentInstructions?: string;
+    /** Optional so existing call sites keep working; wired in production so a client upload is on the record. */
+    auditLog?: AuditLog;
+    /** Same cap and reasoning as `DocumentsService` — see its doc comment. Defaults to the same 25 MB. */
+    maxUploadBytes?: number;
   }) {
     this.#accessControl = params.accessControl;
     this.#matters = params.matters;
@@ -118,6 +134,13 @@ export class ClientPortalService {
     this.#trust = params.trust;
     this.#invoicing = params.invoicing;
     this.#paymentInstructions = params.paymentInstructions;
+    this.#auditLog = params.auditLog;
+    this.#maxUploadBytes = params.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
+  }
+
+  /** Exposed so the portal can tell a client the limit before they try uploading something over it. */
+  getMaxUploadBytes(): number {
+    return this.#maxUploadBytes;
   }
 
   /**
@@ -180,5 +203,44 @@ export class ClientPortalService {
       throw new Error(`no document '${documentId}' on matter '${matterId}'`);
     }
     return doc;
+  }
+
+  /**
+   * Lets a client submit a document (a signed form, an ID scan, a
+   * requested record) to the firm for a matter they've been granted.
+   * Same per-file cap and validation as the staff-facing
+   * `DocumentsService.upload` — a client is just as capable of trying to
+   * upload something oversized, and this project's single-JSON-blob
+   * persistence model (see CLAUDE.md's "Persistence") doesn't care who
+   * the upload came from.
+   *
+   * The result is immediately visible to the client who sent it (see
+   * `CaseDocument.uploadedByClient`'s doc comment for why) but flagged
+   * for staff — nobody on staff has reviewed a client's own submission
+   * yet, unlike a file staff put there themselves.
+   */
+  uploadDocument(actor: Actor, matterId: string, params: { fileName: string; contentType: string; content: string }): ClientDocumentSummary {
+    requireClient(actor);
+    this.#accessControl.authorize({ actor, matterId, category: "client_portal" });
+    if (!params.fileName.trim()) throw new Error("fileName is required");
+    const size = Buffer.byteLength(params.content, "base64");
+    if (size > this.#maxUploadBytes) {
+      throw new Error(`file is ${size} bytes, over the ${this.#maxUploadBytes}-byte upload limit for this server`);
+    }
+    const doc = this.#documents.upload({
+      matterId,
+      fileName: params.fileName,
+      contentType: params.contentType || "application/octet-stream",
+      content: params.content,
+      uploadedBy: actor.id,
+      uploadedByClient: true,
+    });
+    this.#auditLog?.append({
+      actor,
+      matterId,
+      action: "client_document_uploaded",
+      detail: `document=${doc.id} name=${doc.fileName} bytes=${size} contentType=${doc.contentType}`,
+    });
+    return summarizeDocument(doc);
   }
 }

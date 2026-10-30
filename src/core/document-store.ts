@@ -27,16 +27,37 @@ export interface CaseDocument {
    * client portal. Defaults to `false` — an uploaded file starts private
    * the same way a draft starts unreviewed, and someone on staff has to
    * make an affirmative choice to share it, the same as `close()`
-   * requiring a note rather than inferring disposition.
+   * requiring a note rather than inferring disposition. The one
+   * exception is a document a client uploaded themselves (see
+   * `uploadedByClient`) — that one starts visible to the client who just
+   * sent it, since hiding someone's own upload from them would be a
+   * confusing "did that even go through?" experience.
    */
   visibleToClient: boolean;
+  /**
+   * True only for a document a client uploaded through their own portal
+   * (see `ClientPortalService.uploadDocument`), never for one staff
+   * uploaded on a client's behalf. Surfaced to staff in the Cases panel
+   * so an incoming client file is visually distinct from one the firm
+   * put there itself — a client-submitted document hasn't been looked at
+   * by anyone on staff yet, the same "flag it, don't auto-trust it"
+   * reasoning as `RESEARCH_REQUIRES_VERIFICATION_FLAG`.
+   */
+  uploadedByClient: boolean;
 }
 
 export class DocumentStore {
   #byId = new Map<string, CaseDocument>();
   #nextId = 1;
 
-  upload(params: { matterId: string; fileName: string; contentType: string; content: string; uploadedBy: string }): CaseDocument {
+  upload(params: {
+    matterId: string;
+    fileName: string;
+    contentType: string;
+    content: string;
+    uploadedBy: string;
+    uploadedByClient?: boolean;
+  }): CaseDocument {
     const document: CaseDocument = {
       id: `doc_${this.#nextId++}`,
       matterId: params.matterId,
@@ -46,7 +67,8 @@ export class DocumentStore {
       size: Buffer.byteLength(params.content, "base64"),
       uploadedBy: params.uploadedBy,
       uploadedAt: new Date().toISOString(),
-      visibleToClient: false,
+      visibleToClient: params.uploadedByClient ?? false,
+      uploadedByClient: params.uploadedByClient ?? false,
     };
     this.#byId.set(document.id, document);
     return document;
@@ -85,9 +107,10 @@ export class DocumentStore {
     const store = new DocumentStore();
     let maxId = 0;
     for (const doc of snapshot) {
-      // `visibleToClient` may be absent on a snapshot predating client
-      // accounts — defaults to false, same as a freshly uploaded file.
-      store.#byId.set(doc.id, { ...doc, visibleToClient: doc.visibleToClient ?? false });
+      // `visibleToClient`/`uploadedByClient` may be absent on a snapshot
+      // predating client accounts/client uploads — default to false, same
+      // as a freshly staff-uploaded file.
+      store.#byId.set(doc.id, { ...doc, visibleToClient: doc.visibleToClient ?? false, uploadedByClient: doc.uploadedByClient ?? false });
       const num = Number(doc.id.replace(/^doc_/, ""));
       if (Number.isFinite(num) && num > maxId) maxId = num;
     }

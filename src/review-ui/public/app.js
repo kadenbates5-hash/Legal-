@@ -672,6 +672,11 @@ async function openMyMatter(matterId) {
       <div class="card">
         <h3>Documents shared with you</h3>
         <ul class="list">${documentRows || '<li class="static empty">Nothing has been shared with you yet.</li>'}</ul>
+        <div class="field-row mt-sm">
+          <label class="field grow">Send a document to the firm <input id="clientUploadFile" type="file" /></label>
+          <button class="btn primary" id="clientUploadBtn">Upload</button>
+        </div>
+        <p class="meta-xs" id="clientUploadLimitNote"></p>
       </div>
       <div class="card">
         <h3>Messages</h3>
@@ -707,6 +712,35 @@ async function openMyMatter(matterId) {
         }
       });
     }
+
+    api("/api/client-portal/limits")
+      .then((limits) => {
+        document.getElementById("clientUploadLimitNote").textContent = `Max upload size: ${formatBytes(limits.maxUploadBytes)} per file.`;
+      })
+      .catch(() => {});
+
+    document.getElementById("clientUploadBtn").addEventListener("click", async () => {
+      showError("");
+      try {
+        const fileInput = document.getElementById("clientUploadFile");
+        const file = fileInput.files[0];
+        if (!file) throw new Error("choose a file first");
+        const content = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(",")[1] || "");
+          reader.onerror = () => reject(new Error("could not read file"));
+          reader.readAsDataURL(file);
+        });
+        await api(`/api/client-portal/matters/${encodeURIComponent(matterId)}/documents`, {
+          method: "POST",
+          body: JSON.stringify({ fileName: file.name, contentType: file.type, content }),
+        });
+        await openMyMatter(matterId);
+        showToast("Document sent to the firm.", "success");
+      } catch (err) {
+        showError(err.message);
+      }
+    });
   } catch (err) {
     showError(err.message);
     el.innerHTML = "";
@@ -1467,6 +1501,7 @@ async function loadCaseDetail(matterId) {
       li.innerHTML = `<strong>${escapeHtml(doc.fileName)}</strong>
         <span class="badge">${formatBytes(doc.size)}</span>
         ${doc.visibleToClient ? `<span class="badge approved">shared with client</span>` : ""}
+        ${doc.uploadedByClient ? `<span class="badge pending_review">submitted by client</span>` : ""}
         <div class="meta">Uploaded by ${escapeHtml(doc.uploadedBy)} on ${new Date(doc.uploadedAt).toLocaleString()}</div>`;
       const downloadBtn = mkButton("Download", () => downloadDocument(matterId, doc));
       li.appendChild(document.createElement("br"));

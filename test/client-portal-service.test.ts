@@ -36,6 +36,7 @@ function makeService() {
     documents,
     trust,
     invoicing,
+    auditLog,
     paymentInstructions: "Pay by check, payable to the firm.",
   });
   matters.upsert("m1", {
@@ -129,6 +130,53 @@ describe("ClientPortalService", () => {
       accessControl.grantClientAccess("c2", "m1");
       // Shared, but c2 didn't upload/own it — still fine, they're granted the matter.
       expect(() => portal.getDocument(otherClient, "m1", doc.id)).not.toThrow();
+    });
+
+    it("uploadDocument is client-only", () => {
+      const { portal } = makeService();
+      expect(() => portal.uploadDocument(attorney, "m1", { fileName: "x.pdf", contentType: "application/pdf", content: "AAAA" })).toThrow(AccessDeniedError);
+    });
+
+    it("uploadDocument refuses a matter this client wasn't granted", () => {
+      const { portal } = makeService();
+      expect(() => portal.uploadDocument(otherClient, "m1", { fileName: "x.pdf", contentType: "application/pdf", content: "AAAA" })).toThrow(AccessDeniedError);
+    });
+
+    it("uploadDocument requires a fileName", () => {
+      const { portal } = makeService();
+      expect(() => portal.uploadDocument(client, "m1", { fileName: "  ", contentType: "application/pdf", content: "AAAA" })).toThrow(/fileName is required/);
+    });
+
+    it("uploadDocument stores the file and makes it immediately visible to the uploading client", () => {
+      const { portal, documents } = makeService();
+      const result = portal.uploadDocument(client, "m1", { fileName: "id-scan.pdf", contentType: "application/pdf", content: "AAAA" });
+      expect(result).toMatchObject({ matterId: "m1", fileName: "id-scan.pdf" });
+
+      const stored = documents.get(result.id)!;
+      expect(stored.uploadedByClient).toBe(true);
+      expect(stored.visibleToClient).toBe(true);
+      expect(stored.uploadedBy).toBe("c1");
+
+      expect(portal.getMatter(client, "m1").documents).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: result.id, fileName: "id-scan.pdf" })]),
+      );
+    });
+
+    it("uploadDocument enforces the per-file size cap", () => {
+      const { accessControl, matters } = makeService();
+      const documents = new DocumentStore();
+      const portal = new ClientPortalService({ accessControl, matters, documents, maxUploadBytes: 4 });
+      expect(() =>
+        portal.uploadDocument(client, "m1", { fileName: "big.pdf", contentType: "application/pdf", content: Buffer.from("way too big").toString("base64") }),
+      ).toThrow(/over the 4-byte upload limit/);
+    });
+
+    it("uploadDocument audits the upload", () => {
+      const { auditLog, portal } = makeService();
+      const result = portal.uploadDocument(client, "m1", { fileName: "id-scan.pdf", contentType: "application/pdf", content: "AAAA" });
+      const entry = auditLog.read("attorney").find((e) => e.action === "client_document_uploaded");
+      expect(entry?.detail).toContain(result.id);
+      expect(entry?.matterId).toBe("m1");
     });
   });
 

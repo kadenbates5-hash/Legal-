@@ -48,6 +48,7 @@ function summarizeDocument(doc: CaseDocument): DocumentSummary {
     uploadedBy: doc.uploadedBy,
     uploadedAt: doc.uploadedAt,
     visibleToClient: doc.visibleToClient,
+    uploadedByClient: doc.uploadedByClient,
   };
 }
 

@@ -149,6 +149,40 @@ describe("client portal HTTP API", () => {
     expect(await afterShare.text()).toBe("hello world");
   });
 
+  it("lets a client upload a document to their own matter, visible to them immediately, and rejects a staff role", async () => {
+    const res = await fetch(`${baseUrl}/api/client-portal/matters/m1/documents`, withCookie(clientCookie, {
+      method: "POST",
+      body: JSON.stringify({ fileName: "id-scan.pdf", contentType: "application/pdf", content: Buffer.from("scan bytes").toString("base64") }),
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ fileName: "id-scan.pdf", matterId: "m1" });
+
+    const matterDetail = await (await get(clientCookie, "/api/client-portal/matters/m1")).json();
+    expect(matterDetail.documents).toEqual(expect.arrayContaining([expect.objectContaining({ id: body.id })]));
+
+    const staffAttempt = await fetch(`${baseUrl}/api/client-portal/matters/m1/documents`, withCookie(attorneyCookie, {
+      method: "POST",
+      body: JSON.stringify({ fileName: "x.pdf", contentType: "application/pdf", content: "AAAA" }),
+    }));
+    expect(staffAttempt.status).toBe(403);
+  });
+
+  it("refuses a client document upload to a matter they weren't granted", async () => {
+    const c2Cookie = await loginCookie("client2");
+    const res = await fetch(`${baseUrl}/api/client-portal/matters/m1/documents`, withCookie(c2Cookie, {
+      method: "POST",
+      body: JSON.stringify({ fileName: "x.pdf", contentType: "application/pdf", content: "AAAA" }),
+    }));
+    expect(res.status).toBe(403);
+  });
+
+  it("reports the configured upload limit", async () => {
+    const res = await get(clientCookie, "/api/client-portal/limits");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ maxUploadBytes: documents.getMaxUploadBytes() });
+  });
+
   it("serves an invoice preview and PDF only once it's sent, never a draft", async () => {
     const attorneyActor = { id: "a1", role: "attorney" as const };
     const draft = invoicing.createDraft(attorneyActor, "m1", {});
