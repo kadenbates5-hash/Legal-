@@ -33,7 +33,10 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
       refreshPickers();
     }
     if (panel === "home") loadHome();
-    if (panel === "security") loadMfaStatus();
+    if (panel === "security") {
+      loadMfaStatus();
+      loadCalendarConnectionStatus();
+    }
   });
 }
 
@@ -274,6 +277,11 @@ async function loadWhoami() {
     await refreshPeoplePickers();
     refreshMatterOptions();
     loadHome();
+
+    if (window.location.search.includes("calendar")) {
+      handleCalendarConnectionRedirect();
+      document.querySelector('nav.nav button[data-panel="security"]')?.click();
+    }
   } catch (err) {
     // api() already redirects to /login.html on 401.
   }
@@ -387,6 +395,73 @@ async function loadMfaStatus() {
 function showRecoveryCodes(codes) {
   document.getElementById("mfaCodes").textContent = codes.join("\n");
   document.getElementById("mfaCodesCard").hidden = false;
+}
+
+/**
+ * Hidden entirely (not just a blank state) when the server has no
+ * calendarConnection configured at all — same "the feature doesn't
+ * exist here" treatment as every other optional panel, rather than
+ * showing a card with buttons that would just 404.
+ */
+async function loadCalendarConnectionStatus() {
+  const card = document.getElementById("calendarConnectionCard");
+  const status = await tryApi("/api/calendar-connection");
+  if (!status) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  const badge = document.getElementById("calendarStatusBadge");
+  badge.textContent = status.connected ? `connected${status.connectedEmail ? ` — ${status.connectedEmail}` : ""}` : "not connected";
+  badge.className = `badge ${status.connected ? "approved" : "draft"}`;
+  document.getElementById("calendarConnectBtn").hidden = status.connected;
+  document.getElementById("calendarDisconnectBtn").hidden = !status.connected;
+}
+
+document.getElementById("calendarConnectBtn").addEventListener("click", async () => {
+  showError("");
+  try {
+    const { authUrl } = await api("/api/calendar-connection/begin", { method: "POST", body: "{}" });
+    // A full top-level navigation, not a fetch — the consent screen is
+    // Google's own page, and the flow finishes by Google redirecting
+    // the browser back to this app, not by a response this script reads.
+    window.location.href = authUrl;
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+document.getElementById("calendarDisconnectBtn").addEventListener("click", async () => {
+  showError("");
+  if (!confirm("Disconnect your Google Calendar? Your appointments will stop syncing to it.")) return;
+  try {
+    await api("/api/calendar-connection/disconnect", { method: "POST", body: "{}" });
+    await loadCalendarConnectionStatus();
+    showToast("Google Calendar disconnected.", "success");
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+/**
+ * Picks up where the OAuth flow leaves off: Google redirects the
+ * browser to `/api/calendar-connection/callback`, which redirects here
+ * with a query param rather than a JSON body (see server.ts — it's a
+ * top-level navigation, Google's own page did the redirecting, not
+ * this script). Runs once, on load, then strips the param so a reload
+ * doesn't show the toast again.
+ */
+function handleCalendarConnectionRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const connected = params.get("calendarConnected");
+  const error = params.get("calendarError");
+  if (!connected && !error) return;
+  history.replaceState(null, "", window.location.pathname);
+  if (connected) {
+    showToast("Google Calendar connected.", "success");
+  } else {
+    showToast(`Couldn't connect Google Calendar: ${error}`, "error");
+  }
 }
 
 document.getElementById("mfaSetupBannerBtn").addEventListener("click", () => {

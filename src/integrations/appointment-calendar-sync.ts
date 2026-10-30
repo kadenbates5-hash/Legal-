@@ -47,7 +47,7 @@ export class AppointmentCalendarSync {
       try {
         if (appointment.status === "cancelled") {
           if (appointment.calendarEventId) {
-            await this.#publisher.deleteEvent(appointment.calendarEventId);
+            await this.#publisher.deleteEvent(appointment.calendarEventId, appointment.attorneyId);
             result.deleted++;
           }
           await this.#recordSync(appointment.id, undefined);

@@ -181,7 +181,7 @@ export class GoogleCalendarEventPublisher implements CalendarEventPublisher {
     return created.id;
   }
 
-  async deleteEvent(eventId: string): Promise<void> {
+  async deleteEvent(eventId: string, _attorneyId: string): Promise<void> {
     const token = await fetchAccessToken(this.#credentials, "https://www.googleapis.com/auth/calendar.events");
     const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.#calendarId)}/events/${encodeURIComponent(eventId)}`;
     const res = await fetch(url, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });

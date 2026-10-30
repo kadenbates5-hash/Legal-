@@ -494,7 +494,9 @@ independently appear on a shared calendar, never write to or alter
 - `google-calendar.ts` — `GoogleCalendarEventsSource`, the real Google
   Calendar v3 API client. Service-account auth only (the firm shares one
   calendar with the service account's email — no Google Workspace
-  domain-wide delegation, no per-attorney OAuth), hand-rolled as a JWT
+  domain-wide delegation; per-attorney OAuth as an alternative/addition
+  to this shared calendar is now built, see "Per-attorney Google
+  Calendar connections" below), hand-rolled as a JWT
   bearer flow via `node:crypto` + `fetch` rather than pulling in
   `googleapis`/`google-auth-library`, matching this project's
   dependency-light style (`server.ts` is dependency-free; `pg` was the
@@ -589,6 +591,117 @@ event is a one-way projection of Docket's own record, which stays the
 source of truth), or push anything for a `"completed"` appointment
 beyond keeping its existing event current — there's no notion of
 marking an event as historical on the calendar side.
+
+### Per-attorney Google Calendar connections (OAuth — resolved)
+
+The shared service-account calendar above requires every attorney's
+appointments to live on one calendar the firm administers. Some firms
+instead want each attorney's own Google Calendar to receive their own
+appointments — this is that path, built as a genuinely separate,
+additive piece alongside the shared-calendar one, not a replacement for
+it.
+
+- `integrations/google-oauth.ts` — pure, testable OAuth 2.0
+  Authorization Code flow helpers over `fetch`
+  (`buildGoogleAuthUrl()`/`exchangeCodeForTokens()`/
+  `refreshAccessToken()`/`fetchGoogleAccountEmail()`), the same
+  dependency-light call as the service-account JWT flow — no
+  `googleapis`/`google-auth-library`. `buildGoogleAuthUrl()` always
+  requests `access_type=offline`/`prompt=consent` so a refresh token is
+  issued on every connect, never just the first.
+- `core/calendar-connections.ts` — `CalendarConnectionStore`, one
+  `CalendarConnection` (a refresh token, the connected Google account's
+  email, and when) per attorney `actorId`. **This is the first secret
+  this project persists inside its own state blob rather than an
+  environment variable** — the service-account key, SMTP password, and
+  Twilio auth token all live in env vars under the operator's control;
+  a refresh token here lives in `system-state.ts`'s snapshot (file or
+  Postgres) like every other stateful record. That's a real,
+  deliberate trust-boundary difference worth knowing about before
+  turning this on, not a design flaw — there's no other place to keep a
+  per-attorney secret that both survives a restart and doesn't require
+  every attorney to also hold an env-var-editing credential.
+- `review-ui/calendar-connection-service.ts` — `CalendarConnectionService`,
+  self-service like `/api/mfa/*`/`/api/change-password` (no user id
+  param anywhere — it only ever acts on the caller's own connection).
+  `beginConnect()` issues a real Google auth URL and stashes a pending,
+  short-TTL (10 min), swept, in-memory `{ actorId, expiresAt }` keyed by
+  a random `state` value — the same "throwaway call state" pattern as
+  `AudioClipStore`/`intake-demo.ts`. That `state` value does double
+  duty: it's Google's own CSRF protection, and it's the only way the
+  public, cookie-less OAuth callback route learns *which* attorney a
+  given `code` belongs to, since Google's redirect carries no Docket
+  session. `completeConnect()` redeems a `state` exactly once (replay
+  or an unknown/expired one is rejected) and rejects outright if Google
+  didn't actually grant a refresh token. `accessTokenFor()` is
+  `"system"`-role-only and is the *entire* reason an external process
+  never needs the refresh token itself: it performs the refresh
+  server-side and hands back only a short-lived access token — see
+  below. Every connect/disconnect is audited
+  (`calendar_connected`/`calendar_disconnected`), resolving the real
+  role from `AuthService` rather than trusting the caller.
+- `integrations/per-attorney-calendar-publisher.ts` —
+  `PerAttorneyCalendarEventPublisher`, a second `CalendarEventPublisher`
+  implementation alongside `GoogleCalendarEventPublisher`, selected by
+  the standalone push-sync script (see below) rather than core. For a
+  given appointment's `attorneyId` it resolves a fresh access token
+  through the system-only token route and writes directly to that
+  attorney's own `primary` calendar; for an attorney with no connection
+  on file it delegates to an optional `fallback` publisher (typically
+  the existing shared `GoogleCalendarEventPublisher`) if one is
+  configured, so a firm migrating to per-attorney calendars doesn't
+  lose sync for attorneys who haven't connected yet — with no fallback
+  configured, an unconnected attorney's push throws (nothing to write
+  to) and their delete is a silent no-op (nothing to delete).
+  `CalendarEventPublisher.deleteEvent()` gained a required `attorneyId`
+  parameter to make this routing possible; the shared-calendar
+  implementation simply ignores it.
+- **Where the external sync process stays narrow.** `sync-
+  appointments-to-calendar.ts` never holds a refresh token, by design —
+  it calls `GET /api/calendar-connection/actor/:id/token` with the
+  `x-system-api-key` credential, the same pattern every other
+  integration in this project already uses for its one piece of
+  machine authentication, and gets back a short-lived access token it
+  discards after the one push. A new opt-in env var,
+  `GOOGLE_CALENDAR_PER_ATTORNEY=true`, switches the script to this mode
+  (`GOOGLE_SERVICE_ACCOUNT_*` becomes fallback-only rather than
+  required); leaving it unset preserves the exact original
+  shared-calendar-only behavior with zero change.
+- `server.ts` wires three route groups: `GET /api/calendar-connection`
+  (status), `POST /api/calendar-connection/begin`/`/disconnect`
+  (self-service, any logged-in role — connecting someone else's
+  calendar has no legitimate use), the public, session-less
+  `GET /api/calendar-connection/callback` (Google's own redirect
+  target — on success or failure it redirects back into the app with a
+  `calendarConnected=1`/`calendarError=...` query flag rather than ever
+  rendering its own page), and the system-only
+  `GET /api/calendar-connection/actor/:id/token`. All 404 if no
+  `CalendarConnectionService` was passed to `createReviewServer`.
+- The Security panel gained a Google Calendar card (next to the
+  existing MFA controls): a connected/not-connected badge, a "Connect
+  Google Calendar" button that navigates the whole page to Google's own
+  consent screen (not a popup — this is a full OAuth redirect, matching
+  how Google's own consent flow expects to run), and a "Disconnect"
+  button once connected. Landing back on `/?calendarConnected=1` or
+  `/?calendarError=...` shows a toast, switches to the Security panel,
+  and strips the query string via `history.replaceState` so reloading
+  the page doesn't re-show the toast.
+- `start.ts` constructs `CalendarConnectionService` only when
+  `GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET`/
+  `PUBLIC_BASE_URL` are all set — the same "absent config means the
+  surface doesn't exist" pattern as every other optional integration —
+  deriving the OAuth redirect URI from `PUBLIC_BASE_URL` automatically.
+  `persistence/system-state.ts` snapshots `CalendarConnectionStore`
+  alongside everything else.
+
+What this doesn't do: let an attorney choose a calendar other than
+their account's `primary` one, refresh-token *rotation* beyond what
+Google's own token endpoint does transparently on each use, or
+reconcile a per-attorney push against the shared calendar if a firm
+runs both at once for the same attorney (the fallback only applies to
+an attorney with *no* connection — it doesn't merge or dedupe between
+the two destinations for one who has both configured, since that's not
+a configuration this feature expects anyone to actually run).
 
 ## Voicebox voice integration (§8 build order step 6's remaining piece — resolved)
 
@@ -2425,6 +2538,8 @@ npm run start:review-ui   # subsequent boots — attorney review-gate dashboard 
 # CALENDAR_SYSTEM_API_KEY=... npm run start:review-ui                     # pin the calendar-integration key instead of auto-generating one
 GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_CALENDAR_ID=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run sync:calendar  # one-shot Google Calendar deadline sync (run on a schedule, e.g. cron)
 # ... && npm run sync:calendar:push                                       # one-shot: push pending appointments out to Google Calendar (same env vars; the other sync direction)
+# GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable attorneys connecting their own Google Calendar from the Security panel (see "Per-attorney Google Calendar connections")
+# ... GOOGLE_CALENDAR_PER_ATTORNEY=true npm run sync:calendar:push          # push to each attorney's own connected calendar instead of the one shared GOOGLE_CALENDAR_ID (GOOGLE_SERVICE_ACCOUNT_* become fallback-only for attorneys with no connection)
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... FIRM_NAME="..." npm run send:reminders  # one-shot: email whichever appointment reminders are due right now (run on a schedule, e.g. cron every few minutes); add TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... TWILIO_SMS_FROM_NUMBER=... to also text them
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run send:deadline-alerts  # one-shot: email each matter's responsible attorney their own at-risk deadlines (run on a schedule, e.g. daily cron); add DEADLINE_ALERT_RECIPIENT=partners@firm.example as a catch-all for matters with no responsible attorney/email on file
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console

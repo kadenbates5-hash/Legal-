@@ -45,6 +45,7 @@ import { verifyTwilioSignature, twimlPlayThenRecord, twimlPlayThenHangup, downlo
 import type { UserRole } from "../core/auth.js";
 import type { EmailSender } from "../integrations/email-sender.js";
 import { assertSafeEmailAddress } from "../integrations/email-sender.js";
+import type { CalendarConnectionService } from "./calendar-connection-service.js";
 
 /**
  * Attorney review-gate UI backend (§8 build order step 5): a small JSON API
@@ -469,6 +470,7 @@ export interface ReviewServerOptions {
   twilio?: TwilioVoiceConfig;
   /** Absent means `/api/forgot-password` tells the requester self-service reset isn't set up, rather than silently failing — see `handleForgotPassword`. */
   passwordReset?: PasswordResetConfig;
+  calendarConnection?: CalendarConnectionService;
   /** See the module doc comment above — off by default, only enable behind a real TLS-terminating proxy. */
   trustProxy?: boolean;
   /** Names the firm inside an authenticator app's entry (`otpauth://` issuer). Cosmetic; falls back to "Docket". */
@@ -560,6 +562,7 @@ async function handleRequest(
     audioClips,
     twilio,
     passwordReset,
+    calendarConnection,
     trustProxy = false,
     maxRequestBodyBytes = DEFAULT_MAX_REQUEST_BODY_BYTES,
     loginThrottle,
@@ -656,6 +659,37 @@ async function handleRequest(
     } catch (err) {
       sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
     }
+    return;
+  }
+
+  /**
+   * Google redirects the browser here after the consent screen — a
+   * top-level navigation, not a JSON call this app's own `fetch`
+   * wrapper makes, so it has to end in a redirect rather than a JSON
+   * body. Public, same bucket as `/api/login` — there is no Docket
+   * session cookie Google's redirect is obligated to carry, so the
+   * `state` param (verified inside `completeConnect`, bound to the
+   * actor who began the flow) is the entire authentication story here,
+   * the same role a password-reset token plays on that flow's own
+   * callback-shaped route.
+   */
+  if (url.pathname === "/api/calendar-connection/callback" && req.method === "GET") {
+    if (!calendarConnection) {
+      res.writeHead(302, { Location: "/?calendarError=not-configured", ...SECURITY_HEADERS });
+      res.end();
+      return;
+    }
+    try {
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      if (!code || !state) throw new Error("missing code or state");
+      await calendarConnection.completeConnect(code, state);
+      res.writeHead(302, { Location: "/?calendarConnected=1", ...SECURITY_HEADERS });
+      onMutated?.();
+    } catch (err) {
+      res.writeHead(302, { Location: `/?calendarError=${encodeURIComponent(err instanceof Error ? err.message : "unknown error")}`, ...SECURITY_HEADERS });
+    }
+    res.end();
     return;
   }
 
@@ -787,6 +821,45 @@ async function handleRequest(
     return;
   }
 
+  /**
+   * Self-service Google Calendar connect/disconnect — same reasoning
+   * as `/api/mfa` above: no attorney gate, acts only on the caller's
+   * own connection, takes no user id at all. `begin` hands back a
+   * Google consent URL for the browser to navigate to directly; the
+   * flow finishes at the public `/api/calendar-connection/callback`
+   * route above, not here.
+   */
+  if (url.pathname.startsWith("/api/calendar-connection") && !url.pathname.startsWith("/api/calendar-connection/actor/")) {
+    if (!calendarConnection) {
+      sendJson(res, 404, { error: "Google Calendar connection isn't configured on this server" });
+      return;
+    }
+    try {
+      const user = auth.userForToken(parseCookies(req)[SESSION_COOKIE_NAME]);
+      if (!user) throw new AuthError("authentication required");
+      const actor = { id: user.actorId, role: user.role };
+
+      if (url.pathname === "/api/calendar-connection" && req.method === "GET") {
+        sendJson(res, 200, calendarConnection.status(actor));
+        return;
+      }
+      if (url.pathname === "/api/calendar-connection/begin" && req.method === "POST") {
+        sendJson(res, 200, calendarConnection.beginConnect(actor));
+        return;
+      }
+      if (url.pathname === "/api/calendar-connection/disconnect" && req.method === "POST") {
+        calendarConnection.disconnect(actor);
+        sendJson(res, 200, { ok: true });
+        onMutated?.();
+        return;
+      }
+      sendJson(res, 404, { error: "not found" });
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+    }
+    return;
+  }
+
   if (!url.pathname.startsWith("/api/")) {
     if (req.method !== "GET") {
       sendJson(res, 405, { error: "method not allowed" });
@@ -820,6 +893,27 @@ async function handleRequest(
 
     if (url.pathname.startsWith("/api/deadlines")) {
       await handleDeadlineRequest(service, matters, staff, req, res, actor, url, onMutated);
+      return;
+    }
+
+    /**
+     * System-only: resolves a fresh access token for one attorney's
+     * connected Google Calendar — see `CalendarConnectionService
+     * .accessTokenFor()`'s doc comment for why only a short-lived
+     * access token ever crosses this boundary, never the refresh
+     * token behind it.
+     */
+    if (url.pathname.startsWith("/api/calendar-connection/actor/") && url.pathname.endsWith("/token") && req.method === "GET") {
+      if (!calendarConnection) {
+        sendJson(res, 404, { error: "Google Calendar connection isn't configured on this server" });
+        return;
+      }
+      const attorneyActorId = decodeURIComponent(url.pathname.slice("/api/calendar-connection/actor/".length, -"/token".length));
+      try {
+        sendJson(res, 200, await calendarConnection.accessTokenFor(actor, attorneyActorId));
+      } catch (err) {
+        sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+      }
       return;
     }
 

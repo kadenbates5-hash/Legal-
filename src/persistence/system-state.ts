@@ -18,6 +18,7 @@ import { InvoiceStore, type InvoiceSnapshot } from "../core/invoicing.js";
 import { PayrollStore, type PayrollSnapshot } from "../core/payroll.js";
 import { TimeClock, type TimeClockSnapshot } from "../core/time-clock.js";
 import { ClientMessageStore, type ClientMessage } from "../core/client-messages.js";
+import { CalendarConnectionStore, type CalendarConnection } from "../core/calendar-connections.js";
 import type { FirmConfig } from "../config/firm-config.js";
 import { fileStateStore, type StateStore } from "./state-store.js";
 
@@ -76,6 +77,8 @@ export interface SystemStateSnapshot {
   timeClock?: TimeClockSnapshot;
   /** The per-matter client/firm message threads (see core/client-messages.ts), backing the My Matters and Cases panels' "Messages" cards. */
   clientMessages?: ClientMessage[];
+  /** Who has connected their own Google Calendar (see core/calendar-connections.ts), backing the Security panel's calendar card. */
+  calendarConnections?: CalendarConnection[];
 }
 
 export interface SystemState {
@@ -100,6 +103,7 @@ export interface SystemState {
   payroll: PayrollStore;
   timeClock: TimeClock;
   clientMessages: ClientMessageStore;
+  calendarConnections: CalendarConnectionStore;
 }
 
 export interface LoadSystemStateOptions {
@@ -132,6 +136,7 @@ function emptySnapshot(): SystemStateSnapshot {
     payroll: { rates: [], workedHours: [], nextId: 1 },
     timeClock: { shifts: [], nextId: 1 },
     clientMessages: [],
+    calendarConnections: [],
   };
 }
 
@@ -165,6 +170,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const payroll = PayrollStore.fromSnapshot(snapshot.payroll ?? { rates: [], workedHours: [], nextId: 1 });
   const timeClock = TimeClock.fromSnapshot(snapshot.timeClock ?? { shifts: [], nextId: 1 });
   const clientMessages = ClientMessageStore.fromSnapshot(snapshot.clientMessages ?? []);
+  const calendarConnections = CalendarConnectionStore.fromSnapshot(snapshot.calendarConnections ?? []);
   return {
     auditLog,
     auditAnchors: (snapshot.auditAnchors ?? []).map((a) => ({ ...a })),
@@ -186,6 +192,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
     payroll,
     timeClock,
     clientMessages,
+    calendarConnections,
   };
 }
 
@@ -213,6 +220,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     payroll: state.payroll.toSnapshot(),
     timeClock: state.timeClock.toSnapshot(),
     clientMessages: state.clientMessages.toSnapshot(),
+    calendarConnections: state.calendarConnections.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }

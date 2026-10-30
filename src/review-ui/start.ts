@@ -41,6 +41,7 @@ import { ClientPortalService } from "./client-portal-service.js";
 import { ClientMessagingService } from "./client-messaging-service.js";
 import { PayrollService } from "./payroll-service.js";
 import { AnalyticsService } from "./analytics-service.js";
+import { CalendarConnectionService } from "./calendar-connection-service.js";
 import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
 import { UnconfiguredEmailSender, type EmailSender } from "../integrations/email-sender.js";
@@ -689,6 +690,32 @@ const passwordResetOptions: Pick<ReviewServerOptions, "passwordReset"> =
     : {};
 
 /**
+ * Self-service "connect your own Google Calendar" (see "Google
+ * Calendar integration" in CLAUDE.md) — the per-attorney alternative
+ * to the one firm-wide shared service-account calendar. Needs a real
+ * Google OAuth client (console.cloud.google.com → OAuth client ID,
+ * type "Web application", authorized redirect URI
+ * `${PUBLIC_BASE_URL}/api/calendar-connection/callback`) — a one-time
+ * setup step this code can't do for you, the same way the Twilio
+ * console step for the voice channel isn't code either.
+ */
+const GOOGLE_OAUTH_CLIENT_ID = process.env["GOOGLE_OAUTH_CLIENT_ID"];
+const GOOGLE_OAUTH_CLIENT_SECRET = process.env["GOOGLE_OAUTH_CLIENT_SECRET"];
+const calendarConnectionOptions: Pick<ReviewServerOptions, "calendarConnection"> =
+  GOOGLE_OAUTH_CLIENT_ID && GOOGLE_OAUTH_CLIENT_SECRET && PUBLIC_BASE_URL
+    ? {
+        calendarConnection: new CalendarConnectionService({
+          store: state.calendarConnections,
+          clientId: GOOGLE_OAUTH_CLIENT_ID,
+          clientSecret: GOOGLE_OAUTH_CLIENT_SECRET,
+          redirectUri: `${PUBLIC_BASE_URL.replace(/\/+$/, "")}/api/calendar-connection/callback`,
+          auditLog: state.auditLog,
+          auth: state.auth,
+        }),
+      }
+    : {};
+
+/**
  * Persisting after a mutation, serialized and non-fatal.
  *
  * Two things this must not do, both of which it previously did:
@@ -751,6 +778,7 @@ const server = createReviewServer(service, state.auth, {
   ...(assistant ? { assistant } : {}),
   ...voiceOptions,
   ...passwordResetOptions,
+  ...calendarConnectionOptions,
 });
 
 const port = Number(process.env["PORT"] ?? 3000);

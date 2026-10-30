@@ -32,6 +32,13 @@ export interface CalendarEventPublisher {
    */
   upsertEvent(appointmentId: string, existingEventId: string | undefined, draft: CalendarEventDraft): Promise<string>;
 
-  /** Removes an event outright — used when its appointment is cancelled. */
-  deleteEvent(eventId: string): Promise<void>;
+  /**
+   * Removes an event outright — used when its appointment is cancelled.
+   * Takes the appointment's `attorneyId` too, not just the vendor's
+   * event id — a publisher routing by attorney (see
+   * `per-attorney-calendar-publisher.ts`) needs it to know which
+   * calendar the event lives on; a single-shared-calendar publisher
+   * (`GoogleCalendarEventPublisher`) simply ignores it.
+   */
+  deleteEvent(eventId: string, attorneyId: string): Promise<void>;
 }

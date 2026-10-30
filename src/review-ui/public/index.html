@@ -486,6 +486,23 @@
           <button class="btn" id="mfaCodesDoneBtn">I've saved them</button>
         </div>
       </div>
+
+      <div class="card" id="calendarConnectionCard" hidden>
+        <div class="field-row">
+          <h3 class="row-title">Google Calendar</h3>
+          <span id="calendarStatusBadge" class="badge"></span>
+        </div>
+        <p class="subtitle-inline">
+          Connect your own Google Calendar so your appointments sync to it directly, instead of (or
+          alongside) the firm's shared calendar. Only this one connection — nothing else about your
+          Google account is touched.
+        </p>
+        <div id="calendarError" class="flags" hidden></div>
+        <div class="field-row">
+          <button class="btn primary" id="calendarConnectBtn">Connect Google Calendar</button>
+          <button class="btn danger" id="calendarDisconnectBtn" hidden>Disconnect</button>
+        </div>
+      </div>
     </section>
 
     <!-- ===== Messages (every logged-in human) ===== -->

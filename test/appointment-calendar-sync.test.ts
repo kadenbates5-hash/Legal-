@@ -28,7 +28,7 @@ function fakePublisher(): CalendarEventPublisher & { upserts: Array<{ appointmen
       upserts.push({ appointmentId, existingEventId, draft });
       return existingEventId ?? `gcal-${nextId++}`;
     },
-    async deleteEvent(eventId) {
+    async deleteEvent(eventId, _attorneyId) {
       deletes.push(eventId);
     },
   };
