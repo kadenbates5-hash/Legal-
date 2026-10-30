@@ -44,6 +44,7 @@ import { AnalyticsService } from "./analytics-service.js";
 import { CalendarConnectionService } from "./calendar-connection-service.js";
 import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
+import { StripeCheckoutProvider } from "../integrations/stripe-checkout.js";
 import { UnconfiguredEmailSender, type EmailSender } from "../integrations/email-sender.js";
 import { SmtpEmailSender } from "../integrations/smtp-email.js";
 import { PdfLibInvoicePdfRenderer } from "../integrations/invoice-pdf.js";
@@ -392,6 +393,35 @@ const emailSender: EmailSender =
       })
     : new UnconfiguredEmailSender();
 
+/**
+ * Shared by the Twilio telephony integration, self-service password
+ * reset links, the per-attorney Google Calendar OAuth callback, and
+ * (here) Stripe Checkout's success/cancel redirects — one externally
+ * reachable base URL for every feature that needs the browser or a
+ * third party to call back into this server.
+ */
+const PUBLIC_BASE_URL = process.env["PUBLIC_BASE_URL"];
+
+/**
+ * Online invoice payment via a real Stripe Checkout session — see
+ * CLAUDE.md's "Online invoice payment (Stripe Checkout)". Wired up only
+ * when `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/`PUBLIC_BASE_URL` are
+ * all set, same "absent config means the surface doesn't exist" pattern
+ * as every other optional integration — without it the client portal
+ * simply shows no "Pay now" button, same degrade-not-gate reasoning as
+ * `ManualPaymentProcessor` reporting `canCharge: false`.
+ */
+const STRIPE_SECRET_KEY = process.env["STRIPE_SECRET_KEY"];
+const STRIPE_WEBHOOK_SECRET = process.env["STRIPE_WEBHOOK_SECRET"];
+const checkoutOptions: Pick<ConstructorParameters<typeof InvoicingService>[0], "checkout" | "publicBaseUrl"> =
+  STRIPE_SECRET_KEY && STRIPE_WEBHOOK_SECRET && PUBLIC_BASE_URL
+    ? { checkout: new StripeCheckoutProvider({ secretKey: STRIPE_SECRET_KEY }), publicBaseUrl: PUBLIC_BASE_URL }
+    : {};
+const stripeWebhookOptions: Pick<ReviewServerOptions, "stripeWebhook"> =
+  STRIPE_SECRET_KEY && STRIPE_WEBHOOK_SECRET && PUBLIC_BASE_URL
+    ? { stripeWebhook: { webhookSecret: STRIPE_WEBHOOK_SECRET } }
+    : {};
+
 const invoicing = new InvoicingService({
   store: state.invoices,
   accessControl: state.accessControl,
@@ -400,6 +430,7 @@ const invoicing = new InvoicingService({
   billingHours: state.billingHours,
   processor: new ManualPaymentProcessor(),
   email: emailSender,
+  ...checkoutOptions,
   // Always on: PDF rendering needs no configuration and no vendor, and
   // the PDF is the form most clients mean by "the invoice".
   pdf: new PdfLibInvoicePdfRenderer(),
@@ -651,7 +682,6 @@ const mfaRequiredRoles = MFA_REQUIRED_ROLES
  */
 const TWILIO_ACCOUNT_SID = process.env["TWILIO_ACCOUNT_SID"];
 const TWILIO_AUTH_TOKEN = process.env["TWILIO_AUTH_TOKEN"];
-const PUBLIC_BASE_URL = process.env["PUBLIC_BASE_URL"];
 const VOICEBOX_BASE_URL = process.env["VOICEBOX_BASE_URL"];
 const VOICEBOX_PROFILE_ID = process.env["VOICEBOX_PROFILE_ID"];
 const voiceOptions: Pick<ReviewServerOptions, "voiceCalls" | "audioClips" | "twilio"> =
@@ -784,6 +814,7 @@ const server = createReviewServer(service, state.auth, {
   ...voiceOptions,
   ...passwordResetOptions,
   ...calendarConnectionOptions,
+  ...stripeWebhookOptions,
 });
 
 const port = Number(process.env["PORT"] ?? 3000);

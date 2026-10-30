@@ -42,6 +42,7 @@ import { MatterClosingError } from "./matters-service.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { verifyTwilioSignature, twimlPlayThenRecord, twimlPlayThenHangup, downloadTwilioRecording } from "../integrations/twilio-voice.js";
+import { verifyStripeSignature, parseCheckoutSessionCompletedEvent } from "../integrations/stripe-checkout.js";
 import type { UserRole } from "../core/auth.js";
 import type { EmailSender } from "../integrations/email-sender.js";
 import { assertSafeEmailAddress } from "../integrations/email-sender.js";
@@ -422,6 +423,11 @@ export interface PasswordResetConfig {
   firmName?: string;
 }
 
+/** Stripe's webhook signing secret (`whsec_...`, from the Stripe dashboard) — the entire auth story for `POST /api/stripe/webhook`, same role `TwilioVoiceConfig.authToken` plays for the Twilio webhooks. */
+export interface StripeWebhookConfig {
+  webhookSecret: string;
+}
+
 /**
  * `onMutated`/`scheduling`/etc. as an options object rather than a long
  * positional parameter list — this grew past a dozen optional pieces
@@ -471,6 +477,8 @@ export interface ReviewServerOptions {
   /** Absent means `/api/forgot-password` tells the requester self-service reset isn't set up, rather than silently failing — see `handleForgotPassword`. */
   passwordReset?: PasswordResetConfig;
   calendarConnection?: CalendarConnectionService;
+  /** Enables `POST /api/stripe/webhook` — absent means that route 404s, same "absent config means the surface doesn't exist" pattern as every other optional integration. Requires `invoicing` to also be set, since the webhook's only job is calling `invoicing.recordCheckoutPayment`. */
+  stripeWebhook?: StripeWebhookConfig;
   /** See the module doc comment above — off by default, only enable behind a real TLS-terminating proxy. */
   trustProxy?: boolean;
   /** Names the firm inside an authenticator app's entry (`otpauth://` issuer). Cosmetic; falls back to "Docket". */
@@ -563,6 +571,7 @@ async function handleRequest(
     twilio,
     passwordReset,
     calendarConnection,
+    stripeWebhook,
     trustProxy = false,
     maxRequestBodyBytes = DEFAULT_MAX_REQUEST_BODY_BYTES,
     loginThrottle,
@@ -578,6 +587,41 @@ async function handleRequest(
 
   if (url.pathname.startsWith("/api/voice/")) {
     await handleVoiceRequest({ voiceCalls, audioClips, twilio }, req, res, url);
+    return;
+  }
+
+  /**
+   * Public, unauthenticated — Stripe calls this directly, not through a
+   * Docket session, same bucket as the Twilio webhooks above.
+   * `verifyStripeSignature` against the raw body bytes (never the
+   * re-parsed-and-re-serialized JSON, which wouldn't byte-for-byte match
+   * what Stripe signed) is the entire auth story here.
+   */
+  if (url.pathname === "/api/stripe/webhook" && req.method === "POST") {
+    if (!stripeWebhook || !invoicing) {
+      sendJson(res, 404, { error: "Stripe payments are not configured on this server" });
+      return;
+    }
+    const rawBody = (await readBodyBuffer(req)).toString("utf8");
+    const signature = req.headers["stripe-signature"];
+    if (!verifyStripeSignature(rawBody, typeof signature === "string" ? signature : undefined, stripeWebhook.webhookSecret)) {
+      sendJson(res, 400, { error: "invalid Stripe signature" });
+      return;
+    }
+    const event = parseCheckoutSessionCompletedEvent(rawBody);
+    if (event) {
+      try {
+        invoicing.recordCheckoutPayment({ id: "system", role: "system" }, event);
+        onMutated?.();
+      } catch (err) {
+        // A malformed or already-voided invoice shouldn't crash the
+        // webhook handler — Stripe retries on a non-2xx, and retrying a
+        // genuinely bad event forever accomplishes nothing. Logged
+        // server-side so a real failure doesn't vanish silently.
+        console.error("stripe webhook: failed to record checkout payment:", err instanceof Error ? err.message : err);
+      }
+    }
+    sendJson(res, 200, { received: true });
     return;
   }
 
@@ -1108,7 +1152,7 @@ async function handleRequest(
         sendJson(res, 404, { error: "the client portal is not configured on this server" });
         return;
       }
-      await handleClientPortalRequest(clientPortal, req, res, actor, url, onMutated);
+      await handleClientPortalRequest(clientPortal, invoicing, req, res, actor, url, onMutated);
       return;
     }
 
@@ -2057,6 +2101,7 @@ async function handleTrustRequest(
  */
 async function handleClientPortalRequest(
   clientPortal: ClientPortalService,
+  invoicing: InvoicingService | undefined,
   req: IncomingMessage,
   res: ServerResponse,
   actor: Actor,
@@ -2094,6 +2139,16 @@ async function handleClientPortalRequest(
   if (segments.length === 5 && segments[2] === "invoices" && segments[4] === "pdf" && req.method === "GET") {
     const { filename, data } = await clientPortal.invoicePdf(actor, matterId, segments[3]!);
     sendBinary(res, "application/pdf", filename, data);
+    return;
+  }
+
+  if (segments.length === 5 && segments[2] === "invoices" && segments[4] === "checkout-session" && req.method === "POST") {
+    if (!invoicing) {
+      sendJson(res, 404, { error: "online payment is not configured on this server" });
+      return;
+    }
+    const result = await invoicing.createCheckoutSession(actor, matterId, segments[3]!);
+    sendJson(res, 200, result);
     return;
   }
 

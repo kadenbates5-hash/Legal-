@@ -238,3 +238,146 @@ describe("InvoicingService", () => {
     );
   });
 });
+
+function fakeCheckoutProvider() {
+  const sessions: Array<{ amountCents: number; metadata: Record<string, string> }> = [];
+  return {
+    name: "fake",
+    sessions,
+    async createSession(request: { amountCents: number; metadata: Record<string, string> }) {
+      sessions.push({ amountCents: request.amountCents, metadata: request.metadata });
+      return { id: `cs_${sessions.length}`, url: `https://checkout.example.com/cs_${sessions.length}` };
+    },
+  };
+}
+
+function makeServiceWithCheckout() {
+  const auditLog = new AuditLog();
+  const accessControl = new AccessControl(auditLog);
+  accessControl.grantClientAccess("c1", "m-1");
+  const trust = new TrustLedger();
+  const billingHours = new BillingHoursStore();
+  const store = new InvoiceStore();
+  const checkout = fakeCheckoutProvider();
+  const service = new InvoicingService({
+    store,
+    accessControl,
+    auditLog,
+    trust,
+    billingHours,
+    processor: new ManualPaymentProcessor(),
+    checkout,
+    publicBaseUrl: "https://docket.example.com",
+  });
+  return { service, store, checkout, auditLog };
+}
+
+const client: Actor = { id: "c1", role: "client" };
+const system: Actor = { id: "sys", role: "system" };
+
+describe("InvoicingService Checkout", () => {
+  function sentInvoice(service: InvoicingService, store: InvoiceStore) {
+    const draft = service.createDraft(attorney, "m-1", {});
+    service.addLineItem(attorney, "m-1", draft.id, { description: "F", source: "flat", quantityMilli: 1000, unitAmountCents: 100_00 });
+    service.send(attorney, "m-1", draft.id);
+    return store.get(draft.id)!;
+  }
+
+  it("createCheckoutSession is client-only", async () => {
+    const { service, store } = makeServiceWithCheckout();
+    const invoice = sentInvoice(service, store);
+    await expect(service.createCheckoutSession(attorney, "m-1", invoice.id)).rejects.toThrow(AccessDeniedError);
+  });
+
+  it("createCheckoutSession refuses a matter the client wasn't granted", async () => {
+    const { service, store } = makeServiceWithCheckout();
+    const invoice = sentInvoice(service, store);
+    await expect(service.createCheckoutSession({ id: "c2", role: "client" }, "m-1", invoice.id)).rejects.toThrow(AccessDeniedError);
+  });
+
+  it("createCheckoutSession returns no url without a configured provider", async () => {
+    const auditLog = new AuditLog();
+    const accessControl = new AccessControl(auditLog);
+    accessControl.grantClientAccess("c1", "m-1");
+    const service = new InvoicingService({
+      store: new InvoiceStore(),
+      accessControl,
+      auditLog,
+      trust: new TrustLedger(),
+      billingHours: new BillingHoursStore(),
+      processor: new ManualPaymentProcessor(),
+    });
+    const draft = service.createDraft(attorney, "m-1", {});
+    service.addLineItem(attorney, "m-1", draft.id, { description: "F", source: "flat", quantityMilli: 1000, unitAmountCents: 100_00 });
+    service.send(attorney, "m-1", draft.id);
+    await expect(service.createCheckoutSession(client, "m-1", draft.id)).rejects.toThrow(/not configured/);
+  });
+
+  it("creates a session for the invoice's current balance, with matterId/invoiceId as metadata", async () => {
+    const { service, store, checkout } = makeServiceWithCheckout();
+    const invoice = sentInvoice(service, store);
+    const result = await service.createCheckoutSession(client, "m-1", invoice.id);
+    expect(result.url).toBe("https://checkout.example.com/cs_1");
+    expect(checkout.sessions[0]).toEqual({ amountCents: 100_00, metadata: { matterId: "m-1", invoiceId: invoice.id } });
+  });
+
+  it("charges only the remaining balance, not the original total, for a partially paid invoice", async () => {
+    const { service, store, checkout } = makeServiceWithCheckout();
+    const invoice = sentInvoice(service, store);
+    store.recordPayment({ invoiceId: invoice.id, amountCents: 40_00, method: "check", recordedBy: "a1" });
+    await service.createCheckoutSession(client, "m-1", invoice.id);
+    expect(checkout.sessions[0]!.amountCents).toBe(60_00);
+  });
+
+  it("refuses to create a session for an invoice with no balance due", async () => {
+    const { service, store } = makeServiceWithCheckout();
+    const invoice = sentInvoice(service, store);
+    store.recordPayment({ invoiceId: invoice.id, amountCents: 100_00, method: "check", recordedBy: "a1" });
+    await expect(service.createCheckoutSession(client, "m-1", invoice.id)).rejects.toThrow(/no balance due/);
+  });
+
+  it("recordCheckoutPayment is system-only", () => {
+    const { service, store } = makeServiceWithCheckout();
+    const invoice = sentInvoice(service, store);
+    expect(() =>
+      service.recordCheckoutPayment(attorney, { sessionId: "cs_1", paymentIntentId: "pi_1", amountTotalCents: 100_00, matterId: "m-1", invoiceId: invoice.id }),
+    ).toThrow(AccessDeniedError);
+  });
+
+  it("records the payment against the right invoice, with the payment intent id as the reference", () => {
+    const { service, store } = makeServiceWithCheckout();
+    const invoice = sentInvoice(service, store);
+    const view = service.recordCheckoutPayment(system, {
+      sessionId: "cs_1",
+      paymentIntentId: "pi_1",
+      amountTotalCents: 100_00,
+      matterId: "m-1",
+      invoiceId: invoice.id,
+    });
+    expect(view.totals.balanceCents).toBe(0);
+    expect(view.payments[0]).toMatchObject({ method: "card", reference: "pi_1", amountCents: 100_00 });
+  });
+
+  it("is idempotent against a retried webhook for the same session/payment intent", () => {
+    const { service, store } = makeServiceWithCheckout();
+    const invoice = sentInvoice(service, store);
+    const event = { sessionId: "cs_1", paymentIntentId: "pi_1", amountTotalCents: 100_00, matterId: "m-1", invoiceId: invoice.id };
+    service.recordCheckoutPayment(system, event);
+    const second = service.recordCheckoutPayment(system, event);
+    expect(second.payments).toHaveLength(1);
+  });
+
+  it("caps the recorded amount at the invoice's current balance, never overdrawing it", () => {
+    const { service, store } = makeServiceWithCheckout();
+    const invoice = sentInvoice(service, store);
+    const view = service.recordCheckoutPayment(system, {
+      sessionId: "cs_1",
+      paymentIntentId: "pi_1",
+      amountTotalCents: 999_00,
+      matterId: "m-1",
+      invoiceId: invoice.id,
+    });
+    expect(view.totals.balanceCents).toBe(0);
+    expect(view.payments[0]!.amountCents).toBe(100_00);
+  });
+});

@@ -2157,14 +2157,15 @@ narrower view than staff, not the same data with a different login:**
   (`TrustLedger.balanceForMatter`), never the entry history, which can
   carry narrative descriptions of firm work a balance doesn't need to
   say.
-- **There is deliberately no online payment.** `ManualPaymentProcessor`
-  is the only processor this project wires up (see "Invoicing, payments,
-  and staff payroll" above) — nothing has ever accepted a live card in
-  this system, for any role — so a "Pay now" button would be a promise
-  the software can't keep. The panel instead shows the firm's payment
-  instructions text (the same letterhead field the invoice itself
-  prints), the honest "say what's actually configured" pattern
-  `emailTransportReady()` already uses elsewhere.
+- **Online payment is now built** — see "Online invoice payment (Stripe
+  Checkout)" below. `ManualPaymentProcessor` (staff-initiated card
+  charges, see "Invoicing, payments, and staff payroll" above) is
+  unaffected; Checkout is a separate, client-initiated path. Without
+  `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` configured, the panel
+  falls back to the firm's payment instructions text exactly as before
+  (the same letterhead field the invoice itself prints), the honest
+  "say what's actually configured" pattern `emailTransportReady()`
+  already uses elsewhere.
 - **`core/messaging.ts` still has no client access.** `StaffService`,
   `StaffScheduleService`, `PayrollService`, and `TimeClockService` all
   predate the client portal and were written as "open to every
@@ -2196,12 +2197,106 @@ narrower view than staff, not the same data with a different login:**
   lands directly on My Matters rather than the staff Home panel, which
   would otherwise show tiles for surfaces the account can't reach.
 
-What this doesn't do: online payment (see above — client-firm messaging
-*is* now built, see below), letting a client see anything about a
-matter beyond title/status/its own invoices and explicitly-shared
-documents, or a self-service signup —
-same as everywhere else in this project, an account is created by an
-attorney, not by the client themselves.
+What this doesn't do: letting a client see anything about a matter
+beyond title/status/its own invoices and explicitly-shared documents,
+or a self-service signup — same as everywhere else in this project, an
+account is created by an attorney, not by the client themselves. Online
+payment *is* now built (see "Online invoice payment (Stripe Checkout)"
+below), and client-firm messaging *is* now built too (see below).
+
+### Online invoice payment (Stripe Checkout)
+
+`integrations/checkout-provider.ts` / `integrations/stripe-checkout.ts`
+close the gap the client portal always named: a client reading their
+own invoice had no way to actually pay it from here, only the firm's
+payment-instructions text. Stripe was chosen because it's the one
+processor this project can integrate without a merchant account the
+sandbox can provision — nothing about the design is Stripe-specific
+beyond `stripe-checkout.ts` itself.
+
+- **This is a different shape from `PaymentProcessor`
+  (`integrations/payment-processor.ts`), deliberately.** That interface
+  models a direct, synchronous `charge(token)` call, staff-initiated,
+  for a card already tokenized (e.g. a terminal, or Stripe Elements
+  embedded in the app). Stripe Checkout is a *hosted* page: the browser
+  is redirected to Stripe's own domain, Stripe collects the card, and
+  the result comes back asynchronously — a redirect plus a webhook, not
+  a return value. `CheckoutProvider` (`createSession()` only) is the
+  seam for that shape; `StripeCheckoutProvider` is the one
+  implementation, hand-rolled over `fetch` against Stripe's REST API
+  (form-encoded with bracket-notation nested params, since Stripe's API
+  predates JSON bodies) — same dependency-light style as every other
+  integration here, no `stripe` SDK.
+- **The client never touches money directly — only *initiates* a
+  session.** `InvoicingService.createCheckoutSession(actor, matterId,
+  invoiceId)` is client-only, matter-scoped through the existing
+  `client_portal` category, and charges exactly the invoice's *current*
+  balance (never the original total, so a partially paid invoice can't
+  be charged twice for the part already paid). `matterId`/`invoiceId`
+  go on the session as structured `metadata` — never parsed back out of
+  the free-text description — so the webhook can reconcile a payment to
+  exactly one invoice without guessing, the same "trust structured
+  fields, not free text" rule `google-calendar.ts`'s
+  `extendedProperties.private` already follows.
+- **Only the webhook, after signature verification, can ever record the
+  resulting payment.** `InvoicingService.recordCheckoutPayment()`
+  requires the `"system"` role outright — the same role
+  `confirmDeadline`'s `calendar_system` source and `recordCalendarSync`
+  already use for "a verified machine event, not a human request." A
+  client calling this directly (there's no route that would even let
+  them) couldn't anyway. It's idempotent against a retried webhook — a
+  payment already recorded against that session or payment-intent id is
+  treated as already handled rather than double-applied — and caps the
+  recorded amount at the invoice's current balance so two racing
+  retries can never overdraw it.
+- `verifyStripeSignature()` implements Stripe's own webhook scheme
+  (`Stripe-Signature: t=<timestamp>,v1=<hmac>[,v1=...]`, HMAC-SHA256
+  over `${timestamp}.${rawBody}`, timing-safe comparison, replay
+  protection via a timestamp tolerance, and tolerating more than one
+  `v1` during a secret-rotation window) — fails closed on a missing or
+  wrong signature, same posture as `twilio-voice.ts`'s
+  `verifyTwilioSignature`. It's checked against the **raw request
+  body bytes**, not the re-parsed-and-re-serialized JSON, which
+  wouldn't byte-for-byte match what Stripe actually signed.
+  `parseCheckoutSessionCompletedEvent()` is exported standalone so the
+  parsing rules are unit-testable without a live Stripe webhook, same
+  reasoning as `google-calendar.ts`'s `parseDeadlineEvent()`.
+- `server.ts` wires `POST /api/client-portal/matters/:id/invoices/:id/checkout-session`
+  (client-initiated, inside the existing client-portal route handler)
+  and the public, session-less `POST /api/stripe/webhook` (Stripe calls
+  this directly, not through a Docket session — signature verification
+  is the entire auth story, same bucket as the Twilio webhooks). A
+  webhook event this app doesn't recognize, or one that fails to
+  record for some other reason, still gets a `200` back (Stripe retries
+  on anything else, and retrying a genuinely bad event forever
+  accomplishes nothing) — the failure is logged server-side instead.
+  Both routes 404 without `stripeWebhook`/a `checkout`-configured
+  `InvoicingService` passed to `createReviewServer`.
+- The My Matters panel's invoice list gains a "Pay now" button on any
+  invoice with a balance due, which **does a real full-page navigation**
+  to Stripe's hosted page — not an API call that returns inline, the
+  same reasoning the Google Calendar "Connect" button already uses for
+  its own OAuth redirect. Landing back on `/?invoicePaid=1&matterId=...`
+  shows a toast and reopens that matter; `/?invoicePaymentCancelled=1`
+  shows a plain "nothing was charged" notice. The success redirect
+  deliberately doesn't claim the balance is already updated — the
+  webhook records the payment asynchronously, usually before the
+  browser even gets back, but not guaranteed.
+- `start.ts` wires this up only when `STRIPE_SECRET_KEY`/
+  `STRIPE_WEBHOOK_SECRET`/`PUBLIC_BASE_URL` are all set — the same
+  `PUBLIC_BASE_URL` the Twilio/calendar-OAuth/password-reset features
+  already share for their own callback URLs. Absent any of the three,
+  the client portal shows no "Pay now" button and falls back to the
+  firm's payment-instructions text exactly as it always did.
+
+What this doesn't do: refunds through Stripe (a refund still has to be
+handled the way every other correction in this system is — void and
+reissue, or a manual adjustment — Checkout only ever *collects* money),
+partial payment amounts chosen by the client (a session is always for
+the exact current balance, never less), saved payment methods or
+subscriptions, or automatic webhook-secret rotation (regenerate it in
+the Stripe dashboard and update `STRIPE_WEBHOOK_SECRET` by hand, the
+same manual-rotation story as the Google Calendar service-account key).
 
 ### Client document uploads
 
@@ -2597,6 +2692,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run send:deadline-alerts  # one-shot: email each matter's responsible attorney their own at-risk deadlines (run on a schedule, e.g. daily cron); add DEADLINE_ALERT_RECIPIENT=partners@firm.example as a catch-all for matters with no responsible attorney/email on file
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # SMTP_HOST=smtp.example.com SMTP_FROM=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable self-service "forgot password" email links (reuses PUBLIC_BASE_URL and whichever SMTP_* vars are already set for invoices — see "Self-service password reset")
+# STRIPE_SECRET_KEY=sk_... STRIPE_WEBHOOK_SECRET=whsec_... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable a "Pay now" button on outstanding invoices in the client portal (see "Online invoice payment (Stripe Checkout)"); also point a Stripe webhook endpoint at $PUBLIC_BASE_URL/api/stripe/webhook listening for checkout.session.completed in the Stripe dashboard
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
 # ANTHROPIC_API_KEY=sk-ant-...  ANTHROPIC_MODEL=claude-sonnet-5  npm run start:review-ui  # enable the Assistant panel; ANTHROPIC_MODEL/ANTHROPIC_BASE_URL are optional overrides

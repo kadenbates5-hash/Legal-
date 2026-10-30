@@ -711,6 +711,7 @@ pre.mono {
 }
 .toast.success::before { background: var(--ok); }
 .toast.error::before { background: var(--danger); }
+.toast.notice::before { background: var(--accent); }
 .toast .msg { flex: 1; min-width: 0; word-break: break-word; }
 .toast .close {
   all: unset;

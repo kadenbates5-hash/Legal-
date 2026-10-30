@@ -13,6 +13,8 @@ import {
   type PaymentMethod,
 } from "../core/invoicing.js";
 import type { PaymentProcessor } from "../integrations/payment-processor.js";
+import type { CheckoutProvider } from "../integrations/checkout-provider.js";
+import type { StripeCheckoutCompletedEvent } from "../integrations/stripe-checkout.js";
 import { assertSafeEmailAddress, type EmailSender } from "../integrations/email-sender.js";
 import {
   renderInvoice,
@@ -87,6 +89,8 @@ export class InvoicingService {
   #matters: MatterStore | undefined;
   #auth: AuthService | undefined;
   #firm: RenderableFirm;
+  #checkout: CheckoutProvider | undefined;
+  #publicBaseUrl: string | undefined;
 
   constructor(params: {
     store: InvoiceStore;
@@ -104,6 +108,10 @@ export class InvoicingService {
     /** Turns a timekeeper's actorId into a name on the invoice. */
     auth?: AuthService;
     firm?: RenderableFirm;
+    /** Absent means the client portal offers no "Pay now" button — see "Client document uploads"-style degradation elsewhere in this project. */
+    checkout?: CheckoutProvider;
+    /** Where `createCheckoutSession`'s success/cancel redirects point back to. Required if `checkout` is passed. */
+    publicBaseUrl?: string;
   }) {
     this.#store = params.store;
     this.#accessControl = params.accessControl;
@@ -116,6 +124,8 @@ export class InvoicingService {
     this.#matters = params.matters;
     this.#auth = params.auth;
     this.#firm = params.firm ?? { name: "This Firm" };
+    this.#checkout = params.checkout;
+    this.#publicBaseUrl = params.publicBaseUrl;
   }
 
   /** Whether a real processor is wired up, so the UI can say "record payment" rather than offering to charge a card that will fail. */
@@ -696,12 +706,18 @@ export class InvoicingService {
   }
 
   /* ------------------------------------------------------------------ *
-   * Client portal — read-only, and only ever the same document that was
-   * already emailed. Nothing here can create, send, void, or pay an
-   * invoice; those remain firm-side acts on `requireLegalStaff` methods
-   * above. Gated through `AccessControl`'s `client_portal` category
-   * rather than `billing_internal`, since that category also reaches
-   * internal billing-hours detail a client-safe view has not filtered.
+   * Client portal — read-only except for `createCheckoutSession` below,
+   * and only ever the same document that was already emailed. Nothing
+   * here can send, void, directly record, or edit an invoice; those
+   * remain firm-side acts on `requireLegalStaff` methods above. A client
+   * can only *initiate* a hosted Stripe Checkout session for an
+   * invoice's own current balance — the resulting payment is recorded
+   * exclusively by `recordCheckoutPayment`, reachable only by the
+   * `"system"` role (Stripe's webhook, after signature verification),
+   * never by the client directly. Gated through `AccessControl`'s
+   * `client_portal` category rather than `billing_internal`, since that
+   * category also reaches internal billing-hours detail a client-safe
+   * view has not filtered.
    * ------------------------------------------------------------------ */
 
   #requireClient(actor: Actor): void {
@@ -738,5 +754,79 @@ export class InvoicingService {
       filename: invoicePdfFilename(invoice.number, params.matterTitle ?? invoice.matterId),
       data: await this.#pdf.render(params),
     };
+  }
+
+  /**
+   * Creates a hosted Stripe Checkout session for an invoice's own
+   * *current* balance — never the original total, so a partially paid
+   * invoice can't be charged twice for the already-paid portion. The
+   * session carries `matterId`/`invoiceId` as structured metadata (never
+   * encoded in the description) so the webhook can reconcile it back to
+   * exactly one invoice without guessing.
+   */
+  async createCheckoutSession(actor: Actor, matterId: string, invoiceId: string): Promise<{ url: string }> {
+    this.#requireClient(actor);
+    this.#accessControl.authorize({ actor, matterId, category: "client_portal" });
+    if (!this.#checkout) throw new InvoicingError("online payment is not configured on this server");
+    const invoice = this.#requireIssuedOnMatter(matterId, invoiceId);
+    const { balanceCents } = this.#store.totals(invoice.id);
+    if (balanceCents <= 0) throw new InvoicingError("this invoice has no balance due");
+    const base = (this.#publicBaseUrl ?? "").replace(/\/+$/, "");
+    const session = await this.#checkout.createSession({
+      amountCents: balanceCents,
+      description: `Invoice ${invoice.number}`,
+      successUrl: `${base}/?invoicePaid=1&matterId=${encodeURIComponent(matterId)}`,
+      cancelUrl: `${base}/?invoicePaymentCancelled=1&matterId=${encodeURIComponent(matterId)}`,
+      metadata: { matterId, invoiceId: invoice.id },
+    });
+    this.#audit(
+      actor,
+      matterId,
+      "invoice_checkout_session_created",
+      `invoice=${invoice.number} sessionId=${session.id} amountCents=${balanceCents}`,
+    );
+    return { url: session.url };
+  }
+
+  /**
+   * The one way a Checkout-initiated payment actually lands on the
+   * invoice — reached only from the Stripe webhook route, only after
+   * `verifyStripeSignature` has passed, with the `"system"` role as the
+   * credential (the same role `confirmDeadline`'s `calendar_system`
+   * source and `recordCalendarSync` already use for "a verified machine
+   * event, not a human request"). Idempotent against a retried webhook:
+   * a payment already recorded against this session or payment intent
+   * is treated as already handled rather than double-applied, and the
+   * amount recorded is capped at the invoice's current balance in case
+   * two retries somehow race.
+   */
+  recordCheckoutPayment(actor: Actor, event: StripeCheckoutCompletedEvent): InvoiceView {
+    if (actor.role !== "system") {
+      throw new AccessDeniedError(`recording a Checkout payment requires the system credential (got role '${actor.role}')`);
+    }
+    const invoice = this.#requireOnMatter(event.matterId, event.invoiceId);
+    const alreadyRecorded = this.#store
+      .paymentsFor(invoice.id)
+      .some((p) => p.reference === event.paymentIntentId || p.reference === event.sessionId);
+    if (alreadyRecorded) return this.#view(invoice);
+
+    const { balanceCents } = this.#store.totals(invoice.id);
+    const amountCents = Math.min(event.amountTotalCents, balanceCents);
+    if (amountCents <= 0) return this.#view(invoice);
+
+    const payment = this.#store.recordPayment({
+      invoiceId: invoice.id,
+      amountCents,
+      method: "card",
+      reference: event.paymentIntentId ?? event.sessionId,
+      recordedBy: actor.id,
+    });
+    this.#audit(
+      actor,
+      event.matterId,
+      "invoice_payment_recorded",
+      `invoice=${invoice.number} amountCents=${payment.amountCents} method=card (stripe checkout session=${event.sessionId})`,
+    );
+    return this.#view(invoice);
   }
 }

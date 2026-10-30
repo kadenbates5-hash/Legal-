@@ -203,6 +203,19 @@ describe("client portal HTTP API", () => {
     expect(body.text).toContain("Research");
   });
 
+  it("404s the checkout-session route when invoicing isn't wired to the server", async () => {
+    const attorneyActor = { id: "a1", role: "attorney" as const };
+    const draft = invoicing.createDraft(attorneyActor, "m1", {});
+    invoicing.addLineItem(attorneyActor, "m1", draft.id, { description: "Research", source: "flat", quantityMilli: 1000, unitAmountCents: 5_000 });
+    invoicing.send(attorneyActor, "m1", draft.id);
+
+    // The shared beforeEach server never passes `invoicing` to createReviewServer's options directly (only clientPortal holds an internal reference) — see "Stripe Checkout end to end" below for the fully wired path.
+    const res = await fetch(`${baseUrl}/api/client-portal/matters/m1/invoices/${draft.id}/checkout-session`, withCookie(clientCookie, { method: "POST", body: "{}" }));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toMatch(/not configured/);
+  });
+
   it("grants and revokes client matter access through the Accounts routes", async () => {
     const clientUserId = (await (await get(attorneyCookie, "/api/accounts")).json()).find(
       (a: { username: string }) => a.username === "client2",
@@ -232,5 +245,137 @@ describe("client portal HTTP API", () => {
       ...withCookie(clientCookie, { body: JSON.stringify({ matterId: "m1" }) }),
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("Stripe Checkout end to end (client portal + webhook)", () => {
+  const WEBHOOK_SECRET = "whsec_test_secret";
+
+  function fakeCheckoutProvider() {
+    const sessions: Array<{ amountCents: number; metadata: Record<string, string> }> = [];
+    return {
+      name: "fake",
+      sessions,
+      async createSession(request: { amountCents: number; metadata: Record<string, string> }) {
+        sessions.push({ amountCents: request.amountCents, metadata: request.metadata });
+        return { id: `cs_${sessions.length}`, url: `https://checkout.example.com/cs_${sessions.length}` };
+      },
+    };
+  }
+
+  async function setup() {
+    const auditLog = new AuditLog();
+    const accessControl = new AccessControl(auditLog);
+    const auth = new AuthService();
+    auth.createUser({ username: "attorney1", password: "correct-horse", role: "attorney", actorId: "a1" });
+    auth.createUser({ username: "client1", password: "correct-horse", role: "client", actorId: "c1" });
+    accessControl.grantClientAccess("c1", "m1");
+
+    const invoiceStore = new InvoiceStore();
+    const checkout = fakeCheckoutProvider();
+    const invoicing = new InvoicingService({
+      store: invoiceStore,
+      accessControl,
+      auditLog,
+      trust: new TrustLedger(),
+      billingHours: new BillingHoursStore(),
+      processor: new ManualPaymentProcessor(),
+      checkout,
+      publicBaseUrl: "https://docket.example.com",
+    });
+    const matters = new MatterStore();
+    matters.upsert("m1", { title: "State v. Ruiz", status: "open", parties: [] });
+    const clientPortal = new ClientPortalService({ accessControl, matters, documents: new DocumentStore(), invoicing });
+
+    const testServer = createReviewServer(new ReviewGateService(new WorkProductStore()), auth, {
+      clientPortal,
+      invoicing,
+      stripeWebhook: { webhookSecret: WEBHOOK_SECRET },
+    });
+    await new Promise<void>((resolve) => testServer.listen(0, resolve));
+    const url = `http://127.0.0.1:${(testServer.address() as AddressInfo).port}`;
+
+    const login = await fetch(`${url}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "client1", password: "correct-horse" }),
+    });
+    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+
+    const draft = invoicing.createDraft({ id: "a1", role: "attorney" }, "m1", {});
+    invoicing.addLineItem({ id: "a1", role: "attorney" }, "m1", draft.id, { description: "Research", source: "flat", quantityMilli: 1000, unitAmountCents: 5_000 });
+    invoicing.send({ id: "a1", role: "attorney" }, "m1", draft.id);
+
+    return { testServer, url, cookie, draft, invoicing, checkout };
+  }
+
+  it("creates a Checkout session and returns Stripe's own hosted URL", async () => {
+    const { testServer, url, cookie, draft, checkout } = await setup();
+    try {
+      const res = await fetch(`${url}/api/client-portal/matters/m1/invoices/${draft.id}/checkout-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        body: "{}",
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.url).toBe("https://checkout.example.com/cs_1");
+      expect(checkout.sessions[0]).toMatchObject({ amountCents: 5_000, metadata: { matterId: "m1", invoiceId: draft.id } });
+    } finally {
+      await new Promise<void>((resolve) => testServer.close(() => resolve()));
+    }
+  });
+
+  it("rejects a webhook with no/invalid Stripe-Signature header", async () => {
+    const { testServer, url, draft } = await setup();
+    try {
+      const rawBody = JSON.stringify({
+        type: "checkout.session.completed",
+        data: { object: { id: "cs_1", payment_intent: "pi_1", amount_total: 5_000, metadata: { matterId: "m1", invoiceId: draft.id } } },
+      });
+      const res = await fetch(`${url}/api/stripe/webhook`, { method: "POST", body: rawBody });
+      expect(res.status).toBe(400);
+    } finally {
+      await new Promise<void>((resolve) => testServer.close(() => resolve()));
+    }
+  });
+
+  it("records the payment once a correctly signed webhook arrives, visible immediately to the client", async () => {
+    const { createHmac } = await import("node:crypto");
+    const { testServer, url, cookie, draft, invoicing } = await setup();
+    try {
+      const rawBody = JSON.stringify({
+        type: "checkout.session.completed",
+        data: { object: { id: "cs_1", payment_intent: "pi_1", amount_total: 5_000, metadata: { matterId: "m1", invoiceId: draft.id } } },
+      });
+      const timestamp = Math.floor(Date.now() / 1000);
+      const signature = createHmac("sha256", WEBHOOK_SECRET).update(`${timestamp}.${rawBody}`).digest("hex");
+      const res = await fetch(`${url}/api/stripe/webhook`, {
+        method: "POST",
+        headers: { "Stripe-Signature": `t=${timestamp},v1=${signature}` },
+        body: rawBody,
+      });
+      expect(res.status).toBe(200);
+
+      const view = invoicing.get({ id: "a1", role: "attorney" }, "m1", draft.id);
+      expect(view.totals.balanceCents).toBe(0);
+
+      const detail = await (
+        await fetch(`${url}/api/client-portal/matters/m1`, { headers: { Cookie: cookie } })
+      ).json();
+      expect(detail.invoices[0].status).toBe("paid");
+    } finally {
+      await new Promise<void>((resolve) => testServer.close(() => resolve()));
+    }
+  });
+
+  it("404s the webhook route when not configured", async () => {
+    const auth = new AuthService();
+    const bareServer = createReviewServer(new ReviewGateService(new WorkProductStore()), auth, {});
+    await new Promise<void>((resolve) => bareServer.listen(0, resolve));
+    const bareUrl = `http://127.0.0.1:${(bareServer.address() as AddressInfo).port}`;
+    const res = await fetch(`${bareUrl}/api/stripe/webhook`, { method: "POST", body: "{}" });
+    expect(res.status).toBe(404);
+    await new Promise<void>((resolve) => bareServer.close(() => resolve()));
   });
 });

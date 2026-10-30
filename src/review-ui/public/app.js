@@ -241,7 +241,12 @@ async function loadWhoami() {
       for (const label of document.querySelectorAll("nav.nav .nav-group")) label.hidden = true;
       document.getElementById("navMyMatters").hidden = false;
       document.getElementById("navMyMatters").click();
-      loadMyMatters();
+      const returnedMatterId = handleInvoiceCheckoutRedirect();
+      if (returnedMatterId) {
+        await openMyMatter(returnedMatterId);
+      } else {
+        loadMyMatters();
+      }
       return;
     }
     if (me.role === "attorney") {
@@ -464,6 +469,25 @@ function handleCalendarConnectionRedirect() {
   }
 }
 
+/** Landing back from Stripe's hosted Checkout page — see createCheckoutSession's success/cancel URLs. */
+function handleInvoiceCheckoutRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const paid = params.get("invoicePaid");
+  const cancelled = params.get("invoicePaymentCancelled");
+  const matterId = params.get("matterId");
+  if (!paid && !cancelled) return null;
+  history.replaceState(null, "", window.location.pathname);
+  if (paid) {
+    // Stripe's webhook records the payment asynchronously — it's usually
+    // already landed by the time the browser redirects back, but not
+    // guaranteed, so this doesn't claim the balance is updated yet.
+    showToast("Payment received — this may take a moment to reflect on the invoice.", "success");
+  } else {
+    showToast("Payment cancelled — nothing was charged.", "notice");
+  }
+  return matterId;
+}
+
 document.getElementById("mfaSetupBannerBtn").addEventListener("click", () => {
   document.querySelector('nav.nav button[data-panel="security"]').click();
 });
@@ -627,6 +651,7 @@ async function openMyMatter(matterId) {
       .map((inv) => {
         const statusBadge =
           inv.status === "paid" ? "approved" : inv.status === "void" ? "rejected" : inv.status === "sent" ? "pending_review" : "";
+        const balanceDue = inv.totals.balanceCents > 0 && (inv.status === "sent" || inv.status === "partially_paid");
         return `<li class="static">
           <strong>Invoice ${escapeHtml(inv.number)}</strong>
           <span class="badge ${statusBadge}">${escapeHtml(inv.status)}</span>
@@ -634,6 +659,7 @@ async function openMyMatter(matterId) {
           <div class="mt-xs">
             <button class="btn" data-preview="${inv.id}">View itemization</button>
             <a class="btn" href="/api/client-portal/matters/${encodeURIComponent(matterId)}/invoices/${inv.id}/pdf">Download PDF</a>
+            ${balanceDue ? `<button class="btn primary" data-pay="${inv.id}">Pay now</button>` : ""}
           </div>
           <pre class="preview hidden mono mt-sm" id="clientInvoicePreview-${inv.id}"></pre>
         </li>`;
@@ -709,6 +735,27 @@ async function openMyMatter(matterId) {
           pre.classList.toggle("hidden");
         } catch (err) {
           showError(err.message);
+        }
+      });
+    }
+
+    for (const btn of el.querySelectorAll("[data-pay]")) {
+      btn.addEventListener("click", async () => {
+        showError("");
+        const invoiceId = btn.dataset.pay;
+        try {
+          btn.disabled = true;
+          const { url } = await api(`/api/client-portal/matters/${encodeURIComponent(matterId)}/invoices/${invoiceId}/checkout-session`, {
+            method: "POST",
+            body: "{}",
+          });
+          // A real redirect to Stripe's own hosted page, same reasoning as
+          // the Google Calendar connect button — this is not an API call
+          // that returns inline, it's a full navigation to a third party.
+          window.location.href = url;
+        } catch (err) {
+          showError(err.message.includes("not configured") ? "Online payment isn't set up for this firm yet — see the payment instructions above." : err.message);
+          btn.disabled = false;
         }
       });
     }
