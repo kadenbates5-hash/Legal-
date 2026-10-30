@@ -4,11 +4,12 @@
     --border: #e3e5ea;
     --text: #1a1d24;
     --text-muted: #6b7280;
-    --accent: #3454d1;
-    --accent-2: #6f5ce6;
-    --accent-hover: #2a44ac;
-    --accent-soft: #eef1fb;
-    --accent-glow: rgba(52, 84, 209, 0.35);
+    --accent: #2c4270;
+    --accent-2: #b08d57;
+    --accent-hover: #1f3157;
+    --accent-soft: #eaeef6;
+    --accent-glow: rgba(44, 66, 112, 0.35);
+    --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
     --danger: #c02b3a;
     --danger-soft: #fbe9eb;
   }
@@ -92,7 +93,7 @@
     color: #fff; font-weight: 700; font-size: 0.98rem;
     box-shadow: 0 6px 16px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.3);
   }
-  .brand .name { font-weight: 700; font-size: 1.2rem; letter-spacing: -0.015em; }
+  .brand .name { font-family: var(--font-serif); font-weight: 700; font-size: 1.3rem; letter-spacing: -0.01em; }
   p.tagline { color: var(--text-muted); font-size: 0.85rem; margin: -1rem 0 1.5rem; line-height: 1.55; }
   label { display: block; margin-top: 1rem; font-size: 0.8rem; font-weight: 500; color: var(--text-muted); }
   input[type="text"], input[type="password"] {

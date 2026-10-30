@@ -6,19 +6,23 @@
     --border-strong: #d3d6dd;
     --text: #1a1d24;
     --text-muted: #6b7280;
-    --accent: #3454d1;
-    --accent-hover: #2a44ac;
-    --accent-2: #6f5ce6;
-    --accent-soft: #ebeffc;
-    --accent-glow: rgba(52, 84, 209, 0.28);
+    /* A deep chambers-ink blue, not the generic SaaS-template blue —
+       paired with a muted brass secondary for a two-tone identity that
+       reads as "legal," used sparingly (the brand mark, the active nav
+       pill, a handful of accent touches) rather than everywhere. */
+    --accent: #2c4270;
+    --accent-hover: #1f3157;
+    --accent-2: #b08d57;
+    --accent-soft: #eaeef6;
+    --accent-glow: rgba(44, 66, 112, 0.28);
     --danger: #c02b3a;
     --danger-soft: #fbe9eb;
     --warn: #a06600;
     --warn-soft: #fdf3dc;
     --ok: #1a7d4a;
     --ok-soft: #e7f6ee;
-    --sidebar-bg: #0e1016;
-    --sidebar-bg-2: #171a24;
+    --sidebar-bg: #0a0c13;
+    --sidebar-bg-2: #151924;
     --sidebar-text: #b7bac4;
     --sidebar-text-active: #ffffff;
     --sidebar-border: rgba(255, 255, 255, 0.08);
@@ -28,6 +32,13 @@
     --shadow-hover: 0 4px 10px rgba(20, 23, 31, 0.08), 0 10px 24px rgba(20, 23, 31, 0.08);
     --shadow-lg: 0 12px 32px rgba(20, 23, 31, 0.12), 0 2px 8px rgba(20, 23, 31, 0.06);
     --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+    /* A restrained serif for headings/brand only — body and data stay in
+       the sans stack below for density/legibility. No external font
+       files or CDN: every name here is a real system font (or close
+       enough that the fallback is unnoticeable), which keeps the CSP's
+       strict `font-src 'self'`/`style-src 'self'` intact rather than
+       carving out an exception for one font file. */
+    --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
     /* Alias kept for older markup — every surface tile (stat cards, the
        global search box) should render on the same white surface as a
        .card, never fall through to "no background declared" and blend
@@ -44,12 +55,12 @@
       --border-strong: #3a3f4c;
       --text: #e7e9ee;
       --text-muted: #9096a3;
-      --accent-soft: rgba(52, 84, 209, 0.22);
+      --accent-soft: rgba(44, 66, 112, 0.28);
       --danger-soft: rgba(192, 43, 58, 0.18);
       --warn-soft: rgba(160, 102, 0, 0.2);
       --ok-soft: rgba(26, 125, 74, 0.18);
-      --sidebar-bg: #06070b;
-      --sidebar-bg-2: #0e1016;
+      --sidebar-bg: #050609;
+      --sidebar-bg-2: #0d1017;
     }
   }
 
@@ -123,7 +134,7 @@
     font-size: 0.9rem;
     box-shadow: 0 4px 14px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
   }
-  .brand .name { font-weight: 700; font-size: 1.15rem; color: #fff; letter-spacing: -0.015em; }
+  .brand .name { font-family: var(--font-serif); font-weight: 700; font-size: 1.2rem; color: #fff; letter-spacing: -0.01em; }
 
   nav.nav { display: flex; flex-direction: column; gap: 0.1rem; }
   .nav-group {
@@ -226,7 +237,7 @@
     top: 0;
     z-index: 5;
   }
-  .topbar h1 { font-size: 1.15rem; margin: 0; font-weight: 700; letter-spacing: -0.015em; }
+  .topbar h1 { font-family: var(--font-serif); font-size: 1.25rem; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
   .topbar .who { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; color: var(--text-muted); }
   .btn {
     all: unset;
@@ -270,7 +281,7 @@
     margin-bottom: 1rem;
     transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease), border-color 0.2s var(--ease);
   }
-  .card h3 { margin: 0 0 0.75rem; font-size: 0.95rem; letter-spacing: -0.005em; }
+  .card h3 { font-family: var(--font-serif); margin: 0 0 0.75rem; font-size: 1.02rem; letter-spacing: -0.005em; }
   .card h4 { margin: 1rem 0 0.5rem; font-size: 0.82rem; color: var(--text-muted); font-weight: 600; }
 
   .field-row { display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: flex-end; margin-bottom: 0.5rem; }
