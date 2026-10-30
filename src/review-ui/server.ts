@@ -1453,6 +1453,7 @@ async function handleAccountsRequest(
       ...(typeof body["actorId"] === "string" && body["actorId"] ? { actorId: body["actorId"] } : {}),
       ...(typeof body["displayName"] === "string" && body["displayName"] ? { displayName: body["displayName"] } : {}),
       ...(typeof body["email"] === "string" && body["email"] ? { email: body["email"] } : {}),
+      ...(typeof body["phone"] === "string" && body["phone"] ? { phone: body["phone"] } : {}),
     });
     sendJson(res, 200, result);
     onMutated?.();
@@ -1500,6 +1501,9 @@ async function handleAccountsRequest(
         break;
       case "set-email":
         result = accounts.setEmail(actor, id, String(body["email"] ?? ""));
+        break;
+      case "set-phone":
+        result = accounts.setPhone(actor, id, String(body["phone"] ?? ""));
         break;
       default:
         sendJson(res, 404, { error: "not found" });

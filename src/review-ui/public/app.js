@@ -1667,6 +1667,8 @@ async function loadStaff() {
         <span class="badge">${escapeHtml(member.role)}</span>
         ${member.disabled ? `<span class="badge rejected">disabled</span>` : ""}
         ${member.matterAssignment ? `<span class="badge confirmed">matter: ${escapeHtml(member.matterAssignment.matterId)}</span>` : ""}
+        ${member.email ? `<span class="badge muted">${escapeHtml(member.email)}</span>` : ""}
+        ${member.phone ? `<span class="badge muted">${escapeHtml(member.phone)}</span>` : ""}
         <div class="meta-tight">actor id: ${escapeHtml(member.actorId)} (username: ${escapeHtml(member.username)})</div>`;
       list.appendChild(li);
     }
@@ -2022,7 +2024,8 @@ async function loadAccounts() {
         ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${escapeHtml(acct.matterAssignment.matterId)}</span>` : ""}
         ${acct.mustChangePassword ? `<span class="badge pending_review">password reset pending</span>` : ""}
         ${acct.mfaEnabled ? `<span class="badge approved">2FA · ${acct.recoveryCodesRemaining} codes left</span>` : ""}
-        ${acct.email ? `<span class="badge muted">${escapeHtml(acct.email)}</span>` : `<span class="badge muted">no email on file</span>`}`;
+        ${acct.email ? `<span class="badge muted">${escapeHtml(acct.email)}</span>` : `<span class="badge muted">no email on file</span>`}
+        ${acct.phone ? `<span class="badge muted">${escapeHtml(acct.phone)}</span>` : ""}`;
       const toggleBtn = mkButton(acct.disabled ? "Enable" : "Disable", async () => {
         showError("");
         try {
@@ -2062,8 +2065,21 @@ async function loadAccounts() {
           showError(err.message);
         }
       });
+      const phoneBtn = mkButton(acct.phone ? "Change phone" : "Set phone", async () => {
+        showError("");
+        // Surfaced as contact info in the Staff directory — leave blank to clear.
+        const newPhone = prompt(`Phone for ${acct.username}? (shown in the Staff directory; leave blank to clear)`, acct.phone || "");
+        if (newPhone === null) return;
+        try {
+          await api(`/api/accounts/${acct.id}/set-phone`, { method: "POST", body: JSON.stringify({ phone: newPhone }) });
+          await loadAccounts();
+          showToast(newPhone ? `Phone set for ${acct.username}.` : `Phone cleared for ${acct.username}.`, "success");
+        } catch (err) {
+          showError(err.message);
+        }
+      });
       li.appendChild(document.createElement("br"));
-      li.append(toggleBtn, resetBtn, emailBtn);
+      li.append(toggleBtn, resetBtn, emailBtn, phoneBtn);
 
       // Only offered where there's something to clear. This is a real
       // bypass of someone else's second factor — the confirm spells that

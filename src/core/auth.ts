@@ -38,6 +38,13 @@ export interface User {
    * rather than inventing an address.
    */
   readonly email?: string;
+  /**
+   * A staff phone number, for the Staff directory's contact info and
+   * (eventually) any staff-facing SMS the way `MatterParty.phone`
+   * already backs client-facing SMS. Optional, no fallback, same
+   * set-or-clear convention as `email` — see `setPhone`.
+   */
+  readonly phone?: string;
   /** Disabled accounts can never log in again and have every live session revoked immediately — see `setDisabled`. */
   readonly disabled: boolean;
   /** Set by `resetPassword()` (an attorney set a temporary password on this user's behalf); cleared by `changePassword()`. Surfaced via `/api/me` and the Accounts panel — there's no forced-change flow yet, just a flag the UI can nudge on. */
@@ -207,6 +214,7 @@ export class AuthService {
     actorId?: string;
     displayName?: string;
     email?: string;
+    phone?: string;
   }): User {
     const key = params.username.trim().toLowerCase();
     if (!key) throw new AuthError("username must not be empty");
@@ -216,6 +224,7 @@ export class AuthService {
     }
     const salt = randomBytes(16).toString("hex");
     const email = params.email?.trim();
+    const phone = params.phone?.trim();
     const user: User = {
       id: nextUserId(),
       username: params.username,
@@ -227,6 +236,7 @@ export class AuthService {
       disabled: false,
       mustChangePassword: false,
       ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
     };
     this.#usersById.set(user.id, user);
     this.#usersByUsername.set(key, user);
@@ -246,6 +256,17 @@ export class AuthService {
     const trimmed = email.trim();
     const { email: _discard, ...rest } = user;
     const updated: User = trimmed ? { ...rest, email: trimmed } : { ...rest };
+    this.#usersById.set(updated.id, updated);
+    this.#usersByUsername.set(updated.username.trim().toLowerCase(), updated);
+    return updated;
+  }
+
+  /** Sets or clears a user's phone number, same set-or-clear convention as `setEmail`. */
+  setPhone(userId: string, phone: string): User {
+    const user = this.#requireUser(userId);
+    const trimmed = phone.trim();
+    const { phone: _discard, ...rest } = user;
+    const updated: User = trimmed ? { ...rest, phone: trimmed } : { ...rest };
     this.#usersById.set(updated.id, updated);
     this.#usersByUsername.set(updated.username.trim().toLowerCase(), updated);
     return updated;

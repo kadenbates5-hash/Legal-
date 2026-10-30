@@ -79,6 +79,21 @@ describe("StaffService", () => {
     const paralegalEntry = list.find((m) => m.username === "paralegal1")!;
     expect(paralegalEntry.matterAssignment).toBeUndefined();
   });
+
+  it("surfaces email/phone once set, and omits them until then", () => {
+    const { auth, staff } = makeStaff();
+    const before = staff.list(attorney).find((m) => m.username === "attorney1")!;
+    expect(before.email).toBeUndefined();
+    expect(before.phone).toBeUndefined();
+
+    const ada = auth.listUsers().find((u) => u.actorId === "a1")!;
+    auth.setEmail(ada.id, "ada@example.com");
+    auth.setPhone(ada.id, "+15551234567");
+
+    const after = staff.list(attorney).find((m) => m.username === "attorney1")!;
+    expect(after.email).toBe("ada@example.com");
+    expect(after.phone).toBe("+15551234567");
+  });
 });
 
 describe("StaffService.emailForActorId", () => {

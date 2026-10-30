@@ -316,6 +316,39 @@ describe("AuthService", () => {
       const auth = new AuthService();
       expect(() => auth.setEmail("nope", "alice@example.com")).toThrow(/no user/);
     });
+  });
+
+  describe("User.phone", () => {
+    it("is absent by default", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      expect(alice.phone).toBeUndefined();
+    });
+
+    it("can be set at creation", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney", phone: "+15551234567" });
+      expect(alice.phone).toBe("+15551234567");
+    });
+
+    it("setPhone sets it after the fact, and trims whitespace", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      const updated = auth.setPhone(alice.id, "  +15551234567  ");
+      expect(updated.phone).toBe("+15551234567");
+    });
+
+    it("setPhone with an empty string clears it", () => {
+      const auth = new AuthService();
+      const alice = auth.createUser({ username: "alice", password: "correct-horse", role: "attorney", phone: "+15551234567" });
+      const updated = auth.setPhone(alice.id, "   ");
+      expect(updated.phone).toBeUndefined();
+    });
+
+    it("setPhone throws for an unknown user id", () => {
+      const auth = new AuthService();
+      expect(() => auth.setPhone("nope", "+15551234567")).toThrow(/no user/);
+    });
 
     it("round-trips through a snapshot", () => {
       const auth = new AuthService();

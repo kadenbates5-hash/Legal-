@@ -273,4 +273,27 @@ describe("accounts HTTP API", () => {
     );
     expect(res.status).toBe(403);
   });
+
+  it("sets an existing account's phone via the set-phone action", async () => {
+    const cookie = await loginCookie("attorney1", "correct-horse");
+    const created = await (
+      await fetch(`${baseUrl}/api/accounts`, withCookie(cookie, { method: "POST", body: JSON.stringify({ username: "reception4", password: "correct-horse", role: "receptionist" }) }))
+    ).json();
+
+    const res = await fetch(
+      `${baseUrl}/api/accounts/${created.id}/set-phone`,
+      withCookie(cookie, { method: "POST", body: JSON.stringify({ phone: "+15551234567" }) }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).phone).toBe("+15551234567");
+  });
+
+  it("denies set-phone to a non-attorney actor", async () => {
+    const paralegalCookie = await loginCookie("paralegal1", "correct-horse");
+    const res = await fetch(
+      `${baseUrl}/api/accounts/whatever/set-phone`,
+      withCookie(paralegalCookie, { method: "POST", body: JSON.stringify({ phone: "+15551234567" }) }),
+    );
+    expect(res.status).toBe(403);
+  });
 });

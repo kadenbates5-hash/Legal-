@@ -946,21 +946,33 @@ each other, when they're in the office, and how they log billable time.
   `User` later also gained an optional `email` (`setEmail`/
   `createUser({.., email})`) — unlike `displayName` there's no sane
   fallback, so it's simply absent until an attorney sets one via the
-  Accounts panel. Added solely to route the deadline-alert digest to a
-  matter's actual responsible attorney — see "Proactive deadline-risk
-  alerts" above — not a general contact-info field.
+  Accounts panel. Originally added solely to route the deadline-alert
+  digest to a matter's actual responsible attorney — see "Proactive
+  deadline-risk alerts" above — `email`, and the later-added `phone`
+  (same set-or-clear shape via `setPhone`/`createUser({.., phone})`),
+  are now also surfaced as contact info in the Staff directory (see
+  below).
 - `review-ui/staff-service.ts` — `StaffService`, backing the "Staff"
   panel: a read-only directory of every account (username, display name,
-  initials, role, disabled status, and a paralegal's current matter
-  assignment) via `AuthService.listUsers()`/`AccessControl
-  .getParalegalAssignment()`. Open to every logged-in human (messaging
-  and scheduling both need "who else exists in the system" to address);
-  denies only the `"system"` machine credential, which is never created
-  via `createUser` and so can never appear here anyway.
+  initials, role, disabled status, contact email/phone when on file, and
+  a paralegal's current matter assignment) via `AuthService.listUsers()`/
+  `AccessControl.getParalegalAssignment()`. Open to every logged-in human
+  (messaging and scheduling both need "who else exists in the system" to
+  address); denies only the `"system"` machine credential, which is never
+  created via `createUser` and so can never appear here anyway.
   `initialsFor(displayName)` is exported standalone since it's a pure
   presentation-layer function: a single-word name takes its first two
   characters, a multi-word name takes the first letter of the first and
-  last words, both uppercased.
+  last words, both uppercased. **Still read-only** — editing a colleague's
+  contact info happens through the Accounts panel's existing "Set email"/
+  "Set phone" actions (attorney-only, audited `account_email_set`/
+  `account_phone_set`), the same gate `AccountsService` already enforces
+  for every other account field; the Staff panel deliberately doesn't
+  grow a second, parallel edit surface. Role is not editable anywhere,
+  by design — see `AccountsService.create()`'s doc comment — changing it
+  after creation would mean rewriting the access-control/paralegal-
+  assignment/audit history that already keys on it, a materially bigger
+  change than this directory was asked to make.
 - `core/messaging.ts` / `review-ui/messaging-service.ts` — internal
   staff chat, backing the "Messages" panel. `MessagingStore` (core) knows
   three `Conversation` kinds: `"direct"` (exactly two participants,

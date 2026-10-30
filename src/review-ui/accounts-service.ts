@@ -38,6 +38,8 @@ export interface AccountSummary {
   displayName: string;
   /** For routing the deadline-risk digest to this account's responsible matters (see `core/auth.ts`'s `User.email`). Absent until an attorney sets one. */
   email?: string;
+  /** Contact phone number, surfaced in the Staff directory. Absent until an attorney sets one. */
+  phone?: string;
   disabled: boolean;
   /** Set after an attorney resets this account's password; cleared once the holder changes it themselves. */
   mustChangePassword: boolean;
@@ -114,6 +116,7 @@ export class AccountsService {
       actorId: user.actorId,
       displayName: user.displayName,
       ...(user.email ? { email: user.email } : {}),
+      ...(user.phone ? { phone: user.phone } : {}),
       disabled: user.disabled,
       mustChangePassword: user.mustChangePassword,
       mfaEnabled: user.mfa !== undefined,
@@ -130,7 +133,7 @@ export class AccountsService {
 
   create(
     actor: Actor,
-    params: { username: string; password: string; role: UserRole; actorId?: string; displayName?: string; email?: string },
+    params: { username: string; password: string; role: UserRole; actorId?: string; displayName?: string; email?: string; phone?: string },
   ): AccountSummary {
     requireAttorney(actor);
     const user = this.#auth.createUser(params);
@@ -141,18 +144,26 @@ export class AccountsService {
   }
 
   /**
-   * Sets or clears a staff account's email — the one piece of contact
-   * info this project stores for a colleague, and solely so the
-   * deadline-risk digest can route to the actual responsible attorney
-   * instead of one firm-wide recipient (see `integrations/
-   * deadline-alerts.ts`). Not a general profile-editing surface: there
-   * is deliberately no username/role change here, same scope line the
+   * Sets or clears a staff account's email — originally added solely so
+   * the deadline-risk digest can route to the actual responsible
+   * attorney instead of one firm-wide recipient (see `integrations/
+   * deadline-alerts.ts`), now also surfaced as contact info in the
+   * Staff directory. Not a general profile-editing surface: there is
+   * deliberately no username/role change here, same scope line the
    * rest of this service already draws.
    */
   setEmail(actor: Actor, userId: string, email: string): AccountSummary {
     requireAttorney(actor);
     const user = this.#auth.setEmail(userId, email);
     this.#audit(actor, "account_email_set", `user=${user.id} username=${user.username} email=${user.email ?? "(cleared)"}`);
+    return this.#summarize(user);
+  }
+
+  /** Same shape as `setEmail` — surfaced in the Staff directory's contact info once set. */
+  setPhone(actor: Actor, userId: string, phone: string): AccountSummary {
+    requireAttorney(actor);
+    const user = this.#auth.setPhone(userId, phone);
+    this.#audit(actor, "account_phone_set", `user=${user.id} username=${user.username} phone=${user.phone ?? "(cleared)"}`);
     return this.#summarize(user);
   }
 

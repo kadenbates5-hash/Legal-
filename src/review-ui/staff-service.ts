@@ -21,6 +21,9 @@ export interface StaffMember {
   role: UserRole;
   disabled: boolean;
   matterAssignment?: ParalegalAssignment;
+  /** Contact info, same "absent until set" convention as `AccountSummary` — set by an attorney via the Accounts panel. */
+  email?: string;
+  phone?: string;
 }
 
 /**
@@ -67,6 +70,8 @@ export class StaffService {
           role: u.role,
           disabled: u.disabled,
           ...(matterAssignment ? { matterAssignment } : {}),
+          ...(u.email ? { email: u.email } : {}),
+          ...(u.phone ? { phone: u.phone } : {}),
         };
       });
   }

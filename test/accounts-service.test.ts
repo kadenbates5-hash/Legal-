@@ -163,4 +163,37 @@ describe("AccountsService (attorney-only surface)", () => {
       expect(() => accounts.setEmail(paralegal, created.id, "x@example.com")).toThrow(AccessDeniedError);
     });
   });
+
+  describe("phone", () => {
+    it("sets a staff account's phone", () => {
+      const { accounts } = makeAccounts();
+      const created = accounts.create(attorney, { username: "paralegal1", password: "correct-horse", role: "paralegal" });
+      const updated = accounts.setPhone(attorney, created.id, "+15551234567");
+      expect(updated.phone).toBe("+15551234567");
+    });
+
+    it("can be set at creation time too", () => {
+      const { accounts } = makeAccounts();
+      const created = accounts.create(attorney, {
+        username: "paralegal1",
+        password: "correct-horse",
+        role: "paralegal",
+        phone: "+15551234567",
+      });
+      expect(created.phone).toBe("+15551234567");
+    });
+
+    it("clears it with an empty string", () => {
+      const { accounts } = makeAccounts();
+      const created = accounts.create(attorney, { username: "paralegal1", password: "correct-horse", role: "paralegal", phone: "+15551234567" });
+      const cleared = accounts.setPhone(attorney, created.id, "");
+      expect(cleared.phone).toBeUndefined();
+    });
+
+    it("denies a non-attorney actor", () => {
+      const { accounts } = makeAccounts();
+      const created = accounts.create(attorney, { username: "paralegal1", password: "correct-horse", role: "paralegal" });
+      expect(() => accounts.setPhone(paralegal, created.id, "+15551234567")).toThrow(AccessDeniedError);
+    });
+  });
 });
