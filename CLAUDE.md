@@ -995,6 +995,15 @@ each other, when they're in the office, and how they log billable time.
   Service` is the actual access gate (direct/group conversations require
   participancy; announcements don't) plus display-name enrichment via
   `AuthService`, since a raw `actorId` means nothing in the UI.
+  `ConversationView` carries `lastMessageAt` (undefined until the first
+  message, then whatever the newest one's `sentAt` is), which the
+  Messages panel compares against a per-conversation "last opened"
+  timestamp kept in `localStorage` to show a small "new" badge on a
+  conversation with messages this browser hasn't seen yet. Deliberately
+  client-side and per-viewer only — same convenience-storage pattern as
+  the theme preference — never sent to the server, so it's not a
+  cross-user read receipt the way client-firm messaging explicitly
+  doesn't have (see "Client-firm messaging" below).
 - `core/staff-schedule.ts` / `review-ui/staff-schedule-service.ts` —
   who's in the office/remote/out, one entry per (actor, date), backing
   the "Schedule" panel. Deliberately separate from `core/scheduling.ts`'s
