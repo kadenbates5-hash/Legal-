@@ -1,3 +1,45 @@
+/* ===== Theme (light/dark) =====
+   Runs first, before anything else in this file, to apply a stored
+   preference as early as this external script can (the CSP's
+   script-src 'self' rules out an inline anti-flash snippet in <head> —
+   see "Security headers" in CLAUDE.md for why this project keeps that
+   policy strict rather than carving out an exception for one script).
+   Per-viewer only: stored in localStorage, never sent to the server —
+   same reasoning as the Home panel's "Dismiss"-the-checklist flag. */
+function effectiveTheme() {
+  const stored = (() => {
+    try {
+      return localStorage.getItem("theme");
+    } catch {
+      return null;
+    }
+  })();
+  if (stored === "light" || stored === "dark") return stored;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+  if (theme) document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  const icon = document.getElementById("themeIcon");
+  if (icon) {
+    // Shows the icon for what clicking it switches *to* — a moon while
+    // in light mode, a sun while in dark mode.
+    icon.setAttribute("href", effectiveTheme() === "dark" ? "#i-sun" : "#i-moon");
+  }
+}
+
+(function initTheme() {
+  const stored = (() => {
+    try {
+      return localStorage.getItem("theme");
+    } catch {
+      return null;
+    }
+  })();
+  applyTheme(stored);
+})();
+
 const PANEL_TITLES = {
   home: "Home",
   search: "Search",
@@ -67,6 +109,7 @@ function buildPaletteItems() {
       items.push({ label: el.textContent.trim(), group: currentGroup, action: () => el.click() });
     }
   }
+  items.push({ label: "Toggle light/dark theme", group: "Account", action: () => document.getElementById("themeToggle").click() });
   items.push({ label: "Change password", group: "Account", action: () => document.getElementById("changePasswordBtn").click() });
   items.push({ label: "Log out", group: "Account", action: () => document.getElementById("logout").click() });
   return items;
@@ -352,6 +395,17 @@ async function loadUpcomingDeadlines() {
 function renderAttorneyOnly(listId, message) {
   document.getElementById(listId).innerHTML = `<li class="static empty">${message}</li>`;
 }
+
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const next = effectiveTheme() === "dark" ? "light" : "dark";
+  try {
+    localStorage.setItem("theme", next);
+  } catch {
+    // Private browsing / blocked storage — the toggle still works for
+    // this page view, it just won't be remembered next time.
+  }
+  applyTheme(next);
+});
 
 document.getElementById("logout").addEventListener("click", async () => {
   await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
