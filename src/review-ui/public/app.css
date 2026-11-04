@@ -68,6 +68,14 @@
 
   html { color-scheme: light dark; }
 
+  /* Otherwise every checkbox/radio renders in the platform's own default
+     blue, clashing with the accent chosen above — a small thing, but
+     exactly the kind of inconsistency that makes an app feel assembled
+     rather than designed. */
+  input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+
+  ::selection { background: var(--accent-soft); color: var(--accent-hover); }
+
   body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
