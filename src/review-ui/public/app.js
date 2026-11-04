@@ -3676,11 +3676,16 @@ async function sendReminder(row) {
 }
 
 /** The accounts-receivable view: unpaid issued invoices, most overdue first. */
+// Kept around so "Download CSV" exports the same receivables list
+// currently on screen without a second fetch.
+let lastOutstandingRows = [];
+
 async function loadOutstanding() {
   const list = document.getElementById("outstandingList");
   const summary = document.getElementById("outstandingSummary");
   try {
     const [rows, canRemind] = await Promise.all([api("/api/invoices/outstanding"), emailTransportReady()]);
+    lastOutstandingRows = rows;
     list.innerHTML = "";
     const totalCents = rows.reduce((sum, r) => sum + r.totals.balanceCents, 0);
     const overdue = rows.filter((r) => r.daysOverdue > 0);
@@ -4016,7 +4021,29 @@ async function showInvoice(matterId, invoiceId) {
 }
 
 document.getElementById("loadInvoices").addEventListener("click", loadInvoices);
+function downloadOutstandingCsv() {
+  showError("");
+  if (lastOutstandingRows.length === 0) {
+    showError("Nothing to export — nothing is currently outstanding, or the list hasn't loaded yet.");
+    return;
+  }
+  const header = ["Invoice", "Matter ID", "Matter title", "Client", "Balance due", "Due date", "Days overdue", "Times reminded", "Last reminded"];
+  const rows = lastOutstandingRows.map((r) => [
+    r.number,
+    r.matterId,
+    r.matterTitle || "",
+    r.clientName || "",
+    centsToDollars(r.totals.balanceCents),
+    r.dueDate || "",
+    r.daysOverdue > 0 ? r.daysOverdue : 0,
+    r.reminderCount || 0,
+    r.lastRemindedAt ? new Date(r.lastRemindedAt).toISOString().slice(0, 10) : "",
+  ]);
+  downloadCsv(`outstanding-invoices-${new Date().toISOString().slice(0, 10)}.csv`, header, rows);
+}
+
 document.getElementById("refreshOutstanding").addEventListener("click", loadOutstanding);
+document.getElementById("downloadOutstandingCsv").addEventListener("click", downloadOutstandingCsv);
 document.getElementById("navInvoices").addEventListener("click", () => {
   loadOutstanding();
   loadInvoices();
