@@ -471,6 +471,13 @@ Three further behaviours worth naming:
 - **Reading the list writes nothing to the audit log**, so a dashboard
   polling it doesn't grow the log it might later be used to review.
 
+The panel's **"Download CSV"** button exports the same risk-ordered list
+currently loaded (matter, type, date, days away, overdue, verification
+state) — a weekly-meeting handout, a note for the attorney covering
+while someone's out, or a record for an insurer, none of which the
+on-screen view alone served. Same client-side, shared-`downloadCsv()`
+shape as the Audit Log and Billing panels' exports.
+
 Deadlines only appear once someone records one. The only write path is
 `POST /api/deadlines/confirm` (attorney for `human`, the system
 credential for `calendar_system`) plus agent calculations that
@@ -2641,7 +2648,8 @@ nav item is hidden except **My Matters** and **Security** — see below.
   rest of this project's few client-side-only preferences), the
   Review Queue (list/detail/approve/reject/request-revision/
   clear-flag/release), Deadlines (status check/independent confirmation/
-  conflict list), Scheduling (book/list/reschedule/cancel/complete/
+  conflict list/a "Download CSV" on the Coming due list), Scheduling
+  (book/list/reschedule/cancel/complete/
   reminders), Live Intake Demo (a chat window driving `intake-demo.ts` —
   "Start new demo conversation" then type caller turns), Drafting (pick a
   matter, draft from a template/research summary/billing narrative, then
