@@ -1010,7 +1010,12 @@ each other, when they're in the office, and how they log billable time.
   method authorizes the matter via `AccessControl`'s existing
   `"billing_internal"` category before touching the store, since an
   entry is exposed over HTTP by matter id/entry id that any
-  authenticated caller could otherwise name arbitrarily.
+  authenticated caller could otherwise name arbitrarily. Both the
+  matter view and "My hours" have a **"Download CSV"** button —
+  bookkeeping and payroll both eventually need this data outside the
+  browser, and re-typing it from the on-screen list isn't a reasonable
+  ask. Same client-side, no-new-route shape as the Audit Log panel's
+  export, sharing its `downloadCsv()` helper.
 - `server.ts` wires these as `GET /api/staff`; `GET|POST /api/messages/
   conversations`, `POST /api/messages/conversations/direct`,
   `POST /api/messages/conversations/group`, `GET|POST /api/messages/
@@ -1698,6 +1703,15 @@ five, since a log you can only read start-to-finish isn't one anyone
 uses. Redaction for `system_admin_no_content` drops `changes` too:
 before/after values are exactly the privileged content that role is
 walled off from.
+
+**"Download CSV"** exports exactly what's currently on screen — the
+same filtered set `AuditService.list()` just returned, client-side,
+with no new server route — for a bar complaint, litigation hold, or
+internal review where the entries need to leave the browser. RFC
+4180-quoted with a UTF-8 BOM so it opens correctly in Excel rather than
+being guessed into a legacy codepage. The same `downloadCsv()` helper
+(`app.js`) backs the Billing panel's two CSV exports below — one place
+that does the quoting/BOM/blob-download mechanics, not three.
 
 ## Search
 
@@ -2654,8 +2668,9 @@ nav item is hidden except **My Matters** and **Security** — see below.
   in-office/remote/out entry for a date; view everyone's status for a
   date or one actor's upcoming entries — also never hidden), Billing (log
   hours against a matter with a date/hours/description, view a matter's
-  logged hours with a running total, and view your own hours across every
-  matter — same role gate as Drafting), Analytics (matters-by-status
+  logged hours with a running total and a "Download CSV" button, and view
+  your own hours across every matter with the same export — same role
+  gate as Drafting), Analytics (matters-by-status
   tiles, caseload by attorney, invoice aging, and billable-hours/
   AI-utilization trends over a selectable window — all read-only, see
   "Analytics" above; nav item hidden unless role is `attorney`),
@@ -2665,7 +2680,8 @@ nav item is hidden except **My Matters** and **Security** — see below.
   for paralegal accounts specifically, assign/unassign a matter — nav
   item hidden unless role is `attorney`), and Audit Log (every access
   grant/denial and work-product transition, append-only, optionally
-  filtered by matter id — nav item hidden unless role is `attorney`). The
+  filtered by matter id, with a "Download CSV" button for the currently
+  filtered entries — nav item hidden unless role is `attorney`). The
   Drafting/Cases/Research/Assistant/Billing and Analytics/Accounts/Audit Log hides
   are client-side convenience only; the real gate is server-side in
   `AccountsService`/`DraftingService`/`DocumentsService`/`CasesService`/
