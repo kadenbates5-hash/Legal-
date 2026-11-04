@@ -86,4 +86,18 @@ describe("MessagingService", () => {
     const conversations = messaging.listConversations(receptionist);
     expect(conversations.some((c) => c.kind === "announcement")).toBe(true);
   });
+
+  // lastMessageAt is what the dashboard's unread marker compares against —
+  // undefined until the first message, then always the most recent one.
+  it("reports lastMessageAt as undefined for an empty conversation, then the latest message's time", () => {
+    const { messaging } = makeService();
+    const conversation = messaging.startDirectConversation(attorney, "p1");
+    expect(conversation.lastMessageAt).toBeUndefined();
+    messaging.postMessage(attorney, conversation.id, "first");
+    const afterFirst = messaging.listConversations(attorney).find((c) => c.id === conversation.id)!;
+    expect(afterFirst.lastMessageAt).toBeDefined();
+    messaging.postMessage(paralegal, conversation.id, "second");
+    const afterSecond = messaging.listConversations(attorney).find((c) => c.id === conversation.id)!;
+    expect(afterSecond.lastMessageAt! >= afterFirst.lastMessageAt!).toBe(true);
+  });
 });

@@ -19,6 +19,8 @@ export interface ConversationView {
   participants: { actorId: string; displayName: string }[];
   createdBy: string | undefined;
   createdAt: string;
+  /** When the most recent message landed, or undefined for an empty conversation — what an unread-indicator compares against. */
+  lastMessageAt: string | undefined;
 }
 
 /**
@@ -62,6 +64,7 @@ export class MessagingService {
   }
 
   #toConversationView(conversation: Conversation, names: Map<string, string>): ConversationView {
+    const messages = this.#store.listMessages(conversation.id);
     return {
       id: conversation.id,
       kind: conversation.kind,
@@ -72,6 +75,7 @@ export class MessagingService {
       })),
       createdBy: conversation.createdBy,
       createdAt: conversation.createdAt,
+      lastMessageAt: messages.length > 0 ? messages[messages.length - 1]!.sentAt : undefined,
     };
   }
 

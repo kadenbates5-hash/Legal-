@@ -80,6 +80,10 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
       loadPasskeys();
       loadCalendarConnectionStatus();
     }
+    if (panel === "scheduling") {
+      loadAppointments();
+      loadDueReminders();
+    }
   });
 }
 
@@ -1387,8 +1391,6 @@ async function loadDueReminders() {
 
 document.getElementById("bookAppt").addEventListener("click", bookAppointment);
 document.getElementById("refreshAppointments").addEventListener("click", loadAppointments);
-loadAppointments();
-loadDueReminders();
 
 /* ===== Live Intake Demo ===== */
 let intakeSessionId = null;
@@ -1954,6 +1956,26 @@ document.getElementById("navStaff").addEventListener("click", loadStaff);
 /* ===== Messages ===== */
 let currentConversationId = null;
 
+// Per-viewer "have I opened this conversation since its last message"
+// state — same localStorage-convenience pattern as the theme preference.
+// Never sent to the server: this is purely about what *this browser*
+// has scrolled to, not a cross-user read receipt.
+function lastSeenAt(conversationId) {
+  try {
+    return localStorage.getItem(`messagesLastSeen:${conversationId}`) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+function markConversationSeen(conversationId, at) {
+  try {
+    localStorage.setItem(`messagesLastSeen:${conversationId}`, at);
+  } catch {
+    // Private browsing / blocked storage — the unread marker just won't
+    // clear for this viewer; nothing else depends on it.
+  }
+}
+
 function appendMessageBubble(logId, message) {
   const log = document.getElementById(logId);
   const bubble = document.createElement("div");
@@ -2005,7 +2027,8 @@ async function loadConversations() {
         conversation.kind === "group"
           ? conversation.name
           : conversation.participants.map((p) => p.displayName).join(", ");
-      li.innerHTML = `<strong>${escapeHtml(label || "(conversation)")}</strong> <span class="badge">${escapeHtml(conversation.kind)}</span>`;
+      const unread = conversation.lastMessageAt && conversation.lastMessageAt > (lastSeenAt(conversation.id) || "");
+      li.innerHTML = `<strong>${escapeHtml(label || "(conversation)")}</strong> <span class="badge">${escapeHtml(conversation.kind)}</span>${unread ? ' <span class="badge pending_review">new</span>' : ""}`;
       const openBtn = mkButton("Open", () => openConversation(conversation.id));
       li.appendChild(document.createElement("br"));
       li.appendChild(openBtn);
@@ -2026,6 +2049,8 @@ async function openConversation(conversationId) {
     const log = document.getElementById("conversationLog");
     log.innerHTML = "";
     for (const message of messages) appendMessageBubble("conversationLog", message);
+    markConversationSeen(conversationId, messages.length > 0 ? messages[messages.length - 1].sentAt : new Date().toISOString());
+    await loadConversations();
   } catch (err) {
     showError(err.message);
   }
@@ -2061,7 +2086,6 @@ document.getElementById("startDm").addEventListener("click", async () => {
     if (!otherActorId) return;
     const conversation = await api("/api/messages/conversations/direct", { method: "POST", body: JSON.stringify({ otherActorId }) });
     document.getElementById("dmActorId").value = "";
-    await loadConversations();
     await openConversation(conversation.id);
   } catch (err) {
     showError(err.message);
@@ -2076,7 +2100,6 @@ document.getElementById("startGroup").addEventListener("click", async () => {
     const conversation = await api("/api/messages/conversations/group", { method: "POST", body: JSON.stringify({ name, memberActorIds }) });
     document.getElementById("groupName").value = "";
     for (const o of document.getElementById("groupMembers").options) o.selected = false;
-    await loadConversations();
     await openConversation(conversation.id);
   } catch (err) {
     showError(err.message);
