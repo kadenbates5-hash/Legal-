@@ -43,10 +43,12 @@ export interface AccountSummary {
   disabled: boolean;
   /** Set after an attorney resets this account's password; cleared once the holder changes it themselves. */
   mustChangePassword: boolean;
-  /** Whether this account requires a second factor at login. The secret itself never leaves `AuthService`. */
+  /** Whether TOTP is enabled for this account. The secret itself never leaves `AuthService`. A passkey-only account (see `passkeyCount`) reports `false` here, even though it also requires a second factor at login. */
   mfaEnabled: boolean;
   /** Counted so an attorney can see who is one lost phone away from needing a reset. */
   recoveryCodesRemaining: number;
+  /** How many passkeys this account has registered — see `core/auth.ts`'s "Passkeys (WebAuthn)". `mfaEnabled || passkeyCount > 0` is "requires a second factor at login," the same condition `needsMfaSetup()` checks. */
+  passkeyCount: number;
   /** Only ever set for role "paralegal" — the matter (if any) this account is currently scoped to. */
   matterAssignment?: ParalegalAssignment;
   /** Only ever set for role "client" — every matter this account has been granted through the client portal. Unlike a paralegal, additive: more than one is normal. */
@@ -121,6 +123,7 @@ export class AccountsService {
       mustChangePassword: user.mustChangePassword,
       mfaEnabled: user.mfa !== undefined,
       recoveryCodesRemaining: (user.mfa?.recoveryCodes ?? []).filter((c) => !c.usedAt).length,
+      passkeyCount: user.passkeys.length,
       ...(matterAssignment ? { matterAssignment } : {}),
       ...(clientMatterAccess ? { clientMatterAccess } : {}),
     };
@@ -190,16 +193,21 @@ export class AccountsService {
   }
 
   /**
-   * Turns off someone else's second factor — the last resort for a lost
-   * phone and lost recovery codes both.
+   * Turns off someone else's second factor entirely — TOTP *and* every
+   * passkey — the last resort for a lost phone, lost recovery codes, a
+   * lost passkey-holding device, or any combination of those.
    *
    * This is a **real bypass of another person's authentication**, and it
    * is the single most attractive action in this panel to an attacker
    * who has already compromised one attorney account: do this, then log
    * in as anyone with just their password. So it is deliberately loud
    * rather than quiet — audited with who did it to whom, and it revokes
-   * every one of that user's live sessions (`AuthService.disableMfa`)
-   * so the change can't be used to ride an existing session.
+   * every one of that user's live sessions
+   * (`AuthService.resetAllSecondFactors`) so the change can't be used to
+   * ride an existing session. Deliberately not the narrower
+   * `disableMfa`/`removePasskey` — this is the "nothing else works"
+   * path, and leaving either factor type behind would mean someone
+   * locked out of both still can't get back in.
    *
    * It cannot be made safer by restricting it further, only less usable:
    * someone has to be able to do this, and in a firm this size that
@@ -209,11 +217,12 @@ export class AccountsService {
   resetMfa(actor: Actor, userId: string): AccountSummary {
     requireAttorney(actor);
     const before = this.#auth.mfaStatus(userId);
-    const user = this.#auth.disableMfa(userId);
+    const hadPasskeys = this.#auth.listPasskeys(userId).length > 0;
+    const user = this.#auth.resetAllSecondFactors(userId);
     this.#audit(
       actor,
       "account_mfa_reset",
-      `user=${user.id} username=${user.username} wasEnabled=${before.enabled}`,
+      `user=${user.id} username=${user.username} wasEnabled=${before.enabled} hadPasskeys=${hadPasskeys}`,
     );
     return this.#summarize(user);
   }

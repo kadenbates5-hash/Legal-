@@ -519,6 +519,22 @@
         </div>
       </div>
 
+      <div class="card" id="passkeysCard" hidden>
+        <div class="field-row">
+          <h3 class="row-title">Passkeys</h3>
+        </div>
+        <p class="subtitle-inline">
+          A passkey lets you sign in with your device's fingerprint, face, or PIN instead of (or
+          alongside) a six-digit code — it counts as a second factor on its own. Your browser or
+          password manager handles it; nothing is stored here except which credential you added.
+        </p>
+        <ul class="list" id="passkeysList"></ul>
+        <div class="field-row mt-sm">
+          <input class="field" id="passkeyNickname" type="text" placeholder="Nickname (e.g. MacBook Touch ID)" />
+          <button class="btn primary" id="passkeyAddBtn">Add a passkey</button>
+        </div>
+      </div>
+
       <div class="card" id="calendarConnectionCard" hidden>
         <div class="field-row">
           <h3 class="row-title">Google Calendar</h3>

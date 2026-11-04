@@ -99,6 +99,13 @@
   }
   button.submit:hover { box-shadow: 0 8px 24px -4px var(--accent-glow); filter: brightness(1.05); }
   button.submit:active { transform: translateY(1px); }
+  .link-btn {
+    all: unset; box-sizing: border-box; display: block; width: 100%;
+    margin-top: 0.75rem; text-align: center; color: var(--accent);
+    font-size: 0.85rem; font-weight: 500; cursor: pointer;
+  }
+  .link-btn:hover { text-decoration: underline; }
+  .link-btn[hidden] { display: none; }
   .error { color: var(--danger); background: var(--danger-soft); border-radius: 9px; padding: 0.55rem 0.75rem; margin-top: 1rem; font-size: 0.85rem; display: none; }
   .error:not(:empty) { display: block; }
   /* "Enter the code from your app" is a step in the flow, not a failure —

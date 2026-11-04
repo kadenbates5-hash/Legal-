@@ -510,10 +510,14 @@ export interface ReviewServerOptions {
  * rather than a generic 403, so the dashboard can say exactly what to
  * do next instead of just failing.
  */
-const MFA_SETUP_ALLOWED_PATHS: readonly string[] = ["/api/me", "/api/mfa", "/api/logout", "/api/change-password"];
+const MFA_SETUP_ALLOWED_PATHS: readonly string[] = ["/api/me", "/api/mfa", "/api/webauthn", "/api/logout", "/api/change-password"];
 
-function needsMfaSetup(user: { mfa?: unknown; role: UserRole } | undefined, mfaRequiredRoles: ReadonlySet<UserRole> | undefined): boolean {
-  return !!user && !!mfaRequiredRoles?.has(user.role) && user.mfa === undefined;
+/** A passkey satisfies the firm-wide policy exactly as TOTP does — both are "a second factor is enrolled," and the policy doesn't care which. */
+function needsMfaSetup(
+  user: { mfa?: unknown; passkeys?: unknown[]; role: UserRole } | undefined,
+  mfaRequiredRoles: ReadonlySet<UserRole> | undefined,
+): boolean {
+  return !!user && !!mfaRequiredRoles?.has(user.role) && user.mfa === undefined && (user.passkeys?.length ?? 0) === 0;
 }
 
 export function createReviewServer(service: ReviewGateService, auth: AuthService, options?: ReviewServerOptions): Server {
@@ -627,6 +631,75 @@ async function handleRequest(
 
   if (url.pathname === "/api/login" && req.method === "POST") {
     await handleLogin(auth, req, res, { throttle: loginThrottle, auditLog }, onMutated, trustProxy);
+    return;
+  }
+
+  /**
+   * The passkey half of login — same unauthenticated bucket as
+   * `/api/login` itself, and the same throttle keys/accounting, since
+   * `beginPasskeyLogin` re-proves the password exactly like `login()`
+   * does and a wrong one here is just as much a guessing attempt. `begin`
+   * returns the WebAuthn challenge for `navigator.credentials.get()`;
+   * `complete` takes the browser's assertion and, on success, issues a
+   * session the same way a successful `/api/login` does.
+   */
+  if (url.pathname === "/api/login/passkey/begin" && req.method === "POST") {
+    const ip = clientIpFor(req, trustProxy);
+    try {
+      const body = await readJsonBody(req);
+      const username = String(body["username"] ?? "");
+      const password = String(body["password"] ?? "");
+      const keys = [LoginThrottle.usernameKey(username), LoginThrottle.ipKey(ip)];
+      const decision = loginThrottle?.check(keys) ?? { allowed: true, retryAfterSeconds: 0 };
+      if (!decision.allowed) {
+        sendJson(res, 429, { error: `too many failed login attempts — try again in ${decision.retryAfterSeconds} seconds` }, { "Retry-After": String(decision.retryAfterSeconds) });
+        return;
+      }
+      try {
+        const options = await auth.beginPasskeyLogin(username, password);
+        sendJson(res, 200, options);
+      } catch (err) {
+        if (err instanceof AuthError) {
+          loginThrottle?.recordFailure(keys);
+          auditLog?.append({ actor: { id: username || "unknown", role: "anonymous" }, matterId: undefined, action: "login_failed", detail: `ip=${ip} passkey-begin` });
+        }
+        throw err;
+      }
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "invalid request" });
+    }
+    return;
+  }
+
+  if (url.pathname === "/api/login/passkey/complete" && req.method === "POST") {
+    const ip = clientIpFor(req, trustProxy);
+    let username = "";
+    try {
+      const body = await readJsonBody(req);
+      username = String(body["username"] ?? "");
+      const remember = body["remember"] === true;
+      const keys = [LoginThrottle.usernameKey(username), LoginThrottle.ipKey(ip)];
+      try {
+        const session = await auth.completePasskeyLogin(username, body["response"], remember);
+        const user = auth.userForToken(session.token);
+        loginThrottle?.recordSuccess(keys);
+        auditLog?.append({ actor: { id: user?.actorId ?? username, role: user?.role ?? "anonymous" }, matterId: undefined, action: "login_succeeded", detail: `ip=${ip} via=passkey` });
+        sendJson(
+          res,
+          200,
+          { id: user?.actorId, role: user?.role, username: user?.username },
+          { "Set-Cookie": sessionCookieHeader(session.token, session.expiresAt, isSecureRequest(req, trustProxy)) },
+        );
+      } catch (err) {
+        if (err instanceof AuthError) {
+          loginThrottle?.recordFailure(keys);
+          auditLog?.append({ actor: { id: username || "unknown", role: "anonymous" }, matterId: undefined, action: "login_failed", detail: `ip=${ip} passkey-complete` });
+        }
+        throw err;
+      }
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "invalid request" });
+    }
     return;
   }
 
@@ -855,6 +928,64 @@ async function handleRequest(
           detail: `user=${user.id}`,
         });
         sendJson(res, 200, { recoveryCodes });
+        onMutated?.();
+        return;
+      }
+      sendJson(res, 404, { error: "not found" });
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+    }
+    return;
+  }
+
+  /**
+   * Self-service passkey management — same shape as `/api/mfa` above:
+   * no attorney gate, acts only on the caller's own account, no user id
+   * in any route. `begin`/`complete` cover registering a new passkey;
+   * `remove` re-proves the password the same way `/api/mfa/disable`
+   * does, since this is weakening a factor.
+   */
+  if (url.pathname.startsWith("/api/webauthn")) {
+    try {
+      const user = auth.userForToken(parseCookies(req)[SESSION_COOKIE_NAME]);
+      if (!user) throw new AuthError("authentication required");
+
+      if (url.pathname === "/api/webauthn" && req.method === "GET") {
+        sendJson(res, 200, auth.listPasskeys(user.id));
+        return;
+      }
+      if (url.pathname === "/api/webauthn/register/begin" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const options = await auth.beginPasskeyRegistration(user.id, String(body["password"] ?? ""));
+        sendJson(res, 200, options);
+        return;
+      }
+      if (url.pathname === "/api/webauthn/register/complete" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const record = await auth.completePasskeyRegistration(user.id, body["response"], String(body["nickname"] ?? ""));
+        auditLog?.append({
+          actor: { id: user.actorId, role: user.role },
+          matterId: undefined,
+          action: "passkey_added",
+          detail: `user=${user.id} passkey=${record.id} nickname=${record.nickname}`,
+        });
+        // Same sanitized shape as listPasskeys() — no public key over the wire.
+        sendJson(res, 200, { id: record.id, nickname: record.nickname, createdAt: record.createdAt });
+        onMutated?.();
+        return;
+      }
+      const segments = url.pathname.replace(/^\/api\/webauthn\/?/, "").split("/").filter(Boolean);
+      if (segments.length === 1 && req.method === "DELETE") {
+        const body = await readJsonBody(req);
+        const passkeyId = segments[0]!;
+        auth.removePasskey(user.id, String(body["password"] ?? ""), passkeyId);
+        auditLog?.append({
+          actor: { id: user.actorId, role: user.role },
+          matterId: undefined,
+          action: "passkey_removed",
+          detail: `user=${user.id} passkey=${passkeyId} self-service`,
+        });
+        sendJson(res, 200, { ok: true });
         onMutated?.();
         return;
       }
@@ -1349,7 +1480,7 @@ async function handleLogin(
           action: "login_mfa_challenged",
           detail: `ip=${ip}`,
         });
-        sendJson(res, 401, { error: loginErr.message, mfaRequired: true });
+        sendJson(res, 401, { error: loginErr.message, mfaRequired: true, hasPasskey: loginErr.hasPasskey });
         onMutated?.();
         return;
       }

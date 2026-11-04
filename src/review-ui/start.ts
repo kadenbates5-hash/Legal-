@@ -45,6 +45,7 @@ import { CalendarConnectionService } from "./calendar-connection-service.js";
 import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
 import { StripeCheckoutProvider } from "../integrations/stripe-checkout.js";
+import { SimpleWebAuthnProvider } from "../integrations/webauthn-provider.js";
 import { UnconfiguredEmailSender, type EmailSender } from "../integrations/email-sender.js";
 import { SmtpEmailSender } from "../integrations/smtp-email.js";
 import { PdfLibInvoicePdfRenderer } from "../integrations/invoice-pdf.js";
@@ -421,6 +422,25 @@ const stripeWebhookOptions: Pick<ReviewServerOptions, "stripeWebhook"> =
   STRIPE_SECRET_KEY && STRIPE_WEBHOOK_SECRET && PUBLIC_BASE_URL
     ? { stripeWebhook: { webhookSecret: STRIPE_WEBHOOK_SECRET } }
     : {};
+
+/**
+ * Passkeys (WebAuthn) — see CLAUDE.md's "Passkeys (WebAuthn)". Unlike
+ * every other optional integration here, this one needs no vendor
+ * secret at all — WebAuthn is a browser platform standard, not a
+ * third-party service — so it's wired up unconditionally rather than
+ * gated on an env var. What it *does* need is the deployment's real
+ * identity (the relying-party ID and origin), since a WebAuthn
+ * credential is cryptographically bound to the exact origin it was
+ * registered against. `PUBLIC_BASE_URL`'s hostname is that identity in
+ * production; absent it, a plain localhost origin lets registration/
+ * login still work for local dev against `npm run start:review-ui`
+ * without any extra configuration.
+ */
+const WEBAUTHN_RP_ID = process.env["WEBAUTHN_RP_ID"] ?? (PUBLIC_BASE_URL ? new URL(PUBLIC_BASE_URL).hostname : "localhost");
+const WEBAUTHN_ORIGIN = process.env["WEBAUTHN_ORIGIN"] ?? PUBLIC_BASE_URL ?? `http://localhost:${process.env["PORT"] ?? 3000}`;
+state.auth.setWebAuthnProvider(
+  new SimpleWebAuthnProvider({ rpName: firmConfig?.firmName ?? "Docket", rpID: WEBAUTHN_RP_ID, origin: WEBAUTHN_ORIGIN }),
+);
 
 const invoicing = new InvoicingService({
   store: state.invoices,

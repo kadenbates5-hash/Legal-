@@ -1956,7 +1956,139 @@ recovery-code count in the Accounts panel.
 What this doesn't do: show a scannable QR image (the `otpauth://` link
 is offered instead — tapping it on the phone works, and so does typing
 the key; rendering a QR would mean hand-rolling an encoder for the same
-information), or support WebAuthn/passkeys.
+information). WebAuthn/passkeys *are* now supported — see "Passkeys
+(WebAuthn)" below.
+
+### Passkeys (WebAuthn)
+
+A second factor alongside (or instead of) TOTP: a device's fingerprint,
+face, or PIN, via the real browser platform standard rather than typing
+a six-digit code. Not yet a passwordless/first-factor replacement — see
+"What this doesn't do" below — closing that gap would mean changing what
+`/api/login` means by "a password," a materially bigger redesign than
+this pass was.
+
+- `integrations/webauthn-provider.ts` — `WebAuthnProvider`, a vendor-
+  agnostic seam over WebAuthn verification, same pattern as
+  `ClaudeClient`/`CaseLawSearchClient`/`SpeechToText` elsewhere in this
+  project: `core/auth.ts` depends on the interface only, never on a
+  concrete library, so tests drive real unit coverage with a fake
+  implementation instead of needing a hardware or software authenticator
+  simulator. `SimpleWebAuthnProvider` is the real implementation, over
+  `@simplewebauthn/server` — a justified dependency exception to this
+  project's dependency-light style, same reasoning as `pdf-parse`/
+  `pdf-lib`/`pg`: correctly verifying a WebAuthn attestation/assertion
+  means parsing CBOR and validating COSE-keyed ES256/RS256/EdDSA
+  signatures against the exact bytes the browser signed, and a subtly
+  wrong hand-rolled verifier there is a security bug, not a style
+  violation. **Its two `verify*` methods never reject, only resolve
+  `{ verified: false }`** — `@simplewebauthn/server` itself *does* throw
+  on malformed input (confirmed live against a garbage response), so
+  `SimpleWebAuthnProvider` catches that and normalizes it, keeping
+  `core/auth.ts` free of a try/catch around every call and ensuring a
+  bad request always surfaces as a clean `AuthError`, never an uncaught
+  exception at the HTTP layer.
+- **`core/auth.ts` only ever imports the interface as a type**, never
+  the concrete provider or `@simplewebauthn/server` itself — keeping
+  core's "no vendor dependencies" property intact (the same reasoning
+  `PaymentProcessor`/`ManualPaymentProcessor` already follow: the
+  default concrete implementation is constructed and injected by
+  `start.ts`, not by core). `AuthService.setWebAuthnProvider()` wires
+  one in post-construction, the same shape as `setSystemApiKey()` — the
+  relying-party identity (`rpID`/`origin`) is a deployment fact
+  `AuthService` itself shouldn't have to know, and every existing
+  `new AuthService()` call site across this codebase's tests keeps
+  working unchanged since the parameter is optional. Absent, every
+  passkey method throws "passkeys are not configured on this server" —
+  same "absent config means the surface doesn't exist" pattern as
+  everywhere else, though in practice `start.ts` always wires a real one
+  (see below — this is the one integration in this project that needs
+  no vendor secret at all).
+- **Registering and removing both re-prove the password**, same
+  reasoning as `beginMfaEnrollment`/`disableMfa` — a session alone must
+  not be enough to plant or strip a factor. Removing a passkey only
+  revokes every live session when that removal turns the account's
+  second-factor requirement off *entirely* (no TOTP, no passkeys left);
+  removing one of several factors doesn't change what `login()` still
+  demands at the next sign-in, so there's nothing a forced re-login
+  everywhere would protect against — a real refinement over blindly
+  copying `disableMfa`'s always-revoke behavior.
+- **A registration/login ceremony's challenge is single-use, short-lived
+  (5 minutes), in-memory only** — the same "throwaway call state"
+  pattern as `CalendarConnectionService`'s pending OAuth state and
+  `AudioClipStore`. Losing it on a restart just means starting the
+  ceremony over.
+- **`login()`'s gate widened carefully, not loosely.** The existing
+  `if (user.mfa)` branch (TOTP) is untouched; a new `else if
+  (user.passkeys.length > 0)` branch throws the same `MfaRequiredError`
+  for a passkey-only account, since a WebAuthn assertion needs an async
+  round trip `login()`'s synchronous signature can't do. `MfaRequiredError`
+  gained a `hasPasskey` flag so the login route — and the login page —
+  know to offer "use a passkey instead" even when there's no TOTP code
+  field to show at all. The actual passkey verification happens through
+  two new, separate methods: `beginPasskeyLogin(username, password)`
+  re-proves the password (the same check `login()` does, since this is
+  an alternative entry into the same two-step flow, not a bypass of it)
+  and returns a challenge scoped to that account's registered
+  credentials; `completePasskeyLogin(username, response, remember)`
+  verifies the assertion and issues a session exactly like `login()`
+  does — deliberately taking **no password**, since the still-valid
+  pending challenge from `begin` already proved it once for this same
+  ceremony, the same non-double-checking the TOTP code step already
+  gets.
+- `server.ts` wires `POST /api/login/passkey/begin`/`complete` in the
+  same public, unauthenticated bucket as `/api/login` itself, under the
+  *same login-throttle keys/accounting* — a wrong password at `begin` is
+  exactly as much a guessing attempt as a wrong password at `/api/login`
+  and has to count the same way, or the throttle would have a bypass
+  route around it. Self-service management is
+  `GET /api/webauthn` (list, no public key exposed — the registration-
+  complete response is sanitized the same way), `POST /api/webauthn/
+  register/begin`/`complete`, and `DELETE /api/webauthn/:id` — same
+  shape as `/api/mfa/*`, no user id anywhere, acts only on the caller's
+  own account. `/api/webauthn` is also in `MFA_SETUP_ALLOWED_PATHS` and
+  `needsMfaSetup()` now treats a passkey as equally satisfying the
+  firm-wide `MFA_REQUIRED_ROLES` policy as TOTP — the policy cares that
+  *a* second factor is enrolled, not which kind.
+- **The client-side JSON↔`ArrayBuffer` translation is hand-rolled**, in
+  both `app.js` (the Security panel's "Add a passkey") and `login.js`
+  (the "Use a passkey instead" button) — no `@simplewebauthn/browser`
+  or any other client library, since neither page has a bundler and the
+  CSP only loads scripts from `'self'`: there's nowhere to load a CDN
+  script from even if one were wanted, and the translation itself is
+  base64url encode/decode, not cryptography, the same class of call
+  this project already makes for the `FileReader`-to-base64 upload flow.
+  The Security panel's passkey card hides itself entirely if
+  `window.PublicKeyCredential` doesn't exist (an old browser) or the
+  server 404s the surface (not configured) — same degrade-not-break
+  pattern as the Google Calendar card.
+- `start.ts` constructs `SimpleWebAuthnProvider` **unconditionally** —
+  the one integration in this project that needs no vendor secret at
+  all, since WebAuthn is a browser platform standard, not a third-party
+  service. What it does need is the deployment's real identity: a
+  WebAuthn credential is cryptographically bound to the exact origin it
+  was registered against, so `WEBAUTHN_RP_ID`/`WEBAUTHN_ORIGIN` default
+  to `PUBLIC_BASE_URL`'s hostname/URL when set, or a plain
+  `http://localhost:<PORT>` otherwise — registration and login both work
+  for local dev against `npm run start:review-ui` with zero extra
+  configuration.
+- Verified live end-to-end against a Chromium CDP virtual authenticator
+  (real WebAuthn ceremonies, real cryptographic signatures verified by
+  `@simplewebauthn/server`, not a mock): registering a passkey from the
+  Security panel, then signing in with it from the login page after a
+  password-only attempt correctly came back `mfaRequired`/`hasPasskey`.
+  A second run against the same persisted account correctly refused a
+  plain password-only login outright once a passkey was on file —
+  exactly the gate this feature exists to add.
+
+What this doesn't do: passwordless/first-factor login (a passkey is
+only ever the *second* factor here — the password step in `login()` is
+unchanged and still required first), resident-key/"sign in as anyone
+this device remembers" discoverable-credential flows, platform vs.
+cross-platform authenticator preference, or automatic migration for an
+account that loses its only device — same recovery story as TOTP: an
+attorney's `resetMfa` clears every second factor (TOTP *and* passkeys)
+for someone locked out.
 
 #### Firm-wide MFA policy
 

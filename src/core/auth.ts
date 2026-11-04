@@ -1,6 +1,7 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { AgentRole } from "./types.js";
 import { generateTotpSecret, totpUri, verifyTotp } from "./totp.js";
+import type { StoredPasskey, WebAuthnProvider } from "../integrations/webauthn-provider.js";
 
 /**
  * Real authentication for the review-gate UI (§5/§6 "not yet built — real
@@ -53,6 +54,26 @@ export interface User {
   readonly mfa?: MfaEnrollment;
   /** A secret generated but not yet proven to work. Never gates a login; replaced freely if enrollment is restarted. */
   readonly pendingMfaSecret?: string;
+  /**
+   * Passkeys registered as a second factor alongside (or instead of) TOTP
+   * — see "Passkeys (WebAuthn)" below. Always present, defaults to `[]`;
+   * unlike `mfa` there's no meaningful "pending" state worth a separate
+   * field, since a registration ceremony either completes in one round
+   * trip or it doesn't happen at all.
+   */
+  readonly passkeys: PasskeyRecord[];
+}
+
+/**
+ * A passkey as this account's record of it — built from the vendor-
+ * agnostic `integrations/webauthn-provider.ts`'s `StoredPasskey` plus
+ * the two fields that belong to the account relationship rather than the
+ * credential itself: a human-chosen label for the Security panel's list,
+ * and when it was added.
+ */
+export interface PasskeyRecord extends StoredPasskey {
+  readonly nickname: string;
+  readonly createdAt: string;
 }
 
 /** A recovery code, stored the same way a password is — the plaintext exists exactly once, at generation. */
@@ -133,11 +154,18 @@ export class AuthError extends Error {
  * in, which is what the second factor is for.
  */
 export class MfaRequiredError extends AuthError {
-  constructor(message = "authentication code required") {
+  /** Lets the login route offer "use a passkey instead" even when there's no TOTP code field to show at all (a passkey-only account). */
+  readonly hasPasskey: boolean;
+
+  constructor(hasPasskey = false, message = "authentication code required") {
     super(message);
     this.name = "MfaRequiredError";
+    this.hasPasskey = hasPasskey;
   }
 }
+
+/** How long a WebAuthn ceremony's challenge stays redeemable — long enough for a fingerprint/PIN prompt, short enough that a leaked challenge is useless soon after. */
+const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 const SCRYPT_KEYLEN = 64;
 /** No "remember me": long enough to not force a re-login mid-workday, short enough to matter if a device is lost. */
@@ -201,6 +229,9 @@ export class AuthService {
   #sessions = new Map<string, Session>();
   #passwordResetRequests: PasswordResetRequest[] = [];
   #systemApiKey: SystemApiKeyRecord | undefined;
+  #webauthn: WebAuthnProvider | undefined;
+  #pendingPasskeyRegistration = new Map<string, { challenge: string; expiresAt: number }>();
+  #pendingPasskeyLogin = new Map<string, { challenge: string; expiresAt: number }>();
 
   hasAnyUsers(): boolean {
     return this.#usersById.size > 0;
@@ -235,6 +266,7 @@ export class AuthService {
       displayName: params.displayName?.trim() || params.username,
       disabled: false,
       mustChangePassword: false,
+      passkeys: [],
       ...(email ? { email } : {}),
       ...(phone ? { phone } : {}),
     };
@@ -285,14 +317,27 @@ export class AuthService {
     }
     if (user.mfa) {
       const supplied = mfaCode?.trim() ?? "";
-      if (!supplied) throw new MfaRequiredError();
+      if (!supplied) throw new MfaRequiredError(user.passkeys.length > 0);
       this.#consumeSecondFactor(user, supplied);
+    } else if (user.passkeys.length > 0) {
+      // No TOTP enrolled, but at least one passkey is — a password alone
+      // must not be enough here either, the same requirement `user.mfa`
+      // enforces above. There's no code to type for a passkey: the
+      // caller completes the WebAuthn ceremony via `beginPasskeyLogin`/
+      // `completePasskeyLogin` instead, which is why this throws rather
+      // than trying to synchronously verify anything itself — a WebAuthn
+      // assertion requires a round trip this synchronous method can't do.
+      throw new MfaRequiredError(true);
     }
+    return this.#issueSession(user.id, remember);
+  }
+
+  #issueSession(userId: string, remember: boolean): Session {
     const now = Date.now();
     const ttl = remember ? REMEMBER_SESSION_TTL_MS : DEFAULT_SESSION_TTL_MS;
     const session: Session = {
       token: randomBytes(32).toString("hex"),
-      userId: user.id,
+      userId,
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + ttl).toISOString(),
       remember,
@@ -566,6 +611,27 @@ export class AuthService {
     return updated;
   }
 
+  /**
+   * The full "nothing else works" reset: clears TOTP *and* every
+   * passkey, then revokes every live session. Deliberately distinct
+   * from `disableMfa()`, which only ever touches TOTP — a user removing
+   * one passkey already has `removePasskey` for that, and self-service
+   * "turn off two-factor authentication" silently wiping someone's
+   * passkeys too would be a surprising, overly broad side effect nobody
+   * asked for. This one exists because an account can be locked out of
+   * *both* kinds of factor at once (a lost phone and a lost laptop), and
+   * neither `disableMfa` nor `removePasskey` alone can recover that —
+   * see `AccountsService.resetMfa`, the attorney-initiated escape hatch
+   * that calls this.
+   */
+  resetAllSecondFactors(userId: string): User {
+    const user = this.#requireUser(userId);
+    const { mfa: _mfa, pendingMfaSecret: _pending, ...rest } = user;
+    const updated = this.#replaceUser({ ...rest, passkeys: [] });
+    this.#revokeAllSessions(userId);
+    return updated;
+  }
+
   /** A fresh set of recovery codes, invalidating the old ones. Plaintext returned once. */
   regenerateRecoveryCodes(userId: string): string[] {
     const user = this.#requireUser(userId);
@@ -617,6 +683,170 @@ export class AuthService {
     }
 
     throw new AuthError("invalid authentication code");
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Passkeys (WebAuthn) — a second factor alongside (or instead of)
+   * TOTP, not yet a passwordless/first-factor replacement (see
+   * CLAUDE.md's "Not yet built"). Same two trust-boundary rules as the
+   * TOTP section above: establishing or removing a passkey re-proves the
+   * password (a session alone isn't enough to plant or strip a factor),
+   * and a ceremony's challenge is single-use, short-lived, in-memory
+   * only — the same "throwaway call state" pattern as
+   * `CalendarConnectionService`'s pending OAuth state.
+   * ------------------------------------------------------------------ */
+
+  #requireWebAuthn(): WebAuthnProvider {
+    if (!this.#webauthn) throw new AuthError("passkeys are not configured on this server");
+    return this.#webauthn;
+  }
+
+  /**
+   * Wires in the real (or, for tests, a fake) `WebAuthnProvider` — the
+   * same post-construction-setter shape as `setSystemApiKey`, since the
+   * relying-party identity (`rpID`/`origin`) is a deployment fact
+   * `start.ts` knows and `AuthService` itself shouldn't have to. Absent,
+   * every passkey method below throws rather than silently no-op'ing —
+   * same "absent config means the surface doesn't exist" pattern as
+   * every other optional integration in this project.
+   */
+  setWebAuthnProvider(provider: WebAuthnProvider): void {
+    this.#webauthn = provider;
+  }
+
+  /**
+   * Starts registering a new passkey. Requires the current password,
+   * same reasoning as `beginMfaEnrollment` — a session alone must not be
+   * enough to plant a new factor, since most accounts start with none at
+   * all. `excludeCredentials` is this account's existing passkeys, so
+   * the browser won't silently let someone re-register the same
+   * authenticator twice.
+   */
+  async beginPasskeyRegistration(userId: string, password: string): Promise<unknown> {
+    const user = this.#requireUser(userId);
+    this.verifyPassword(userId, password);
+    const options = await this.#requireWebAuthn().generateRegistrationOptions({
+      userId: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      excludeCredentials: user.passkeys,
+    });
+    const challenge = (options as { challenge?: string }).challenge;
+    if (!challenge) throw new AuthError("could not start passkey registration");
+    this.#pendingPasskeyRegistration.set(userId, { challenge, expiresAt: Date.now() + PASSKEY_CHALLENGE_TTL_MS });
+    return options;
+  }
+
+  /**
+   * Finishes registering a passkey once the browser has completed the
+   * ceremony. `nickname` is purely for the Security panel's list (e.g.
+   * "MacBook Touch ID") — it never gates anything, so an empty one just
+   * falls back to a generic label rather than failing the whole call.
+   */
+  async completePasskeyRegistration(userId: string, response: unknown, nickname: string): Promise<PasskeyRecord> {
+    const user = this.#requireUser(userId);
+    const pending = this.#pendingPasskeyRegistration.get(userId);
+    this.#pendingPasskeyRegistration.delete(userId);
+    if (!pending || pending.expiresAt < Date.now()) {
+      throw new AuthError("passkey registration has expired — start again");
+    }
+    const result = await this.#requireWebAuthn().verifyRegistration({ response, expectedChallenge: pending.challenge });
+    if (!result.verified) throw new AuthError("could not verify the new passkey");
+    const record: PasskeyRecord = {
+      ...result.credential,
+      nickname: nickname.trim() || "Passkey",
+      createdAt: new Date().toISOString(),
+    };
+    this.#replaceUser({ ...user, passkeys: [...user.passkeys, record] });
+    return record;
+  }
+
+  /** Self-service listing — no public key exposed, same "never hand back raw `User` fields" care as every other account read in this project. */
+  listPasskeys(userId: string): { id: string; nickname: string; createdAt: string }[] {
+    const user = this.#requireUser(userId);
+    return user.passkeys.map((p) => ({ id: p.id, nickname: p.nickname, createdAt: p.createdAt }));
+  }
+
+  /**
+   * Removes a passkey. Requires the current password, same reasoning as
+   * `disableMfa` — this is weakening a factor. Unlike `disableMfa`,
+   * though, it only revokes every live session when this removal
+   * actually turns the account's second-factor requirement off entirely
+   * (no TOTP, no passkeys left): removing one of several factors doesn't
+   * change what `login()` still demands at the next sign-in, so there's
+   * nothing a forced re-login everywhere would protect against.
+   */
+  removePasskey(userId: string, password: string, passkeyId: string): void {
+    const user = this.#requireUser(userId);
+    this.verifyPassword(userId, password);
+    if (!user.passkeys.some((p) => p.id === passkeyId)) {
+      throw new AuthError(`no passkey '${passkeyId}' on this account`);
+    }
+    const remaining = user.passkeys.filter((p) => p.id !== passkeyId);
+    this.#replaceUser({ ...user, passkeys: remaining });
+    if (!user.mfa && remaining.length === 0) {
+      this.#revokeAllSessions(userId);
+    }
+  }
+
+  /**
+   * First half of a passkey sign-in: re-verifies username/password (the
+   * same check `login()` does, since this is an alternative entry point
+   * into the same two-step flow, not a bypass of it) and hands back a
+   * challenge scoped to this account's registered passkeys. Throws if
+   * the account has none — the caller should fall back to asking for a
+   * TOTP code instead.
+   */
+  async beginPasskeyLogin(username: string, password: string): Promise<unknown> {
+    const user = this.#usersByUsername.get(username.trim().toLowerCase());
+    if (!user || user.disabled || !timingSafeStringEqual(hashSecret(password, user.salt), user.passwordHash)) {
+      throw new AuthError("invalid username or password");
+    }
+    if (user.passkeys.length === 0) {
+      throw new AuthError("this account has no passkey registered");
+    }
+    const options = await this.#requireWebAuthn().generateAuthenticationOptions({ allowCredentials: user.passkeys });
+    const challenge = (options as { challenge?: string }).challenge;
+    if (!challenge) throw new AuthError("could not start passkey sign-in");
+    this.#pendingPasskeyLogin.set(user.id, { challenge, expiresAt: Date.now() + PASSKEY_CHALLENGE_TTL_MS });
+    return options;
+  }
+
+  /**
+   * Second half: verifies the browser's assertion against the challenge
+   * `beginPasskeyLogin` issued and, on success, issues a session exactly
+   * like `login()` does. Deliberately takes no password — `login()`'s
+   * own TOTP path doesn't re-check the password at the code-verification
+   * step either, and `beginPasskeyLogin` already proved it once for this
+   * same ceremony; the still-valid pending challenge *is* that proof.
+   * Updates the credential's stored counter so a cloned authenticator
+   * (a real attack WebAuthn's counter exists to catch) is detectable on
+   * its next use.
+   */
+  async completePasskeyLogin(username: string, response: unknown, remember: boolean): Promise<Session> {
+    const user = this.#usersByUsername.get(username.trim().toLowerCase());
+    if (!user || user.disabled) {
+      throw new AuthError("invalid username or password");
+    }
+    const pending = this.#pendingPasskeyLogin.get(user.id);
+    this.#pendingPasskeyLogin.delete(user.id);
+    if (!pending || pending.expiresAt < Date.now()) {
+      throw new AuthError("passkey sign-in has expired — try again");
+    }
+    const responseId = (response as { id?: string } | undefined)?.id;
+    const credential = user.passkeys.find((p) => p.id === responseId);
+    if (!credential) throw new AuthError("unrecognized passkey");
+    const result = await this.#requireWebAuthn().verifyAuthentication({
+      response,
+      expectedChallenge: pending.challenge,
+      credential,
+    });
+    if (!result.verified) throw new AuthError("could not verify the passkey");
+    this.#replaceUser({
+      ...user,
+      passkeys: user.passkeys.map((p) => (p.id === credential.id ? { ...p, counter: result.newCounter } : p)),
+    });
+    return this.#issueSession(user.id, remember);
   }
 
   #requireUser(userId: string): User {
@@ -708,12 +938,13 @@ export class AuthService {
   static fromSnapshot(snapshot: AuthSnapshot): AuthService {
     const service = new AuthService();
     for (const user of snapshot.users) {
-      // `disabled`/`mustChangePassword` default to false for state files saved before these fields existed.
+      // `disabled`/`mustChangePassword`/`passkeys` default for state files saved before these fields existed.
       const restored: User = {
         ...user,
         disabled: user.disabled ?? false,
         mustChangePassword: user.mustChangePassword ?? false,
         displayName: user.displayName || user.username,
+        passkeys: user.passkeys ?? [],
       };
       service.#usersById.set(user.id, restored);
       service.#usersByUsername.set(user.username.trim().toLowerCase(), restored);

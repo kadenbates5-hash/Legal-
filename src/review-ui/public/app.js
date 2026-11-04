@@ -35,6 +35,7 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
     if (panel === "home") loadHome();
     if (panel === "security") {
       loadMfaStatus();
+      loadPasskeys();
       loadCalendarConnectionStatus();
     }
   });
@@ -401,6 +402,111 @@ function showRecoveryCodes(codes) {
   document.getElementById("mfaCodes").textContent = codes.join("\n");
   document.getElementById("mfaCodesCard").hidden = false;
 }
+
+/* ===== Passkeys (WebAuthn) =====
+   navigator.credentials.create()/.get() speak ArrayBuffers; the server
+   speaks base64url strings (so options/responses survive a JSON round
+   trip). These two helpers are the entire translation layer — no
+   @simplewebauthn/browser or any other client library, consistent with
+   this app having no bundler and a CSP that only loads scripts from
+   'self': there's nowhere to load a CDN script from even if we wanted
+   one, and the translation itself is base64url encode/decode, not
+   cryptography. */
+function base64urlToBuffer(base64url) {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "===".slice((base64.length + 3) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function bufferToBase64url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function performPasskeyRegistration(optionsJSON) {
+  const publicKey = {
+    ...optionsJSON,
+    challenge: base64urlToBuffer(optionsJSON.challenge),
+    user: { ...optionsJSON.user, id: base64urlToBuffer(optionsJSON.user.id) },
+    excludeCredentials: (optionsJSON.excludeCredentials || []).map((c) => ({ ...c, id: base64urlToBuffer(c.id) })),
+  };
+  const credential = await navigator.credentials.create({ publicKey });
+  return {
+    id: credential.id,
+    rawId: bufferToBase64url(credential.rawId),
+    type: credential.type,
+    response: {
+      clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+      attestationObject: bufferToBase64url(credential.response.attestationObject),
+      transports: credential.response.getTransports ? credential.response.getTransports() : [],
+    },
+    clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {},
+  };
+}
+
+/** Loaded only when the Security panel opens — see `loadPasskeys()`'s own feature-detection guard for why this card can be entirely absent. */
+async function loadPasskeys() {
+  const card = document.getElementById("passkeysCard");
+  if (!window.PublicKeyCredential) {
+    card.hidden = true;
+    return;
+  }
+  try {
+    const passkeys = await api("/api/webauthn");
+    card.hidden = false;
+    const list = document.getElementById("passkeysList");
+    list.innerHTML = "";
+    for (const p of passkeys) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      li.innerHTML = `<strong>${escapeHtml(p.nickname)}</strong>
+        <span class="meta-xs">added ${new Date(p.createdAt).toLocaleDateString()}</span>`;
+      const removeBtn = mkButton("Remove", async () => {
+        showError("");
+        const password = prompt("Confirm your password to remove this passkey.");
+        if (!password) return;
+        try {
+          await api(`/api/webauthn/${encodeURIComponent(p.id)}`, { method: "DELETE", body: JSON.stringify({ password }) });
+          await loadPasskeys();
+          showToast("Passkey removed.", "success");
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+      removeBtn.classList.add("danger");
+      li.appendChild(document.createElement("br"));
+      li.appendChild(removeBtn);
+      list.appendChild(li);
+    }
+    if (passkeys.length === 0) list.innerHTML = '<li class="static empty">No passkeys added yet.</li>';
+  } catch {
+    // Not configured on this server, or not reachable — same "the
+    // surface doesn't exist here" treatment as the calendar card.
+    card.hidden = true;
+  }
+}
+
+document.getElementById("passkeyAddBtn").addEventListener("click", async () => {
+  showError("");
+  const password = prompt("Confirm your password to add a passkey.");
+  if (!password) return;
+  try {
+    const options = await api("/api/webauthn/register/begin", { method: "POST", body: JSON.stringify({ password }) });
+    const response = await performPasskeyRegistration(options);
+    const nickname = document.getElementById("passkeyNickname").value.trim();
+    await api("/api/webauthn/register/complete", { method: "POST", body: JSON.stringify({ response, nickname }) });
+    document.getElementById("passkeyNickname").value = "";
+    await loadPasskeys();
+    showToast("Passkey added.", "success");
+  } catch (err) {
+    showError(err.name === "NotAllowedError" ? "Passkey setup was cancelled." : err.message);
+  }
+});
 
 /**
  * Hidden entirely (not just a blank state) when the server has no
@@ -2105,7 +2211,8 @@ async function loadAccounts() {
         <span class="badge ${acct.disabled ? "rejected" : "approved"}">${acct.disabled ? "disabled" : "enabled"}</span>
         ${acct.matterAssignment ? `<span class="badge confirmed">matter: ${escapeHtml(acct.matterAssignment.matterId)}</span>` : ""}
         ${acct.mustChangePassword ? `<span class="badge pending_review">password reset pending</span>` : ""}
-        ${acct.mfaEnabled ? `<span class="badge approved">2FA · ${acct.recoveryCodesRemaining} codes left</span>` : ""}
+        ${acct.mfaEnabled ? `<span class="badge approved">2FA (TOTP) · ${acct.recoveryCodesRemaining} codes left</span>` : ""}
+        ${acct.passkeyCount > 0 ? `<span class="badge approved">${acct.passkeyCount} passkey${acct.passkeyCount === 1 ? "" : "s"}</span>` : ""}
         ${acct.email ? `<span class="badge muted">${escapeHtml(acct.email)}</span>` : `<span class="badge muted">no email on file</span>`}
         ${acct.phone ? `<span class="badge muted">${escapeHtml(acct.phone)}</span>` : ""}`;
       const toggleBtn = mkButton(acct.disabled ? "Enable" : "Disable", async () => {
@@ -2166,11 +2273,14 @@ async function loadAccounts() {
       // Only offered where there's something to clear. This is a real
       // bypass of someone else's second factor — the confirm spells that
       // out, and the action is recorded in the audit log either way.
-      if (acct.mfaEnabled) {
+      // Offered for TOTP *or* passkeys: resetMfa() clears both, since an
+      // account can be locked out of either kind of factor (or both at
+      // once), and this is the one escape hatch for all of them.
+      if (acct.mfaEnabled || acct.passkeyCount > 0) {
         li.append(
           mkButton("Reset 2FA", async () => {
             showError("");
-            if (!confirm(`Turn off two-factor authentication for ${acct.username}?\n\nThey will be able to sign in with their password alone until they set it up again. This is recorded in the audit log.`)) return;
+            if (!confirm(`Turn off two-factor authentication (TOTP and any passkeys) for ${acct.username}?\n\nThey will be able to sign in with their password alone until they set it up again. This is recorded in the audit log.`)) return;
             try {
               await api(`/api/accounts/${acct.id}/reset-mfa`, { method: "POST", body: "{}" });
               await loadAccounts();
