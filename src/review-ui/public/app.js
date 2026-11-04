@@ -368,6 +368,10 @@ function deadlineRowHtml(d) {
     }</div>`;
 }
 
+// Kept around so "Download CSV" exports the same risk-ranked list
+// currently on screen, at the same horizon, without a second fetch.
+let lastUpcomingDeadlines = [];
+
 async function loadUpcomingDeadlines() {
   const list = document.getElementById("upcomingList");
   if (currentRole && currentRole !== "attorney") {
@@ -377,6 +381,7 @@ async function loadUpcomingDeadlines() {
   try {
     const withinDays = Number(document.getElementById("deadlineHorizon").value) || 14;
     const due = await api(`/api/deadlines/upcoming?withinDays=${withinDays}`);
+    lastUpcomingDeadlines = due;
     list.innerHTML = "";
     for (const d of due) list.appendChild(listRow(deadlineRowHtml(d)));
     if (due.length === 0) {
@@ -1271,9 +1276,32 @@ async function loadConflicts() {
   }
 }
 
+function downloadDeadlinesCsv() {
+  showError("");
+  if (lastUpcomingDeadlines.length === 0) {
+    showError("Nothing to export — load the \"Coming due\" list first.");
+    return;
+  }
+  const header = ["Matter ID", "Type", "Date", "Days away", "Overdue", "Verification"];
+  const rows = lastUpcomingDeadlines.map((d) => [
+    d.matterId,
+    DEADLINE_TYPE_LABEL[d.type] || d.type,
+    d.date,
+    d.daysAway,
+    d.overdue ? "yes" : "no",
+    d.confirmationState === "confirmed"
+      ? "confirmed by two sources"
+      : d.confirmationState === "conflict"
+        ? "sources disagree"
+        : "only one source — not verified",
+  ]);
+  downloadCsv(`deadlines-coming-due-${new Date().toISOString().slice(0, 10)}.csv`, header, rows);
+}
+
 document.getElementById("checkDeadline").addEventListener("click", checkDeadline);
 document.getElementById("loadUpcoming").addEventListener("click", loadUpcomingDeadlines);
 document.getElementById("confirmDeadline").addEventListener("click", confirmDeadline);
+document.getElementById("downloadDeadlinesCsv").addEventListener("click", downloadDeadlinesCsv);
 
 /* ===== Scheduling ===== */
 async function bookAppointment() {
