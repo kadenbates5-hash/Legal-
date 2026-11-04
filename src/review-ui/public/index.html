@@ -249,7 +249,7 @@
       <div class="card">
         <div class="field-row">
           <h3 class="row-title">Appointments</h3>
-          <label class="field">Matter ID <input id="scheduleListMatterId" list="matterOptions" autocomplete="off" value="m1" /></label>
+          <label class="field">Matter ID <input id="scheduleListMatterId" list="matterOptions" autocomplete="off" placeholder="matter to list" /></label>
           <button class="btn" id="refreshAppointments">Refresh</button>
         </div>
         <ul id="appointmentList" class="list"></ul>
@@ -282,7 +282,7 @@
       <p class="subtitle">Draft engagement letters, motions, discovery requests, research summaries, and billing narratives. Every draft is scoped to one matter and submits into the attorney's Review Queue — nothing here reaches a client on its own.</p>
       <div class="card">
         <div class="field-row">
-          <label class="field">Matter ID <input id="draftingMatterId" list="matterOptions" autocomplete="off" value="m1" /></label>
+          <label class="field">Matter ID <input id="draftingMatterId" list="matterOptions" autocomplete="off" placeholder="matter to draft on" /></label>
           <button class="btn" id="loadMatterDrafts">Load matter</button>
         </div>
       </div>
@@ -434,7 +434,7 @@
       <div class="card">
         <h3>Quick access — saved to a matter</h3>
         <div class="field-row">
-          <label class="field">Matter ID <input id="researchMatterId" list="matterOptions" autocomplete="off" value="m1" /></label>
+          <label class="field">Matter ID <input id="researchMatterId" list="matterOptions" autocomplete="off" placeholder="matter to save to" /></label>
           <button class="btn" id="loadResearchMatter">Load matter</button>
         </div>
         <ul id="researchSavedList" class="list"></ul>
@@ -641,7 +641,7 @@
       <div class="card">
         <h3>Log hours</h3>
         <div class="field-row">
-          <label class="field">Matter ID <input id="billingMatterId" list="matterOptions" autocomplete="off" value="m1" /></label>
+          <label class="field">Matter ID <input id="billingMatterId" list="matterOptions" autocomplete="off" placeholder="matter to log against" /></label>
           <label class="field">Date <input id="billingDate" type="date" /></label>
           <label class="field">Hours <input id="billingHoursValue" type="number" step="0.1" min="0.1" /></label>
           <label class="field grow">Description <input id="billingDescription" /></label>

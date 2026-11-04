@@ -1333,10 +1333,14 @@ async function bookAppointment() {
 
 async function loadAppointments() {
   showError("");
+  const matterId = document.getElementById("scheduleListMatterId").value.trim();
+  const list = document.getElementById("appointmentList");
+  if (!matterId) {
+    list.innerHTML = '<li class="static empty">Enter a matter ID above to see its appointments.</li>';
+    return;
+  }
   try {
-    const matterId = document.getElementById("scheduleListMatterId").value;
     const items = await api(`/api/appointments?matterId=${encodeURIComponent(matterId)}`);
-    const list = document.getElementById("appointmentList");
     list.innerHTML = "";
     for (const appt of items) {
       const li = document.createElement("li");
@@ -1467,9 +1471,13 @@ async function loadTemplates() {
 async function loadMatterDrafts() {
   showError("");
   document.getElementById("draftingDetail").innerHTML = "";
+  const list = document.getElementById("draftingList");
+  if (!draftingMatterId().trim()) {
+    list.innerHTML = '<li class="static empty">Enter a matter ID above to see its drafts.</li>';
+    return;
+  }
   try {
     const items = await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}`);
-    const list = document.getElementById("draftingList");
     list.innerHTML = "";
     for (const item of items) {
       const li = document.createElement("li");
@@ -1884,10 +1892,14 @@ async function searchResearch() {
 
 async function loadResearchMatter() {
   showError("");
+  const matterId = document.getElementById("researchMatterId").value.trim();
+  const list = document.getElementById("researchSavedList");
+  if (!matterId) {
+    list.innerHTML = '<li class="static empty">Enter a matter ID above to see its saved references.</li>';
+    return;
+  }
   try {
-    const matterId = document.getElementById("researchMatterId").value;
     const refs = await api(`/api/research/matters/${encodeURIComponent(matterId)}`);
-    const list = document.getElementById("researchSavedList");
     list.innerHTML = "";
     for (const ref of refs) {
       const li = document.createElement("li");
@@ -2220,9 +2232,12 @@ document.getElementById("logBillingHours").addEventListener("click", async () =>
 
 async function loadBillingMatter() {
   showError("");
+  const matterId = document.getElementById("billingMatterId").value.trim();
+  if (!matterId) {
+    document.getElementById("billingMatterList").innerHTML = '<li class="static empty">Enter a matter ID above to see its logged hours.</li>';
+    return;
+  }
   try {
-    const matterId = document.getElementById("billingMatterId").value.trim();
-    if (!matterId) return;
     const entries = await api(`/api/billing-hours/matters/${encodeURIComponent(matterId)}`);
     lastBillingMatterEntries = entries;
     renderBillingEntries("billingMatterList", entries, { showActorId: true });
