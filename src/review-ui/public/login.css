@@ -29,47 +29,24 @@
     position: relative;
   }
 
-  /* Two slow-drifting color fields rather than a static radial gradient —
-     the first impression of the app should feel alive, not like a flat
-     screenshot. Pure CSS, no images/webfonts, so it costs nothing over
-     the network and respects the CSP (no external resources at all). */
+  /* A legal pad, not a SaaS gradient blob. Faint ruled horizontal lines
+     plus the pad's traditional left margin rule, rendered entirely in
+     CSS (repeating-linear-gradient + two solid gradient "lines") — no
+     images, no webfonts, nothing for the CSP to carve an exception for.
+     This is the one piece of decoration on the page, so it earns its
+     keep by actually meaning something instead of being an abstract
+     color field. A faint vignette behind it adds depth without motion. */
   .aurora {
     position: fixed;
-    inset: -20%;
+    inset: 0;
     z-index: 0;
     pointer-events: none;
-    filter: blur(60px);
-  }
-  .aurora::before, .aurora::after {
-    content: "";
-    position: absolute;
-    width: 55vmax;
-    height: 55vmax;
-    border-radius: 50%;
-    opacity: 0.55;
-  }
-  .aurora::before {
-    top: -10%;
-    left: -10%;
-    background: radial-gradient(circle, var(--accent-2), transparent 65%);
-    animation: drift-a 22s ease-in-out infinite;
-  }
-  .aurora::after {
-    bottom: -15%;
-    right: -10%;
-    background: radial-gradient(circle, var(--accent), transparent 65%);
-    animation: drift-b 26s ease-in-out infinite;
-  }
-  @keyframes drift-a {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    50% { transform: translate(6vmax, 4vmax) scale(1.08); }
-  }
-  @keyframes drift-b {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    50% { transform: translate(-5vmax, -5vmax) scale(1.05); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .aurora::before, .aurora::after { animation: none; }
+    background:
+      /* the margin rule, ~70px from the left edge */
+      linear-gradient(90deg, transparent calc(70px - 1px), rgba(176, 141, 87, 0.3) calc(70px - 1px), rgba(176, 141, 87, 0.3) 70px, transparent 70px),
+      /* ruled horizontal lines, one every 2.2rem */
+      repeating-linear-gradient(to bottom, transparent, transparent 2.1rem, rgba(255, 255, 255, 0.045) 2.1rem, rgba(255, 255, 255, 0.045) calc(2.1rem + 1px)),
+      radial-gradient(ellipse 80% 60% at 50% 15%, rgba(44, 66, 112, 0.35), transparent 70%);
   }
 
   .card {

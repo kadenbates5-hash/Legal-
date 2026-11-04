@@ -8,40 +8,71 @@
 </head>
 <body>
 
+<!-- One hand-drawn icon set for the sidebar, defined once and referenced by
+     <use> — no icon font/CDN (the CSP allows no external font-src), and a
+     real glyph per panel instead of a uniform dot reads as a considered
+     product rather than a template. -->
+<svg aria-hidden="true" class="icon-sprite" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 20 20"><path d="M3.3 10 10 4l6.7 6M5.5 8.5V16h9V8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-briefcase" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="14" height="9" rx="1.5"/><path d="M7.5 7V5.5A1.5 1.5 0 0 1 9 4h2a1.5 1.5 0 0 1 1.5 1.5V7"/></g></symbol>
+    <symbol id="i-inbox" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 5 4h10l2 7"/><path d="M3 11v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4h-4.2l-1 2H9.2l-1-2H3Z"/></g></symbol>
+    <symbol id="i-alarm" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="11" r="6.2"/><path d="M10 8v3.3l2.4 1.4"/><path d="M6.7 4.6 5 3M13.3 4.6 15 3"/></g></symbol>
+    <symbol id="i-calendar" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="13" height="12" rx="1.5"/><path d="M3.5 8.2h13M7 3v3M13 3v3"/></g></symbol>
+    <symbol id="i-calendar-check" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="13" height="12" rx="1.5"/><path d="M3.5 8.2h13M7 3v3M13 3v3M7.3 12.1l1.6 1.6 3.4-3.6"/></g></symbol>
+    <symbol id="i-chat" viewBox="0 0 20 20"><path d="M4 5h12a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 16 14H9.5L6 17v-3H4A1.5 1.5 0 0 1 2.5 12.5v-6A1.5 1.5 0 0 1 4 5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 20 20"><path d="M12.6 4.4 15.6 7.4 7 16H4v-3L12.6 4.4Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 20 20"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3l1.5 2H16a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 16 16H4.5A1.5 1.5 0 0 1 3 14.5v-8Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shield-alert" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 16 5v5c0 4-2.7 6.2-6 7-3.3-.8-6-3-6-7V5l6-2Z"/><path d="M10 7.8v3"/><circle cx="10" cy="13" r="0.15" fill="currentColor" stroke="currentColor" stroke-width="1.3"/></g></symbol>
+    <symbol id="i-shield-check" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 16 5v5c0 4-2.7 6.2-6 7-3.3-.8-6-3-6-7V5l6-2Z"/><path d="M7.3 10l1.8 1.8L13 8"/></g></symbol>
+    <symbol id="i-search" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.6" cy="8.6" r="4.3"/><path d="M11.8 11.8 16.5 16.5"/></g></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 20 20"><path d="M10 2 11.3 8.7 18 10 11.3 11.3 10 18 8.7 11.3 2 10 8.7 8.7Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-people" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.3" cy="7.2" r="2.4"/><path d="M3 16.2c0-2.8 1.9-4.6 4.3-4.6s4.3 1.8 4.3 4.6"/><circle cx="14.3" cy="7.7" r="1.9"/><path d="M12.9 11.9c1.9.3 3.1 1.9 3.1 4.1"/></g></symbol>
+    <symbol id="i-clock" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10.5" r="6.3"/><path d="M10 7v3.5l2.6 1.6"/></g></symbol>
+    <symbol id="i-coin" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6.3"/><path d="M10 6.3v7.4M11.9 8.1c0-.9-.85-1.6-1.9-1.6s-1.9.6-1.9 1.5c0 2.1 3.8 1 3.8 3.1 0 .9-.85 1.5-1.9 1.5s-1.9-.6-1.9-1.5"/></g></symbol>
+    <symbol id="i-receipt" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.2 3.5h9.6v13l-1.7-1.2-1.6 1.2-1.7-1.2-1.6 1.2-1.7-1.2-1.7 1.2v-13Z"/><path d="M7.2 7h5.6M7.2 9.8h5.6M7.2 12.5h3.6"/></g></symbol>
+    <symbol id="i-invoice" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h6l3 3v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M12 3v3h3"/><path d="M10 8.7v6.6M11.6 10c0-.85-.72-1.4-1.6-1.4s-1.6.55-1.6 1.3c0 1.8 3.2 1 3.2 2.7 0 .85-.72 1.4-1.6 1.4s-1.6-.55-1.6-1.4"/></g></symbol>
+    <symbol id="i-lock" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="9" width="11" height="7.5" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></g></symbol>
+    <symbol id="i-bars" viewBox="0 0 20 20"><path d="M4.5 16.5V11M9.5 16.5V6.5M14.5 16.5V9.5M17 16.5h-13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-person-plus" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="7.5" r="3"/><path d="M3.3 16.3c0-3 2.1-4.9 4.7-4.9s4.7 1.9 4.7 4.9"/><path d="M15.2 9v5M12.7 11.5h5"/></g></symbol>
+    <symbol id="i-ledger" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3.5" width="11" height="13" rx="1"/><path d="M7.2 7h5.6M7.2 10h5.6M7.2 13h3.6"/></g></symbol>
+  </defs>
+</svg>
+
 <aside class="sidebar">
   <div class="brand"><span class="mark">D</span><span class="name">Docket</span></div>
   <nav class="nav">
-    <button data-panel="home" class="active"><span class="dot"></span>Home</button>
-    <button data-panel="my-matters" id="navMyMatters" hidden><span class="dot"></span>My Matters</button>
+    <button data-panel="home" class="active"><svg class="nav-icon"><use href="#i-home"/></svg>Home</button>
+    <button data-panel="my-matters" id="navMyMatters" hidden><svg class="nav-icon"><use href="#i-briefcase"/></svg>My Matters</button>
 
     <p class="nav-group">Casework</p>
-    <button data-panel="queue"><span class="dot"></span>Review Queue</button>
-    <button data-panel="deadlines"><span class="dot"></span>Deadlines</button>
-    <button data-panel="scheduling"><span class="dot"></span>Scheduling</button>
-    <button data-panel="intake"><span class="dot"></span>Live Intake Demo</button>
-    <button data-panel="drafting" id="navDrafting" hidden><span class="dot"></span>Drafting</button>
-    <button data-panel="cases" id="navCases" hidden><span class="dot"></span>Cases</button>
-    <button data-panel="conflicts" id="navConflicts" hidden><span class="dot"></span>Conflicts</button>
-    <button data-panel="research" id="navResearch" hidden><span class="dot"></span>Research</button>
-    <button data-panel="assistant" id="navAssistant" hidden><span class="dot"></span>Assistant</button>
+    <button data-panel="queue"><svg class="nav-icon"><use href="#i-inbox"/></svg>Review Queue</button>
+    <button data-panel="deadlines"><svg class="nav-icon"><use href="#i-alarm"/></svg>Deadlines</button>
+    <button data-panel="scheduling"><svg class="nav-icon"><use href="#i-calendar"/></svg>Scheduling</button>
+    <button data-panel="intake"><svg class="nav-icon"><use href="#i-chat"/></svg>Live Intake Demo</button>
+    <button data-panel="drafting" id="navDrafting" hidden><svg class="nav-icon"><use href="#i-pen"/></svg>Drafting</button>
+    <button data-panel="cases" id="navCases" hidden><svg class="nav-icon"><use href="#i-folder"/></svg>Cases</button>
+    <button data-panel="conflicts" id="navConflicts" hidden><svg class="nav-icon"><use href="#i-shield-alert"/></svg>Conflicts</button>
+    <button data-panel="research" id="navResearch" hidden><svg class="nav-icon"><use href="#i-search"/></svg>Research</button>
+    <button data-panel="assistant" id="navAssistant" hidden><svg class="nav-icon"><use href="#i-sparkle"/></svg>Assistant</button>
 
     <p class="nav-group">Team</p>
-    <button data-panel="staff" id="navStaff"><span class="dot"></span>Staff</button>
-    <button data-panel="messages" id="navMessages"><span class="dot"></span>Messages</button>
-    <button data-panel="staff-schedule" id="navStaffSchedule"><span class="dot"></span>Schedule</button>
-    <button data-panel="time-clock" id="navTimeClock"><span class="dot"></span>Time Clock</button>
-    <button data-panel="payroll" id="navPayroll"><span class="dot"></span>Payroll</button>
+    <button data-panel="staff" id="navStaff"><svg class="nav-icon"><use href="#i-people"/></svg>Staff</button>
+    <button data-panel="messages" id="navMessages"><svg class="nav-icon"><use href="#i-chat"/></svg>Messages</button>
+    <button data-panel="staff-schedule" id="navStaffSchedule"><svg class="nav-icon"><use href="#i-calendar-check"/></svg>Schedule</button>
+    <button data-panel="time-clock" id="navTimeClock"><svg class="nav-icon"><use href="#i-clock"/></svg>Time Clock</button>
+    <button data-panel="payroll" id="navPayroll"><svg class="nav-icon"><use href="#i-coin"/></svg>Payroll</button>
 
     <p class="nav-group" id="navGroupFinance" hidden>Finance</p>
-    <button data-panel="billing" id="navBilling" hidden><span class="dot"></span>Billing</button>
-    <button data-panel="trust" id="navTrust" hidden><span class="dot"></span>Trust</button>
-    <button data-panel="invoices" id="navInvoices" hidden><span class="dot"></span>Invoices</button>
+    <button data-panel="billing" id="navBilling" hidden><svg class="nav-icon"><use href="#i-receipt"/></svg>Billing</button>
+    <button data-panel="trust" id="navTrust" hidden><svg class="nav-icon"><use href="#i-shield-check"/></svg>Trust</button>
+    <button data-panel="invoices" id="navInvoices" hidden><svg class="nav-icon"><use href="#i-invoice"/></svg>Invoices</button>
 
     <p class="nav-group">Admin</p>
-    <button data-panel="security"><span class="dot"></span>Security</button>
-    <button data-panel="analytics" id="navAnalytics" hidden><span class="dot"></span>Analytics</button>
-    <button data-panel="accounts" id="navAccounts" hidden><span class="dot"></span>Accounts</button>
-    <button data-panel="audit" id="navAudit" hidden><span class="dot"></span>Audit Log</button>
+    <button data-panel="security"><svg class="nav-icon"><use href="#i-lock"/></svg>Security</button>
+    <button data-panel="analytics" id="navAnalytics" hidden><svg class="nav-icon"><use href="#i-bars"/></svg>Analytics</button>
+    <button data-panel="accounts" id="navAccounts" hidden><svg class="nav-icon"><use href="#i-person-plus"/></svg>Accounts</button>
+    <button data-panel="audit" id="navAudit" hidden><svg class="nav-icon"><use href="#i-ledger"/></svg>Audit Log</button>
   </nav>
   <div class="sidebar-user" id="sidebarUser" hidden>
     <span class="sidebar-user-avatar" id="sidebarUserAvatar"></span>

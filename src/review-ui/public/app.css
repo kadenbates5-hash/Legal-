@@ -177,8 +177,9 @@
     border-radius: 0 3px 3px 0;
     background: #fff;
   }
-  nav.nav .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.5; flex-shrink: 0; }
-  nav.nav button.active .dot { opacity: 1; }
+  .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+  nav.nav .nav-icon { width: 17px; height: 17px; flex-shrink: 0; opacity: 0.7; transition: opacity 0.15s var(--ease); }
+  nav.nav button:hover .nav-icon, nav.nav button.active .nav-icon { opacity: 1; }
   nav.nav button[hidden], .nav-group[hidden] { display: none; }
 
   .sidebar-user {
