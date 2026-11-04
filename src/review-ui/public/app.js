@@ -2119,6 +2119,9 @@ document.getElementById("loadScheduleForActor").addEventListener("click", async 
 });
 
 /* ===== Billing ===== */
+let lastBillingMatterEntries = [];
+let lastBillingMineEntries = [];
+
 function renderBillingEntries(listId, entries, { showActorId }) {
   const list = document.getElementById(listId);
   list.innerHTML = "";
@@ -2170,6 +2173,7 @@ async function loadBillingMatter() {
     const matterId = document.getElementById("billingMatterId").value.trim();
     if (!matterId) return;
     const entries = await api(`/api/billing-hours/matters/${encodeURIComponent(matterId)}`);
+    lastBillingMatterEntries = entries;
     renderBillingEntries("billingMatterList", entries, { showActorId: true });
   } catch (err) {
     showError(err.message);
@@ -2180,14 +2184,33 @@ async function loadMyBillingHours() {
   showError("");
   try {
     const entries = await api("/api/billing-hours/mine");
+    lastBillingMineEntries = entries;
     renderBillingEntries("billingMineList", entries, { showActorId: false });
   } catch (err) {
     showError(err.message);
   }
 }
 
+/** Shared by both billing-hours export buttons — same shape, different source list. */
+function downloadBillingCsv(entries, filenamePrefix, { showActorId }) {
+  showError("");
+  if (entries.length === 0) {
+    showError("Nothing to export — load some hours first.");
+    return;
+  }
+  const header = [...(showActorId ? ["Logged by"] : []), "Matter ID", "Date", "Hours", "Description"];
+  const rows = entries.map((e) => [...(showActorId ? [e.actorId] : []), e.matterId, e.date, e.hours, e.description]);
+  downloadCsv(`${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv`, header, rows);
+}
+
 document.getElementById("loadBillingMatter").addEventListener("click", loadBillingMatter);
 document.getElementById("loadMyBillingHours").addEventListener("click", loadMyBillingHours);
+document.getElementById("downloadBillingMatterCsv").addEventListener("click", () =>
+  downloadBillingCsv(lastBillingMatterEntries, "billing-hours-matter", { showActorId: true }),
+);
+document.getElementById("downloadBillingMineCsv").addEventListener("click", () =>
+  downloadBillingCsv(lastBillingMineEntries, "billing-hours-mine", { showActorId: false }),
+);
 document.getElementById("navBilling").addEventListener("click", () => {
   loadBillingMatter();
   loadMyBillingHours();
@@ -2668,6 +2691,19 @@ function csvField(value) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+/** Shared by every "Download CSV" button — builds, downloads, and revokes the blob URL. */
+function downloadCsv(filename, header, rows) {
+  const csv = [header, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n");
+  // A BOM so Excel (still the most common opener for a CSV like this)
+  // detects UTF-8 instead of guessing a legacy codepage on accented names.
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 function downloadAuditCsv() {
   showError("");
   if (lastAuditEntries.length === 0) {
@@ -2691,15 +2727,7 @@ function downloadAuditCsv() {
       changes,
     ];
   });
-  const csv = [header, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n");
-  // A BOM so Excel (still the most common opener for a CSV like this)
-  // detects UTF-8 instead of guessing a legacy codepage on accented names.
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click();
-  URL.revokeObjectURL(link.href);
+  downloadCsv(`audit-log-${new Date().toISOString().slice(0, 10)}.csv`, header, rows);
 }
 
 document.getElementById("downloadAuditCsv").addEventListener("click", downloadAuditCsv);
