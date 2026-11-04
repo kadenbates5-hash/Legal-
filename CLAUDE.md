@@ -1485,7 +1485,11 @@ raising, so a paralegal scoped to one matter sees that matter's
 receivables with no hint that others exist. Drafts are excluded — a
 draft is not money anyone owes yet. Each row carries the client name and
 matter title so a receivable can be chased without opening the matter,
-and clicking one jumps straight to that invoice.
+and clicking one jumps straight to that invoice. A **"Download CSV"**
+button exports the same currently loaded list — this is the one most
+likely to actually leave the browser, headed to a bookkeeper — via the
+same shared `downloadCsv()` helper as the Audit Log/Billing/Deadlines
+exports.
 
 **Payment reminders.** `emailReminder()` sends a covering note plus the
 full itemisation and the PDF, from a "Send reminder" button on each
