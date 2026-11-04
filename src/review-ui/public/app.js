@@ -2531,6 +2531,10 @@ document.getElementById("navAnalytics").addEventListener("click", loadAnalytics)
 document.getElementById("analyticsTrendDays").addEventListener("change", loadAnalytics);
 
 /* ===== Audit Log ===== */
+// Kept around so "Download CSV" exports exactly what's on screen —
+// the currently applied filters — without a second round trip.
+let lastAuditEntries = [];
+
 async function loadAudit() {
   showError("");
   try {
@@ -2547,6 +2551,7 @@ async function loadAudit() {
     if (to) query.set("to", to);
 
     const entries = await api(`/api/audit${query.toString() ? `?${query}` : ""}`);
+    lastAuditEntries = entries;
     const list = document.getElementById("auditList");
     document.getElementById("auditCount").textContent =
       `${entries.length} entr${entries.length === 1 ? "y" : "ies"}${query.toString() ? " matching" : ""}`;
@@ -2657,6 +2662,47 @@ async function verifyAuditIntegrity() {
   }
 }
 
+/** Quotes a CSV field per RFC 4180 — only when it actually needs it. */
+function csvField(value) {
+  const s = value === undefined || value === null ? "" : String(value);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadAuditCsv() {
+  showError("");
+  if (lastAuditEntries.length === 0) {
+    showError("Nothing to export — the current filter matches no entries.");
+    return;
+  }
+  const header = ["Sequence", "Timestamp", "Action", "Actor name", "Actor role", "Matter ID", "Detail", "Changes"];
+  const rows = [...lastAuditEntries].reverse().map((entry) => {
+    const who = knownStaff.find((m) => m.actorId === entry.actor.id)?.displayName || entry.actor.id;
+    const changes = (entry.changes || [])
+      .map((c) => `${c.field}: ${c.from ?? "(not set)"} -> ${c.to ?? "(cleared)"}`)
+      .join("; ");
+    return [
+      entry.sequence,
+      new Date(entry.timestamp).toISOString(),
+      entry.action,
+      who,
+      entry.actor.role,
+      entry.matterId || "",
+      entry.detail || "",
+      changes,
+    ];
+  });
+  const csv = [header, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n");
+  // A BOM so Excel (still the most common opener for a CSV like this)
+  // detects UTF-8 instead of guessing a legacy codepage on accented names.
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+document.getElementById("downloadAuditCsv").addEventListener("click", downloadAuditCsv);
 document.getElementById("refreshAudit").addEventListener("click", loadAudit);
 document.getElementById("verifyAudit").addEventListener("click", verifyAuditIntegrity);
 document.getElementById("anchorAudit").addEventListener("click", anchorAuditNow);
