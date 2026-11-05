@@ -40,6 +40,14 @@ function applyTheme(theme) {
   applyTheme(stored);
 })();
 
+// Registers the app-shell service worker (see sw.js's own doc comment
+// for exactly what it does and doesn't cache — nothing under /api/).
+// Best-effort: an old browser or a blocked registration just means no
+// install prompt/offline shell, not a broken app.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+}
+
 const PANEL_TITLES = {
   home: "Home",
   search: "Search",

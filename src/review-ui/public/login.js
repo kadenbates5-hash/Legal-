@@ -1,3 +1,10 @@
+// Same best-effort registration as app.js — see sw.js's doc comment.
+// Registered from here too so a PWA install prompt can fire from the
+// login page itself, before anyone's signed in.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+}
+
 /* WebAuthn's JSON<->ArrayBuffer translation — see app.js's identical
    copy for why this is hand-rolled rather than a client library: no
    bundler on this page and the CSP only loads scripts from 'self'. */
