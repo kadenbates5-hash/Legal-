@@ -4163,6 +4163,10 @@ document.getElementById("setPayRate").addEventListener("click", async () => {
   } catch (err) { showError(err.message); }
 });
 
+// Kept around so "Download CSV" exports the same summary currently on
+// screen, for the same period, without re-running it.
+let lastPayrollSummary = null;
+
 document.getElementById("runPayrollSummary").addEventListener("click", async () => {
   showError("");
   const out = document.getElementById("payrollSummaryResult");
@@ -4172,6 +4176,7 @@ document.getElementById("runPayrollSummary").addEventListener("click", async () 
     const to = document.getElementById("payrollTo").value;
     if (!from || !to) { showError("Pick a period."); return; }
     const r = await api(`/api/payroll/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    lastPayrollSummary = { from, to, ...r };
     out.innerHTML = r.incomplete
       ? `<div class="flags"><strong>Total is understated.</strong> Some worked days have no pay rate on record — gross pay so far is ${escapeHtml(centsToDollars(r.totalGrossPayCents))}.</div>`
       : `<p class="subtitle-inline">Total gross pay: <strong>${escapeHtml(centsToDollars(r.totalGrossPayCents))}</strong></p>`;
@@ -4193,6 +4198,23 @@ document.getElementById("runPayrollSummary").addEventListener("click", async () 
   }
 });
 
+function downloadPayrollCsv() {
+  showError("");
+  if (!lastPayrollSummary || lastPayrollSummary.lines.length === 0) {
+    showError("Nothing to export — run a period summary first.");
+    return;
+  }
+  const header = ["Name", "Hours", "Gross pay", "Dates missing a rate"];
+  const rows = lastPayrollSummary.lines.map((line) => [
+    knownStaff.find((m) => m.actorId === line.actorId)?.displayName || line.actorId,
+    (line.hoursMilli / 1000).toFixed(2),
+    centsToDollars(line.grossPayCents),
+    line.datesMissingRate.join("; "),
+  ]);
+  downloadCsv(`payroll-summary-${lastPayrollSummary.from}-to-${lastPayrollSummary.to}.csv`, header, rows);
+}
+
+document.getElementById("downloadPayrollCsv").addEventListener("click", downloadPayrollCsv);
 document.getElementById("loadWorkedHours").addEventListener("click", loadWorkedHours);
 document.getElementById("navPayroll").addEventListener("click", () => {
   // The rate and firm-wide summary cards are attorney-only server-side; hide
