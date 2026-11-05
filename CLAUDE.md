@@ -753,6 +753,36 @@ service reached with a per-request API key.
   tradeoff is inherent to the vendor choice, not something this adapter
   can paper over.
 
+### Dashboard "Listen" buttons (a second, much lower-stakes consumer)
+
+`src/review-ui/speech-service.ts` — `SpeechService`, a thin wrapper over
+the exact same `TextToSpeech` interface above, reused for something far
+simpler than a phone call: reading already-on-screen text back to a
+staff member. Not a standalone "type anything, get audio" panel — every
+caller already has real text (a draft's content, a chat message, a
+scripted reply), so there's no freeform input to abuse. Open to every
+logged-in staff human (same "every staff role" meaning as
+`messaging-service.ts`'s `requireHuman()`) — receptionist included,
+deliberately, since previewing a script line in the Live Intake Demo is
+primarily their use case, not an attorney's. Caps text at 4000
+characters: this is for one draft/message/line at a time, not
+synthesizing a whole brief in one request. `POST /api/speech/synthesize`
+returns raw `audio/wav` bytes, 404s without a configured `SpeechService`.
+
+`start.ts` wires it behind its own opt-in, `SPEECH_TOOLS=true` —
+deliberately independent of the Twilio voice-channel gate, since a firm
+may want dashboard read-aloud without real-call telephony configured at
+all (or the reverse). Reuses the same `VOICEBOX_BASE_URL`/
+`VOICEBOX_PROFILE_ID` vars either way.
+
+The dashboard's shared `playSynthesizedSpeech()`/`listenButton()`
+(`app.js`) back three "Listen" buttons: the Drafting panel's draft
+detail view, every message/announcement bubble, and the Live Intake
+Demo's agent-reply bubbles specifically — not the demo caller's own
+typed lines, since this is a preview of the *script*, not a transcript
+reader. Each is gated client-side by the same role check the backend
+enforces, so the button never appears somewhere it would just 403.
+
 ## Telephony integration — Twilio (§8 build order step 6, fully resolved)
 
 A real phone call now reaches `VoiceReceptionistSession` end to end,
@@ -2695,9 +2725,12 @@ nav item is hidden except **My Matters** and **Security** — see below.
   conflict list/a "Download CSV" on the Coming due list), Scheduling
   (book/list/reschedule/cancel/complete/
   reminders), Live Intake Demo (a chat window driving `intake-demo.ts` —
-  "Start new demo conversation" then type caller turns), Drafting (pick a
+  "Start new demo conversation" then type caller turns, with a "Listen"
+  button on each of the agent's own scripted replies when
+  `SPEECH_TOOLS=true`), Drafting (pick a
   matter, draft from a template/research summary/billing narrative, then
-  revise/submit — nav item hidden unless `GET /api/me` reports role
+  revise/submit, plus a "Listen" button on a draft's content — nav item
+  hidden unless `GET /api/me` reports role
   `attorney` or `paralegal`), Cases (a clickable list of every matter,
   expanding into that matter's uploaded documents — upload a file and
   download it back out as a data URI, plus "Draft report from this PDF"
@@ -2714,8 +2747,9 @@ nav item is hidden except **My Matters** and **Security** — see below.
   read-only directory of every account — username, display name,
   initials, role, and a paralegal's matter assignment — open to every
   logged-in human, never hidden), Messages (an Announcements chat window
-  every human can post to, a "start DM"/"create group" form, and a
-  conversation list with an "Open" button into a chat window — also
+  every human can post to, a "start DM"/"create group" form, a
+  conversation list with an "Open" button into a chat window, and a
+  "Listen" button on every message when `SPEECH_TOOLS=true` — also
   never hidden), Schedule (set your own or, as an attorney, anyone's
   in-office/remote/out entry for a date; view everyone's status for a
   date or one actor's upcoming entries — also never hidden), Billing (log
@@ -2894,6 +2928,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # SMTP_HOST=smtp.example.com SMTP_FROM=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable self-service "forgot password" email links (reuses PUBLIC_BASE_URL and whichever SMTP_* vars are already set for invoices — see "Self-service password reset")
 # STRIPE_SECRET_KEY=sk_... STRIPE_WEBHOOK_SECRET=whsec_... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable a "Pay now" button on outstanding invoices in the client portal (see "Online invoice payment (Stripe Checkout)"); also point a Stripe webhook endpoint at $PUBLIC_BASE_URL/api/stripe/webhook listening for checkout.session.completed in the Stripe dashboard
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
+# SPEECH_TOOLS=true npm run start:review-ui                               # enable the dashboard's "Listen" buttons (drafts/messages/Live Intake Demo script preview) — independent of Twilio, reuses VOICEBOX_BASE_URL/VOICEBOX_PROFILE_ID
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
 # ANTHROPIC_API_KEY=sk-ant-...  ANTHROPIC_MODEL=claude-sonnet-5  npm run start:review-ui  # enable the Assistant panel; ANTHROPIC_MODEL/ANTHROPIC_BASE_URL are optional overrides
 # AUDIT_ANCHOR_FILE=/mnt/append-only/anchors.jsonl AUDIT_ANCHOR_EMAILS=partner@firm.example npm run start:review-ui  # publish the audit head hash outside this database (see "Anchoring")
