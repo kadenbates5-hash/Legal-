@@ -2639,6 +2639,22 @@ nav item is hidden except **My Matters** and **Security** — see below.
   `AnalyticsService` was
   passed to `createReviewServer`, respectively. `npm run build` copies
   `public/` into `dist/` since `tsc` only compiles `.ts` files.
+- `public/manifest.webmanifest` / `public/sw.js` / `public/icons/` —
+  PWA support: Docket is installable (a home-screen icon, a standalone
+  window) on top of the same deployed website, no app store or separate
+  build. The icons are the brand mark rendered at 32/180/192/512px, not
+  a different asset. `sw.js` never intercepts `/api/*` (those responses
+  are per-request and often privileged — caching one risks serving
+  stale case data, or a different session's response) and is
+  network-first, not cache-first, for the static shell it does cache,
+  since this app redeploys often and a returning visitor should see
+  today's code; the cache is only an offline fallback. Registered from
+  both `app.js` and `login.js` so the install prompt can fire before
+  anyone's signed in. `server.ts`'s `MIME_TYPES` serves `.png` and
+  `.webmanifest` correctly for this; the favicon links added alongside
+  it incidentally closed a long-standing gap — there was never a
+  `<link rel="icon">` anywhere, so browsers were always guessing at
+  `/favicon.ico`.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
 - `public/index.html` / `public/app.js` / `public/app.css` — the Docket
