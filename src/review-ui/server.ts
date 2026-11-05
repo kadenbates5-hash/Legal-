@@ -337,6 +337,7 @@ const MIME_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".png": "image/png",
   ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".woff2": "font/woff2",
 };
 
 /**
@@ -2432,12 +2433,22 @@ async function handleMattersRequest(
           };
         })
       : undefined;
+    const keyDates = Array.isArray(body["keyDates"])
+      ? body["keyDates"].map((d) => {
+          const entry = d as Record<string, unknown>;
+          return { label: String(entry["label"] ?? ""), date: String(entry["date"] ?? "") };
+        })
+      : undefined;
     const result = matters.upsert(actor, matterId, {
       ...(typeof body["title"] === "string" ? { title: body["title"] } : {}),
       ...(typeof body["status"] === "string" ? { status: body["status"] as MatterStatus } : {}),
       ...(typeof body["practiceAreaId"] === "string" ? { practiceAreaId: body["practiceAreaId"] } : {}),
       ...(typeof body["responsibleAttorneyId"] === "string" ? { responsibleAttorneyId: body["responsibleAttorneyId"] } : {}),
       ...(typeof body["description"] === "string" ? { description: body["description"] } : {}),
+      ...(typeof body["court"] === "string" ? { court: body["court"] } : {}),
+      ...(typeof body["caseNumber"] === "string" ? { caseNumber: body["caseNumber"] } : {}),
+      ...(typeof body["opposingCounsel"] === "string" ? { opposingCounsel: body["opposingCounsel"] } : {}),
+      ...(keyDates ? { keyDates } : {}),
       ...(parties ? { parties } : {}),
     });
     sendJson(res, 200, result);

@@ -36,18 +36,32 @@
     --shadow-hover: 0 2px 6px rgba(20, 23, 31, 0.1), 0 8px 18px rgba(20, 23, 31, 0.1), 0 20px 36px -12px rgba(20, 23, 31, 0.16);
     --shadow-lg: 0 12px 32px rgba(20, 23, 31, 0.12), 0 2px 8px rgba(20, 23, 31, 0.06);
     --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
-    /* A restrained serif for headings/brand only — body and data stay in
-       the sans stack below for density/legibility. No external font
-       files or CDN: every name here is a real system font (or close
-       enough that the fallback is unnoticeable), which keeps the CSP's
-       strict `font-src 'self'`/`style-src 'self'` intact rather than
-       carving out an exception for one font file. */
-    --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    /* A distinctive serif for headings/brand only — body and data stay
+       in the sans stack below for density/legibility. "Fraunces
+       Display" is self-hosted from /fonts/ (see the @font-face below)
+       rather than pulled from a CDN, so the CSP's strict `font-src
+       'self'` needs no exception carved out for it — same-origin is
+       all it ever asks for. Pinned to a single static instance (a
+       subset of the real variable font: weight 650, a touch of
+       optical-size and softness, with the "wonk" alternates on) rather
+       than shipping the whole variable font, since the UI only ever
+       asks for one weight. The system stack after it is what renders
+       before the font file finishes loading, and what an old browser
+       that ignores @font-face falls back to permanently. */
+    --font-serif: "Fraunces Display", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
     /* Alias kept for older markup — every surface tile (stat cards, the
        global search box) should render on the same white surface as a
        .card, never fall through to "no background declared" and blend
        into the page. */
     --panel: var(--surface);
+  }
+
+  @font-face {
+    font-family: "Fraunces Display";
+    src: url("/fonts/fraunces-display.woff2") format("woff2");
+    font-weight: 650;
+    font-style: normal;
+    font-display: swap;
   }
 
   /* Dark mode follows the OS by default, but can be forced either way

@@ -88,7 +88,7 @@
     </span>
   </div>
   <div class="sidebar-footer">Nothing here reaches a client, filing, or invoice without an attorney's sign-off.</div>
-  <div class="sidebar-credit">Crafted by <strong>KJB Forge</strong></div>
+  <div class="sidebar-credit">Made by <strong>KJB Systems</strong></div>
 </aside>
 
 <div id="toasts" class="toast-container" aria-live="polite" aria-atomic="false"></div>
@@ -386,11 +386,13 @@
 
       <div class="card">
         <h3>Matter record</h3>
-        <p class="subtitle-inline">Who the client and opposing parties are. These are what every future conflicts check searches, so keeping them accurate is what makes screening work. Editing is attorney-only.</p>
+        <p class="subtitle-inline">Who the client and opposing parties are, and the case details worth having on hand without opening a file. Parties are what every future conflicts check searches, so keeping them accurate is what makes screening work. Editing is attorney-only.</p>
         <div class="field-row">
           <label class="field">Matter ID <input id="matterRecordId" list="matterOptions" autocomplete="off" /></label>
           <button class="btn" id="loadMatterRecord">Load</button>
         </div>
+
+        <h4>Basics</h4>
         <div class="field-row">
           <label class="field grow">Title <input id="matterTitle" placeholder="State v. Ruiz" /></label>
           <label class="field">Status
@@ -402,12 +404,44 @@
           </label>
         </div>
         <div class="field-row">
+          <label class="field">Practice area <input id="matterPracticeArea" placeholder="e.g. criminal-law" /></label>
+          <label class="field">Responsible attorney <select id="matterResponsibleAttorney"><option value="">(unassigned)</option></select></label>
+        </div>
+
+        <h4>Court &amp; docket</h4>
+        <div class="field-row">
+          <label class="field grow">Court <input id="matterCourt" placeholder="e.g. Superior Court of California, County of Los Angeles" /></label>
+          <label class="field">Case/docket number <input id="matterCaseNumber" placeholder="e.g. 24-CR-00417" /></label>
+        </div>
+
+        <h4>Opposing counsel</h4>
+        <div class="field-row">
+          <label class="field grow">Name, firm, contact <input id="matterOpposingCounsel" placeholder="Jane Smith, Smith &amp; Associates &lt;jane@smithlaw.example&gt;" /></label>
+        </div>
+
+        <h4>Key dates</h4>
+        <p class="meta-tight">Quick reference only — not the redundantly-verified deadlines the Deadlines panel tracks. Nothing here needs a second source to agree.</p>
+        <ul id="matterKeyDatesList" class="list"></ul>
+        <div class="field-row">
+          <label class="field">Label <input id="newKeyDateLabel" placeholder="e.g. Arraignment" /></label>
+          <label class="field">Date <input id="newKeyDateValue" type="date" /></label>
+          <button class="btn" id="addKeyDate">Add date</button>
+        </div>
+
+        <h4>Parties</h4>
+        <div class="field-row">
           <label class="field grow">Client name(s), one per line
             <textarea id="matterClients" rows="2" placeholder="Maria Ruiz &lt;maria@example.com&gt; [+15551234567]"></textarea></label>
           <label class="field grow">Adverse party name(s), one per line
             <textarea id="matterAdverse" rows="2" placeholder="The State"></textarea></label>
         </div>
         <p class="meta-tight">Add a client's email as <code>Name &lt;email@example.com&gt;</code> — that's the address the Invoices panel bills to — and/or a phone number in E.164 as <code>Name [+15551234567]</code>, which the appointment-reminder job can text. Adverse parties are never emailed or texted.</p>
+
+        <h4>Notes</h4>
+        <div class="field-row">
+          <label class="field grow">Description / notes <textarea id="matterDescription" rows="2" placeholder="Anything worth knowing at a glance that doesn't fit the fields above"></textarea></label>
+        </div>
+
         <div class="field-row">
           <button class="btn primary" id="saveMatterRecord">Save matter record</button>
         </div>

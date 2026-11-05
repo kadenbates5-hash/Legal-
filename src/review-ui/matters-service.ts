@@ -81,6 +81,10 @@ function flattenMatter(matter: Matter): Record<string, unknown> {
     practiceAreaId: matter.practiceAreaId,
     responsibleAttorneyId: matter.responsibleAttorneyId,
     description: matter.description,
+    court: matter.court,
+    caseNumber: matter.caseNumber,
+    opposingCounsel: matter.opposingCounsel,
+    keyDates: matter.keyDates.map((d) => `${d.label}: ${d.date}`).join(", ") || undefined,
     clients: named("client"),
     adverseParties: named("adverse"),
     relatedParties: named("related"),
@@ -203,7 +207,20 @@ export class MattersService {
     const changes = diffFields(
       before ? flattenMatter(before) : undefined,
       flattenMatter(record),
-      ["title", "status", "practiceAreaId", "responsibleAttorneyId", "description", "clients", "adverseParties", "relatedParties"],
+      [
+        "title",
+        "status",
+        "practiceAreaId",
+        "responsibleAttorneyId",
+        "description",
+        "court",
+        "caseNumber",
+        "opposingCounsel",
+        "keyDates",
+        "clients",
+        "adverseParties",
+        "relatedParties",
+      ],
     );
     this.#auditLog.append({
       actor,

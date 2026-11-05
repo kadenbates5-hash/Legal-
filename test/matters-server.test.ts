@@ -121,6 +121,31 @@ describe("matters HTTP API", () => {
   it("404s for a matter with no record", async () => {
     expect((await fetch(`${baseUrl}/api/matters/never-seen`, withCookie(attorneyCookie))).status).toBe(404);
   });
+
+  it("round-trips the standard case-detail fields (court, case number, opposing counsel, key dates)", async () => {
+    const put = await fetch(
+      `${baseUrl}/api/matters/m-owned`,
+      withCookie(attorneyCookie, {
+        method: "PUT",
+        body: JSON.stringify({
+          court: "Superior Court of California, County of Los Angeles",
+          caseNumber: "24-CR-00417",
+          opposingCounsel: "Jane Smith, Smith & Associates <jane@smithlaw.example>",
+          keyDates: [{ label: "Arraignment", date: "2026-12-01" }],
+        }),
+      }),
+    );
+    expect(put.status).toBe(200);
+    const saved = await put.json();
+    expect(saved.court).toBe("Superior Court of California, County of Los Angeles");
+    expect(saved.caseNumber).toBe("24-CR-00417");
+    expect(saved.opposingCounsel).toBe("Jane Smith, Smith & Associates <jane@smithlaw.example>");
+    expect(saved.keyDates).toEqual([{ label: "Arraignment", date: "2026-12-01" }]);
+
+    const got = await (await fetch(`${baseUrl}/api/matters/m-owned`, withCookie(attorneyCookie))).json();
+    expect(got.caseNumber).toBe("24-CR-00417");
+    expect(got.keyDates).toEqual([{ label: "Arraignment", date: "2026-12-01" }]);
+  });
 });
 
 describe("conflicts HTTP API", () => {

@@ -997,6 +997,22 @@ function fillPeopleSelect(el, { includeSelf = true, selfActorId = null } = {}) {
   if (previous && knownStaff.some((m) => m.actorId === previous)) el.value = previous;
 }
 
+// Responsible attorney is optional, unlike every other person-picker —
+// a freshly opened matter has no attorney assigned yet — so it keeps a
+// leading "(unassigned)" option fillPeopleSelect's fresh-render would
+// otherwise wipe out.
+function fillMatterResponsibleAttorneySelect() {
+  const el = document.getElementById("matterResponsibleAttorney");
+  if (!el) return;
+  const previous = el.value;
+  fillPeopleSelect(el);
+  const unassigned = document.createElement("option");
+  unassigned.value = "";
+  unassigned.textContent = "(unassigned)";
+  el.insertBefore(unassigned, el.firstChild);
+  el.value = previous && knownStaff.some((m) => m.actorId === previous) ? previous : "";
+}
+
 async function refreshPeoplePickers() {
   try {
     knownStaff = await api("/api/staff");
@@ -1009,6 +1025,7 @@ async function refreshPeoplePickers() {
   fillPeopleSelect(document.getElementById("groupMembers"), { includeSelf: false, selfActorId: me });
   fillPeopleSelect(document.getElementById("scheduleActorId"));
   fillPeopleSelect(document.getElementById("scheduleViewActorId"));
+  fillMatterResponsibleAttorneySelect();
   // Default the schedule pickers to yourself — by far the common case.
   for (const id of ["scheduleActorId", "scheduleViewActorId"]) {
     const el = document.getElementById(id);
@@ -3339,6 +3356,42 @@ function partiesToTextareas(matter) {
   document.getElementById("matterAdverse").value = pick("adverse");
 }
 
+// The key-dates list being edited for whatever matter is currently
+// loaded — held client-side and only sent on "Save matter record",
+// same as the parties textareas above.
+let currentKeyDates = [];
+
+function renderKeyDatesList() {
+  const list = document.getElementById("matterKeyDatesList");
+  list.innerHTML = "";
+  currentKeyDates.forEach((d, i) => {
+    const li = document.createElement("li");
+    li.classList.add("static");
+    li.innerHTML = `<strong>${escapeHtml(d.label)}</strong> <span class="badge">${escapeHtml(d.date)}</span>`;
+    const remove = mkButton("Remove", () => {
+      currentKeyDates.splice(i, 1);
+      renderKeyDatesList();
+    });
+    remove.classList.add("danger");
+    li.appendChild(document.createElement("br"));
+    li.appendChild(remove);
+    list.appendChild(li);
+  });
+  if (currentKeyDates.length === 0) list.innerHTML = '<li class="static empty">No key dates recorded.</li>';
+}
+
+document.getElementById("addKeyDate").addEventListener("click", () => {
+  const label = document.getElementById("newKeyDateLabel").value.trim();
+  const date = document.getElementById("newKeyDateValue").value;
+  if (!label || !date) { showError("A key date needs both a label and a date."); return; }
+  showError("");
+  currentKeyDates.push({ label, date });
+  currentKeyDates.sort((a, b) => a.date.localeCompare(b.date));
+  renderKeyDatesList();
+  document.getElementById("newKeyDateLabel").value = "";
+  document.getElementById("newKeyDateValue").value = "";
+});
+
 /**
  * Closing controls, rendered from the loaded record so the button always
  * matches the matter's real state rather than whatever it was when the
@@ -3430,14 +3483,30 @@ async function loadMatterRecord() {
     const matter = await api(`/api/matters/${encodeURIComponent(id)}`);
     document.getElementById("matterTitle").value = matter.title || "";
     document.getElementById("matterStatus").value = matter.status || "open";
+    document.getElementById("matterPracticeArea").value = matter.practiceAreaId || "";
+    document.getElementById("matterResponsibleAttorney").value = matter.responsibleAttorneyId || "";
+    document.getElementById("matterCourt").value = matter.court || "";
+    document.getElementById("matterCaseNumber").value = matter.caseNumber || "";
+    document.getElementById("matterOpposingCounsel").value = matter.opposingCounsel || "";
+    document.getElementById("matterDescription").value = matter.description || "";
+    currentKeyDates = (matter.keyDates || []).map((d) => ({ ...d }));
+    renderKeyDatesList();
     partiesToTextareas(matter);
     renderMatterLifecycle(matter);
   } catch (err) {
     // A matter with no record yet is the normal case, not an error worth shouting about.
     if (/no matter/i.test(err.message)) {
       document.getElementById("matterTitle").value = "";
+      document.getElementById("matterPracticeArea").value = "";
+      document.getElementById("matterResponsibleAttorney").value = "";
+      document.getElementById("matterCourt").value = "";
+      document.getElementById("matterCaseNumber").value = "";
+      document.getElementById("matterOpposingCounsel").value = "";
+      document.getElementById("matterDescription").value = "";
       document.getElementById("matterClients").value = "";
       document.getElementById("matterAdverse").value = "";
+      currentKeyDates = [];
+      renderKeyDatesList();
       renderMatterLifecycle(null);
       showError("No record for that matter yet — fill this in and save to create one.");
     } else {
@@ -3460,6 +3529,13 @@ async function saveMatterRecord() {
       body: JSON.stringify({
         title: document.getElementById("matterTitle").value.trim(),
         status: document.getElementById("matterStatus").value,
+        practiceAreaId: document.getElementById("matterPracticeArea").value.trim(),
+        responsibleAttorneyId: document.getElementById("matterResponsibleAttorney").value,
+        court: document.getElementById("matterCourt").value.trim(),
+        caseNumber: document.getElementById("matterCaseNumber").value.trim(),
+        opposingCounsel: document.getElementById("matterOpposingCounsel").value.trim(),
+        description: document.getElementById("matterDescription").value.trim(),
+        keyDates: currentKeyDates,
         parties,
       }),
     });

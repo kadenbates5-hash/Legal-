@@ -75,6 +75,21 @@ export function clientPhoneFor(matter: Matter | undefined): string | undefined {
   return matter?.parties.find((p) => p.role === "client" && p.phone?.trim())?.phone?.trim();
 }
 
+/**
+ * An informal date worth keeping on the matter record for quick
+ * reference — "arraignment", "statute of limitations runs" — distinct
+ * from `core/deadline.ts`'s `DeadlineTracker`, which is specifically
+ * for dates that need independent, redundant verification before an
+ * attorney can rely on them. This is a single-sourced memo, not a
+ * substitute for that: nothing here requires a second source to agree,
+ * and nothing here blocks a draft's approval the way an unconfirmed
+ * tracked deadline does.
+ */
+export interface MatterKeyDate {
+  label: string;
+  date: string;
+}
+
 export interface Matter {
   matterId: string;
   /** Human-facing caption, e.g. "State v. Ruiz". */
@@ -83,6 +98,13 @@ export interface Matter {
   practiceAreaId: string | undefined;
   responsibleAttorneyId: string | undefined;
   description: string | undefined;
+  /** The court or tribunal this matter is before, e.g. "Superior Court of California, County of Los Angeles". */
+  court: string | undefined;
+  /** The court's own docket/case number — never this system's `matterId`, which is an internal filing key. */
+  caseNumber: string | undefined;
+  /** Free text (name, firm, contact) for the attorney representing the other side — distinct from `parties`, which names the adverse *client*, not their counsel. */
+  opposingCounsel: string | undefined;
+  keyDates: MatterKeyDate[];
   parties: MatterParty[];
   openedAt: string;
   closedAt: string | undefined;
@@ -106,6 +128,10 @@ export interface MatterInput {
   practiceAreaId?: string;
   responsibleAttorneyId?: string;
   description?: string;
+  court?: string;
+  caseNumber?: string;
+  opposingCounsel?: string;
+  keyDates?: MatterKeyDate[];
   parties?: MatterParty[];
   retentionUntil?: string;
   closingNote?: string;
@@ -133,6 +159,10 @@ export class MatterStore {
       practiceAreaId: input.practiceAreaId ?? existing?.practiceAreaId,
       responsibleAttorneyId: input.responsibleAttorneyId ?? existing?.responsibleAttorneyId,
       description: input.description ?? existing?.description,
+      court: input.court ?? existing?.court,
+      caseNumber: input.caseNumber ?? existing?.caseNumber,
+      opposingCounsel: input.opposingCounsel ?? existing?.opposingCounsel,
+      keyDates: (input.keyDates ?? existing?.keyDates ?? []).map((d) => ({ ...d })),
       parties: (input.parties ?? existing?.parties ?? []).map((p) => ({ ...p })),
       openedAt: existing?.openedAt ?? now,
       // Closing stamps a date; reopening clears it, so "closed" and
@@ -167,13 +197,21 @@ export class MatterStore {
   }
 
   toSnapshot(): Matter[] {
-    return this.listAll().map((m) => ({ ...m, parties: m.parties.map((p) => ({ ...p })) }));
+    return this.listAll().map((m) => ({
+      ...m,
+      parties: m.parties.map((p) => ({ ...p })),
+      keyDates: m.keyDates.map((d) => ({ ...d })),
+    }));
   }
 
   static fromSnapshot(snapshot: readonly Matter[]): MatterStore {
     const store = new MatterStore();
     for (const m of snapshot) {
-      store.#byId.set(m.matterId, { ...m, parties: (m.parties ?? []).map((p) => ({ ...p })) });
+      store.#byId.set(m.matterId, {
+        ...m,
+        parties: (m.parties ?? []).map((p) => ({ ...p })),
+        keyDates: (m.keyDates ?? []).map((d) => ({ ...d })),
+      });
     }
     return store;
   }

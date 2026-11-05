@@ -9,9 +9,18 @@
     --accent-hover: #1f3157;
     --accent-soft: #eaeef6;
     --accent-glow: rgba(44, 66, 112, 0.35);
-    --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    /* Self-hosted from /fonts/ — see app.css's @font-face comment for
+       why (same font, same CSP reasoning, same single pinned weight). */
+    --font-serif: "Fraunces Display", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
     --danger: #c02b3a;
     --danger-soft: #fbe9eb;
+  }
+  @font-face {
+    font-family: "Fraunces Display";
+    src: url("/fonts/fraunces-display.woff2") format("woff2");
+    font-weight: 650;
+    font-style: normal;
+    font-display: swap;
   }
   * { box-sizing: border-box; }
   html { color-scheme: dark; }
