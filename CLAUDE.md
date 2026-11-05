@@ -1381,7 +1381,11 @@ payroll to trust.
   confidently wrong paycheck. Access is about privacy between
   colleagues rather than matters: setting a rate is attorney-only, you
   can see your own hours and rate, and only an attorney can see anyone
-  else's or run the firm-wide summary.
+  else's or run the firm-wide summary. The period summary's
+  **"Download CSV"** button exports the currently run summary (name,
+  hours, gross pay, any dates missing a rate) — the same shared
+  `downloadCsv()` shape as the other exports in this doc, for handing a
+  pay period to a bookkeeper or payroll provider.
 - `server.ts` wires `/api/invoices/*` and `/api/payroll/*` (each 404s
   without its service). An invoice-state violation is **409**, malformed
   input is 400.
