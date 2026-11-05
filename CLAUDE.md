@@ -1167,10 +1167,19 @@ any client or adversary actually was.
   `BillingHoursStore`/`AccessControl` happened to key on. A `Matter`
   record adds what screening needs: title, status
   (`prospective`/`open`/`closed`), responsible attorney, and **parties**
-  with a `client`/`adverse`/`related` role. Deliberately keyed on the
-  same `matterId` string rather than a new primary key, so every
-  existing store keeps working untouched and a matter can still be
-  referenced before its record is filled in. A record here is
+  with a `client`/`adverse`/`related` role — plus the standard
+  case-detail fields a firm tracks day to day: `court`, `caseNumber`
+  (the court's own docket number — never this system's internal
+  `matterId`), `opposingCounsel` (free text; deliberately separate from
+  `parties`, which names the adverse *client*, never their attorney),
+  and `keyDates` (`{label, date}[]`, a quick-reference memo —
+  deliberately informal and single-sourced, unlike `core/deadline.ts`'s
+  `DeadlineTracker`, which requires two independent sources to agree
+  before a date counts as confirmed; nothing here gates a draft's
+  approval the way an unconfirmed tracked deadline does). Deliberately
+  keyed on the same `matterId` string rather than a new primary key, so
+  every existing store keeps working untouched and a matter can still
+  be referenced before its record is filled in. A record here is
   *descriptive* — `AccessControl` remains the only thing deciding who
   can see what.
 - `core/conflicts.ts` — `ConflictChecker`. Screens names against every
@@ -1221,7 +1230,9 @@ any client or adversary actually was.
   and `POST /api/conflicts/check` (404 if no `MattersService` was
   passed). The UI is the "Conflicts" panel: run a check, read the hits
   with their rule citations, and maintain the matter records that make
-  screening work.
+  screening work — the matter-record form is organized into sections
+  (Basics, Court & docket, Opposing counsel, Key dates, Parties, Notes)
+  rather than one flat block, now that it covers this many fields.
 
 ### Closing a matter, and file retention
 
