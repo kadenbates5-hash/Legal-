@@ -24,6 +24,7 @@ import { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import { AudioClipStore } from "../receptionist/audio-clip-store.js";
 import { VoiceboxSpeechToText, VoiceboxTextToSpeech } from "../integrations/voicebox.js";
 import { AssistantService } from "./assistant-service.js";
+import { SpeechService } from "./speech-service.js";
 import { AnthropicClient } from "../integrations/anthropic.js";
 import { StaffService } from "./staff-service.js";
 import { MessagingService } from "./messaging-service.js";
@@ -725,6 +726,29 @@ const voiceOptions: Pick<ReviewServerOptions, "voiceCalls" | "audioClips" | "twi
     : {};
 
 /**
+ * The dashboard's "Listen" buttons (a draft's content, a chat message, a
+ * Live Intake Demo script reply) — deliberately independent of the
+ * Twilio gate above. A firm may well want Voicebox read-aloud in the
+ * dashboard without having set up real-call telephony at all (or vice
+ * versa), so this reuses the same `VOICEBOX_BASE_URL`/`VOICEBOX_PROFILE_ID`
+ * vars but behind its own explicit opt-in rather than inheriting
+ * Twilio's — constructing a `VoiceboxTextToSpeech` unconditionally
+ * whenever Twilio happened to be configured would make this feature's
+ * availability an accident of an unrelated integration.
+ */
+const speechOptions: Pick<ReviewServerOptions, "speech"> =
+  process.env["SPEECH_TOOLS"] === "true"
+    ? {
+        speech: new SpeechService(
+          new VoiceboxTextToSpeech({
+            ...(VOICEBOX_BASE_URL ? { baseUrl: VOICEBOX_BASE_URL } : {}),
+            ...(VOICEBOX_PROFILE_ID ? { profileId: VOICEBOX_PROFILE_ID } : {}),
+          }),
+        ),
+      }
+    : {};
+
+/**
  * Self-service "forgot password" needs the same externally-reachable
  * base URL Twilio's webhook config already names (`PUBLIC_BASE_URL`) —
  * reused here rather than a second env var meaning the same thing —
@@ -832,6 +856,7 @@ const server = createReviewServer(service, state.auth, {
   ...(mfaRequiredRoles?.size ? { mfaRequiredRoles } : {}),
   ...(assistant ? { assistant } : {}),
   ...voiceOptions,
+  ...speechOptions,
   ...passwordResetOptions,
   ...calendarConnectionOptions,
   ...stripeWebhookOptions,

@@ -1205,6 +1205,72 @@ function mkButton(label, onClick) {
   return btn;
 }
 
+/**
+ * Backs every "Listen" button (a draft's content, a chat message, a
+ * Live Intake Demo script reply) — POSTs the already-on-screen text to
+ * /api/speech/synthesize and plays back whatever comes back. Not a raw
+ * fetch inline at each call site because every one of them needs the
+ * same three things: the 401-redirects-to-login handling every other
+ * API call gets, a busy state on the button that triggered it (so a
+ * second click mid-synthesis can't stack two requests), and the blob
+ * URL cleaned up once playback actually finishes rather than leaking
+ * one per click.
+ */
+async function playSynthesizedSpeech(text, button) {
+  showError("");
+  const trimmed = (text || "").trim();
+  if (!trimmed) {
+    showError("Nothing to read aloud.");
+    return;
+  }
+  const originalLabel = button ? button.textContent : null;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Synthesizing…";
+  }
+  try {
+    const res = await fetch("/api/speech/synthesize", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: trimmed }),
+    });
+    if (res.status === 401) {
+      window.location.href = "/login.html";
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      showError(body.error || "Couldn't synthesize speech.");
+      return;
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const audio = new Audio(url);
+    audio.addEventListener("ended", () => URL.revokeObjectURL(url));
+    audio.addEventListener("error", () => URL.revokeObjectURL(url));
+    await audio.play();
+  } catch (err) {
+    showError(err.message || "Couldn't play synthesized speech.");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
+}
+
+// Matches SpeechService's own gate (every logged-in staff human; not
+// system/client/anonymous) — rendering the button for a role the
+// backend will refuse would just be a control that always 403s.
+function canUseSpeechTools() {
+  return currentRole && currentRole !== "system" && currentRole !== "client" && currentRole !== "anonymous";
+}
+
+function listenButton(text) {
+  const btn = mkButton("Listen", () => playSynthesizedSpeech(text, btn));
+  return btn;
+}
+
 const REVIEW_ACTION_LABEL = {
   approve: "Approved.",
   reject: "Rejected.",
@@ -1429,6 +1495,13 @@ function appendBubble(kind, text) {
   const bubble = document.createElement("div");
   bubble.className = `bubble ${kind}`;
   bubble.textContent = text;
+  // Only the agent's own scripted reply is worth previewing aloud — this
+  // is this panel's answer to "what does this line actually sound like
+  // on a real call," not a transcript reader for what the demo caller
+  // typed.
+  if (kind === "agent" && canUseSpeechTools()) {
+    bubble.appendChild(listenButton(text));
+  }
   log.appendChild(bubble);
   log.scrollTop = log.scrollHeight;
 }
@@ -1536,6 +1609,9 @@ async function loadDraftDetail(id) {
         <div class="actions" id="draftDetailActions"></div>
       </div>
     `;
+    if (canUseSpeechTools()) {
+      document.getElementById("draftDetailActions").appendChild(listenButton(wp.content));
+    }
     if (editable) {
       const actions = document.getElementById("draftDetailActions");
       const saveBtn = mkButton("Save revision", async () => {
@@ -2019,6 +2095,9 @@ function appendMessageBubble(logId, message) {
   bubble.className = "bubble";
   const time = new Date(message.sentAt).toLocaleString();
   bubble.innerHTML = `<strong>${escapeHtml(message.senderName)}</strong> <span class="meta-xs">${time}</span><div>${escapeHtml(message.body)}</div>`;
+  if (canUseSpeechTools()) {
+    bubble.appendChild(listenButton(message.body));
+  }
   log.appendChild(bubble);
   log.scrollTop = log.scrollHeight;
 }

@@ -17,6 +17,7 @@ import type { CasesService } from "./cases-service.js";
 import type { AuditService } from "./audit-service.js";
 import type { ResearchService } from "./research-service.js";
 import type { AssistantService } from "./assistant-service.js";
+import type { SpeechService } from "./speech-service.js";
 import type { StaffService } from "./staff-service.js";
 import type { MessagingService } from "./messaging-service.js";
 import type { StaffScheduleService } from "./staff-schedule-service.js";
@@ -477,6 +478,8 @@ export interface ReviewServerOptions {
   voiceCalls?: VoiceCallSessions;
   audioClips?: AudioClipStore;
   twilio?: TwilioVoiceConfig;
+  /** Powers the dashboard's "Listen" buttons (a draft's content, a chat message, a Live Intake Demo script reply) — a second, much lower-stakes consumer of the same TextToSpeech seam the real voice channel uses. Absent means those buttons 404, same "absent config means the surface doesn't exist" pattern as everything else optional here. */
+  speech?: SpeechService;
   /** Absent means `/api/forgot-password` tells the requester self-service reset isn't set up, rather than silently failing — see `handleForgotPassword`. */
   passwordReset?: PasswordResetConfig;
   calendarConnection?: CalendarConnectionService;
@@ -576,6 +579,7 @@ async function handleRequest(
     voiceCalls,
     audioClips,
     twilio,
+    speech,
     passwordReset,
     calendarConnection,
     stripeWebhook,
@@ -1203,6 +1207,17 @@ async function handleRequest(
         return;
       }
       await handleAssistantRequest(assistant, req, res, actor, url);
+      return;
+    }
+
+    if (url.pathname === "/api/speech/synthesize" && req.method === "POST") {
+      if (!speech) {
+        sendJson(res, 404, { error: "text-to-speech is not configured on this server" });
+        return;
+      }
+      const body = await readJsonBody(req);
+      const audio = await speech.synthesize(actor, String(body["text"] ?? ""));
+      sendBinary(res, "audio/wav", "speech.wav", audio);
       return;
     }
 
