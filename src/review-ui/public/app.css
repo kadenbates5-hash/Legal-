@@ -28,8 +28,12 @@
     --sidebar-border: rgba(255, 255, 255, 0.08);
     --radius: 12px;
     --radius-sm: 8px;
-    --shadow: 0 1px 2px rgba(20, 23, 31, 0.05), 0 1px 8px rgba(20, 23, 31, 0.04);
-    --shadow-hover: 0 4px 10px rgba(20, 23, 31, 0.08), 0 10px 24px rgba(20, 23, 31, 0.08);
+    /* Three stacked layers (tight contact + medium ambient + soft far
+       ambient) read as an object actually resting above the page rather
+       than a flat rectangle with a drop-shadow filter bolted on — the
+       usual tell of a template that was never tuned. */
+    --shadow: 0 1px 2px rgba(20, 23, 31, 0.07), 0 3px 10px rgba(20, 23, 31, 0.06), 0 10px 26px -10px rgba(20, 23, 31, 0.1);
+    --shadow-hover: 0 2px 6px rgba(20, 23, 31, 0.1), 0 8px 18px rgba(20, 23, 31, 0.1), 0 20px 36px -12px rgba(20, 23, 31, 0.16);
     --shadow-lg: 0 12px 32px rgba(20, 23, 31, 0.12), 0 2px 8px rgba(20, 23, 31, 0.06);
     --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
     /* A restrained serif for headings/brand only — body and data stay in
@@ -156,19 +160,28 @@
     gap: 0.5rem;
     padding: 0 0.5rem 1.5rem;
   }
+  /* A raised, embossed badge rather than a flat gradient square: a bright
+     bevel along the top edge and a dark one along the bottom give it real
+     thickness, like a struck medallion rather than a color swatch. The
+     glyph is a pen nib (ties to drafting/ink, the "chambers-ink" accent
+     name, and the ruled-paper login texture) rather than a bare initial. */
   .brand .mark {
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
     background: linear-gradient(155deg, var(--accent-2), var(--accent) 55%, var(--accent-hover));
     display: inline-flex;
     align-items: center;
     justify-content: center;
     color: white;
-    font-weight: 700;
-    font-size: 0.9rem;
-    box-shadow: 0 4px 14px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    flex-shrink: 0;
+    box-shadow:
+      0 6px 16px -3px var(--accent-glow),
+      0 2px 5px rgba(10, 12, 19, 0.3),
+      inset 0 1.5px 0 rgba(255, 255, 255, 0.4),
+      inset 0 -2px 3px rgba(0, 0, 0, 0.22);
   }
+  .brand .mark svg { width: 19px; height: 19px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.28)); }
   .brand .name { font-family: var(--font-serif); font-weight: 700; font-size: 1.2rem; color: #fff; letter-spacing: -0.01em; }
 
   nav.nav { display: flex; flex-direction: column; gap: 0.1rem; }
@@ -288,17 +301,37 @@
     transition: background 0.15s var(--ease), border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.1s var(--ease);
   }
   .btn:hover { background: var(--surface-2); border-color: var(--border-strong); box-shadow: var(--shadow); }
+  /* A raised button, not a flat color fill: a bright top edge and a dark
+     bottom edge inside the same shadow stack that gives the brand mark
+     its bevel, so pressing one is a genuine push-in, not just a color
+     swap. */
   .btn.primary {
     background: linear-gradient(135deg, var(--accent-2), var(--accent));
     color: #fff;
     border-color: transparent;
-    box-shadow: 0 2px 8px -1px var(--accent-glow);
+    box-shadow:
+      0 2px 8px -1px var(--accent-glow),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3),
+      inset 0 -2px 3px rgba(0, 0, 0, 0.18);
   }
-  .btn.primary:hover { box-shadow: 0 4px 16px -2px var(--accent-glow); filter: brightness(1.06); }
+  .btn.primary:hover {
+    box-shadow:
+      0 6px 18px -3px var(--accent-glow),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35),
+      inset 0 -2px 3px rgba(0, 0, 0, 0.18);
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+  }
   .btn.danger { color: var(--danger); border-color: var(--danger-soft); }
   .btn.danger:hover { background: var(--danger-soft); }
   .btn:disabled { opacity: 0.5; cursor: default; }
   .btn:active:not(:disabled) { transform: translateY(1px) scale(0.99); }
+  .btn.primary:active:not(:disabled) {
+    transform: translateY(1px) scale(0.99);
+    box-shadow:
+      0 1px 3px -1px var(--accent-glow),
+      inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  }
   .icon-btn { padding: 0.45rem; display: inline-flex; align-items: center; justify-content: center; }
   .icon-btn .nav-icon { width: 17px; height: 17px; opacity: 0.85; }
 
@@ -590,7 +623,11 @@
 .stat.alert .n { color: var(--danger); }
 .stat.ok .n { color: var(--ok); }
 .stat.clickable { cursor: pointer; }
-.stat.clickable:hover { border-color: var(--accent); box-shadow: var(--shadow-hover); transform: translateY(-2px); }
+.stat.clickable:hover {
+  border-color: var(--accent);
+  box-shadow: 0 14px 28px -10px rgba(20, 23, 31, 0.22), 0 4px 10px rgba(20, 23, 31, 0.1);
+  transform: perspective(700px) translateY(-4px) scale(1.015);
+}
 
 /* ---------- Time Clock ---------- */
 /* The punch buttons are the whole point of the panel, so they're sized

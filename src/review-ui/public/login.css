@@ -64,13 +64,20 @@
   @keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
 
   .brand { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 1.5rem; }
+  /* Same embossed-medallion treatment as the dashboard sidebar's mark —
+     see app.css's .brand .mark comment. */
   .brand .mark {
-    width: 32px; height: 32px; border-radius: 9px;
+    width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
     background: linear-gradient(155deg, var(--accent-2), var(--accent) 55%, var(--accent-hover));
     display: inline-flex; align-items: center; justify-content: center;
-    color: #fff; font-weight: 700; font-size: 0.98rem;
-    box-shadow: 0 6px 16px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    color: #fff;
+    box-shadow:
+      0 6px 16px -2px var(--accent-glow),
+      0 2px 5px rgba(10, 12, 19, 0.3),
+      inset 0 1.5px 0 rgba(255, 255, 255, 0.4),
+      inset 0 -2px 3px rgba(0, 0, 0, 0.22);
   }
+  .brand .mark svg { width: 20px; height: 20px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.28)); }
   .brand .name { font-family: var(--font-serif); font-weight: 700; font-size: 1.3rem; letter-spacing: -0.01em; }
   p.tagline { color: var(--text-muted); font-size: 0.85rem; margin: -1rem 0 1.5rem; line-height: 1.55; }
   label { display: block; margin-top: 1rem; font-size: 0.8rem; font-weight: 500; color: var(--text-muted); }
