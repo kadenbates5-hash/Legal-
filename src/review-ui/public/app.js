@@ -57,6 +57,7 @@ const PANEL_TITLES = {
   intake: "Live Intake Demo",
   drafting: "Drafting",
   cases: "Cases",
+  signatures: "Signatures",
   conflicts: "Conflicts",
   research: "Research",
   assistant: "Assistant",
@@ -79,7 +80,7 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
     for (const b of document.querySelectorAll("nav.nav button")) b.classList.toggle("active", b === btn);
     for (const s of document.querySelectorAll("section.panel")) s.classList.toggle("active", s.id === `panel-${panel}`);
     document.getElementById("panelTitle").textContent = PANEL_TITLES[panel] || "";
-    if (["messages", "staff-schedule", "drafting", "billing", "research", "cases", "scheduling", "conflicts", "trust", "invoices", "payroll"].includes(panel)) {
+    if (["messages", "staff-schedule", "drafting", "billing", "research", "cases", "signatures", "scheduling", "conflicts", "trust", "invoices", "payroll"].includes(panel)) {
       refreshPickers();
     }
     if (panel === "home") loadHome();
@@ -91,6 +92,10 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
     if (panel === "scheduling") {
       loadAppointments();
       loadDueReminders();
+    }
+    if (panel === "signatures" && signaturesMatterId().trim()) {
+      loadSignatureSources();
+      loadSignatures();
     }
   });
 }
@@ -314,6 +319,7 @@ async function loadWhoami() {
       document.getElementById("globalSearch").hidden = false;
       document.getElementById("navDrafting").hidden = false;
       document.getElementById("navCases").hidden = false;
+      document.getElementById("navSignatures").hidden = false;
       document.getElementById("navConflicts").hidden = false;
       document.getElementById("navResearch").hidden = false;
       document.getElementById("navAssistant").hidden = false;
@@ -1945,6 +1951,209 @@ async function loadCaseDetail(matterId) {
 
 document.getElementById("refreshCases").addEventListener("click", loadCases);
 document.getElementById("navCases").addEventListener("click", loadCases);
+
+/* ===== Signatures =====
+   Getting an already-uploaded PDF or an attorney-released draft actually
+   signed. The signer never logs in — they open a bare token link
+   (`sign.html?token=...`) this panel hands back right after "Send for
+   signature", since no SMTP transport may be configured to email it. */
+function signaturesMatterId() {
+  return document.getElementById("signaturesMatterId").value;
+}
+
+// The matter's uploaded PDFs and released drafts, cached client-side so
+// switching the "Source" dropdown re-populates "Document/draft" without
+// a round trip — the same reasoning `refreshMatterOptions`'s datalist
+// caching already uses.
+let sigDocuments = [];
+let sigReleasedDrafts = [];
+
+async function loadSignatureSources() {
+  const matterId = signaturesMatterId().trim();
+  if (!matterId) return;
+  try {
+    const [docs, drafts] = await Promise.all([
+      api(`/api/documents/matters/${encodeURIComponent(matterId)}`),
+      api(`/api/drafting/matters/${encodeURIComponent(matterId)}`),
+    ]);
+    sigDocuments = docs.filter((d) => d.contentType === "application/pdf" || d.fileName.toLowerCase().endsWith(".pdf"));
+    sigReleasedDrafts = drafts.filter((d) => d.status === "released");
+    renderSigSourceOptions();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+function renderSigSourceOptions() {
+  const kind = document.getElementById("sigSourceKind").value;
+  const select = document.getElementById("sigSourceId");
+  select.innerHTML = "";
+  const options = kind === "document" ? sigDocuments.map((d) => ({ id: d.id, label: d.fileName })) : sigReleasedDrafts.map((d) => ({ id: d.id, label: `${d.kind} (${d.id})` }));
+  if (options.length === 0) {
+    select.innerHTML = `<option value="">${kind === "document" ? "No uploaded PDFs on this matter" : "No released drafts on this matter"}</option>`;
+    return;
+  }
+  for (const opt of options) {
+    const el = document.createElement("option");
+    el.value = opt.id;
+    el.textContent = opt.label;
+    select.appendChild(el);
+  }
+}
+
+document.getElementById("sigSourceKind").addEventListener("change", renderSigSourceOptions);
+document.getElementById("loadSignatures").addEventListener("click", async () => {
+  await loadSignatureSources();
+  await loadSignatures();
+});
+
+// The signers being built up for the next "Send for signature" — held
+// client-side until send, same pattern as the matter record's key dates.
+let currentSigners = [];
+
+function renderSignerRows() {
+  const list = document.getElementById("sigSignersList");
+  list.innerHTML = "";
+  currentSigners.forEach((signer, i) => {
+    const row = document.createElement("div");
+    row.className = "field-row signer-row";
+    row.innerHTML = `
+      <label class="field">Name <input type="text" value="${escapeHtml(signer.name)}" data-signer-field="name" /></label>
+      <label class="field">Email <input type="email" value="${escapeHtml(signer.email)}" data-signer-field="email" /></label>
+    `;
+    row.querySelector('[data-signer-field="name"]').addEventListener("input", (e) => { currentSigners[i].name = e.target.value; });
+    row.querySelector('[data-signer-field="email"]').addEventListener("input", (e) => { currentSigners[i].email = e.target.value; });
+    const remove = mkButton("Remove", () => {
+      currentSigners.splice(i, 1);
+      renderSignerRows();
+    });
+    remove.classList.add("danger");
+    row.appendChild(remove);
+    list.appendChild(row);
+  });
+  if (currentSigners.length === 0) list.innerHTML = '<p class="meta">No signers added yet.</p>';
+}
+
+document.getElementById("addSigner").addEventListener("click", () => {
+  currentSigners.push({ name: "", email: "" });
+  renderSignerRows();
+});
+renderSignerRows();
+
+function sigStatusBadgeClass(status) {
+  if (status === "completed" || status === "signed") return "approved";
+  if (status === "voided" || status === "declined") return "rejected";
+  return "pending_review";
+}
+
+async function loadSignatures() {
+  showError("");
+  const matterId = signaturesMatterId().trim();
+  const list = document.getElementById("signaturesList");
+  if (!matterId) {
+    list.innerHTML = '<li class="static empty">Enter a matter ID above to see its signature requests.</li>';
+    return;
+  }
+  try {
+    const envelopes = await api(`/api/esignature/matters/${encodeURIComponent(matterId)}`);
+    list.innerHTML = "";
+    for (const envelope of envelopes) {
+      const li = document.createElement("li");
+      li.classList.add("static");
+      const signerRows = envelope.signers
+        .map((s) => `${escapeHtml(s.name)} &lt;${escapeHtml(s.email)}&gt; <span class="badge ${sigStatusBadgeClass(s.status)}">${s.status}</span>`)
+        .join("<br>");
+      li.innerHTML = `
+        <strong>${escapeHtml(envelope.title)}</strong>
+        <span class="badge ${sigStatusBadgeClass(envelope.status)}">${envelope.status}</span>
+        ${envelope.voidReason ? `<div class="meta">Void reason: ${escapeHtml(envelope.voidReason)}</div>` : ""}
+        <div class="mt-xs">${signerRows}</div>
+        <div class="actions mt-sm" data-actions></div>
+      `;
+      const actions = li.querySelector("[data-actions]");
+      if (envelope.status === "completed") {
+        actions.appendChild(mkButton("Download final PDF", async () => {
+          showError("");
+          try {
+            const res = await fetch(`/api/esignature/matters/${encodeURIComponent(matterId)}/${envelope.id}/final-pdf`, { credentials: "same-origin" });
+            if (res.status === 401) { window.location.href = "/login.html"; return; }
+            if (!res.ok) { showError((await res.json()).error || res.statusText); return; }
+            const disposition = res.headers.get("content-disposition") || "";
+            const name = /filename="([^"]+)"/.exec(disposition)?.[1] || `${envelope.id}.pdf`;
+            const url = URL.createObjectURL(await res.blob());
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = name;
+            link.click();
+            URL.revokeObjectURL(url);
+          } catch (err) {
+            showError(err.message);
+          }
+        }));
+      }
+      if (envelope.status === "sent" && currentRole === "attorney") {
+        const voidBtn = mkButton("Void", async () => {
+          const reason = prompt("Reason for withdrawing this signature request?") || "";
+          if (!reason.trim()) return;
+          showError("");
+          try {
+            await api(`/api/esignature/matters/${encodeURIComponent(matterId)}/${envelope.id}/void`, {
+              method: "POST",
+              body: JSON.stringify({ reason }),
+            });
+            await loadSignatures();
+            showToast("Signature request withdrawn.", "success");
+          } catch (err) {
+            showError(err.message);
+          }
+        });
+        voidBtn.classList.add("danger");
+        actions.appendChild(voidBtn);
+      }
+      list.appendChild(li);
+    }
+    if (envelopes.length === 0) list.innerHTML = '<li class="static empty">No signature requests on this matter yet.</li>';
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("sendForSignature").addEventListener("click", async () => {
+  showError("");
+  const resultEl = document.getElementById("sigSendResult");
+  resultEl.innerHTML = "";
+  const matterId = signaturesMatterId().trim();
+  if (!matterId) { showError("Enter a matter ID first."); return; }
+  const sourceId = document.getElementById("sigSourceId").value;
+  if (!sourceId) { showError("Pick a document or draft to send."); return; }
+  const signers = currentSigners.filter((s) => s.name.trim() && s.email.trim());
+  if (signers.length === 0) { showError("Add at least one signer with a name and email."); return; }
+  try {
+    const result = await api(`/api/esignature/matters/${encodeURIComponent(matterId)}`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: document.getElementById("sigTitle").value,
+        sourceKind: document.getElementById("sigSourceKind").value,
+        sourceId,
+        signers,
+      }),
+    });
+    currentSigners = [];
+    renderSignerRows();
+    document.getElementById("sigTitle").value = "";
+    await loadSignatures();
+    const links = result.envelope.signers
+      .map((s) => `${escapeHtml(s.name)}: <code>${escapeHtml(result.signingUrls[s.id])}</code>`)
+      .join("<br>");
+    resultEl.innerHTML = `<div class="card">
+      <p class="meta">${result.emailed ? "Emailed to every signer." : "No email transport configured — share these links yourself:"}</p>
+      <div class="mt-xs">${links}</div>
+    </div>`;
+    showToast("Sent for signature.", "success");
+  } catch (err) {
+    showError(err.message);
+  }
+});
 
 /* ===== Research ===== */
 async function searchResearch() {

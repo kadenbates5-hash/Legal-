@@ -1184,6 +1184,126 @@ recompress embedded images when condensing (see `pdf-condenser.ts`'s doc
 comment above) — a scanned, image-heavy PDF condenses poorly by design,
 not by bug.
 
+## E-signature
+
+`src/core/esignature.ts` / `src/integrations/esignature-pdf.ts` /
+`src/review-ui/esignature-service.ts` — getting an already-attorney-
+approved document (an engagement letter, a settlement, a stipulation)
+actually signed. Closes a real gap: drafting, review, and billing all
+existed, but nothing produced by this system could ever be signed by
+anyone, and the signer is deliberately **not** assumed to be a Docket
+user at all — a client, a witness, opposing counsel on a stipulation —
+so this never goes through the client portal or `AccessControl`'s
+`client_portal` category.
+
+**§1's non-negotiable rule applies here too, not just at drafting.** A
+`WorkProduct` can only be sent for signature once it is `released` —
+never `draft`/`pending_review`/`approved` — enforced in
+`ESignatureService.send()`'s source lookup, so this can never become a
+second way around the attorney checkpoint. A staff-uploaded PDF
+`document` has no such gate, since it was never agent-drafted content
+to begin with; it must actually be a PDF (`contentType ===
+"application/pdf"`) — signing an arbitrary file type isn't supported.
+
+- `core/esignature.ts` — `ESignatureStore`. A `SignatureEnvelope` freezes
+  the exact bytes sent (`pdfContent`, base64) and their SHA-256
+  (`documentHash`) at send time — never a live reference to a source
+  that could change out from under a signature already collected. Each
+  `Signer` gets a single-use, hashed, salted, time-boxed (14-day) bearer
+  token — the identical shape and reasoning as `core/auth.ts`'s
+  `PasswordResetRequest`: whoever holds it can sign with no other proof
+  of identity, so only the hash is ever stored, never the plaintext.
+  The envelope completes (`status: "completed"`) the moment every
+  signer has signed; a signer declining moves the *whole* envelope to
+  `"declined"` rather than just that signer, since a document missing a
+  required signature can't be partially executed. Only a still-`"sent"`
+  (pending) envelope can be voided — a completed signature can't be
+  un-signed, the same "void, don't edit" reasoning as a sent invoice.
+- `integrations/esignature-pdf.ts` — the two PDF operations this needed
+  that nothing else in this codebase did yet, over the `pdf-lib` this
+  project already depends on for invoices/condensing:
+  `renderPlainTextPdf()` turns a released `WorkProduct`'s plain-text
+  content into a PDF in the first place (drafts had never had a PDF
+  form before — invoices were the only thing that needed one), and
+  `stampCertificateOfCompletion()` appends a **certificate of
+  completion** page once every signer has signed — the document's hash
+  and every signer's name/email/signature text/timestamp/IP address —
+  the same "accountability has to be provable, not just asserted"
+  reasoning as the audit log's hash chain, applied to a single document.
+  Both are exported standalone and unit-tested without a live service,
+  same pattern as `invoice-pdf.ts`'s `invoicePdfFilename`.
+- `review-ui/esignature-service.ts` — `ESignatureService`, with two
+  genuinely different trust boundaries in one class. Staff-facing
+  methods (`send`/`get`/`listByMatter`/`void`/`downloadFinal`) take an
+  `Actor` and go through `AccessControl`'s `case_file` category exactly
+  like `DraftingService`/`DocumentsService` — `send` is paralegal/
+  attorney, `void` is attorney-only (a paralegal prepares and sends a
+  request, but withdrawing one already out for signature is
+  supervisory, the same split `InvoicingService` draws for voiding a
+  sent invoice). The signer-facing methods
+  (`getForSigner`/`getDocumentForSigner`/`sign`/`decline`) take a bare
+  bearer token instead and no `Actor` at all — the same shape as
+  `AuthService.resetPasswordWithToken`, where holding the token already
+  is the proof. A mail failure in `send()` doesn't abort the send — the
+  envelope already exists and the response always carries every
+  signer's raw signing URL regardless of whether email was configured,
+  so staff can still deliver it by hand (the same "degrade, don't
+  block" reasoning as `InvoicingService`'s preview-and-send-yourself
+  fallback) — `emailed` in the response says whether mail actually went
+  out. Every send/void/sign/decline is audited; a signer's own actions
+  are recorded with `actor: { id: signer.email, role: "anonymous" }`,
+  the same role `core/types.ts` already reserves for a pre-credential
+  party, never `"system"` (that's the calendar/Stripe machine
+  credential specifically).
+- `server.ts` wires the staff side as `/api/esignature/matters/:matterId`
+  (list/send) and `/api/esignature/matters/:matterId/:id`
+  (get/`/void`/`/final-pdf`), gated by the normal cookie session like
+  everything else. The signer side is `/api/sign/:token` (status),
+  `/api/sign/:token/document` (the PDF, served `inline` so a browser can
+  preview it rather than downloading it — `sendBinary()` gained a
+  `disposition` parameter for this), `/api/sign/:token` `POST` (sign),
+  and `/api/sign/:token/decline` — all public and unauthenticated,
+  handled in the same bucket as `/api/forgot-password`/
+  `/api/reset-password/confirm` before the normal actor-resolution step
+  runs, since a signer has no Docket session to resolve. Both buckets
+  404 when no `ESignatureService` was passed to `createReviewServer`.
+- `start.ts` constructs `ESignatureService` whenever `PUBLIC_BASE_URL` is
+  set — the same var Twilio/Stripe/calendar-OAuth/password-reset already
+  share for their own callback/link URLs, so this needed **no new env
+  var and no new vendor at all**: it's built entirely from
+  `pdf-lib`+whatever `EmailSender` is already configured (optional —
+  see the degrade-gracefully behavior above) +the existing
+  `DocumentStore`/`WorkProductStore`/`AccessControl`. `persistence/
+  system-state.ts` snapshots `ESignatureStore` alongside everything
+  else.
+- The dashboard's **Signatures** panel (same role gate as Drafting/
+  Cases): pick a matter, pick an uploaded PDF or a released draft, add
+  one or more signers by name/email, and send — the response shows
+  each signer's raw link right there (useful whether or not email is
+  configured) so staff always has it to hand. The matter's signature
+  requests list shows each signer's live status, a "Void" button
+  (attorney-only, reason required), and a "Download final PDF" button
+  once completed. `public/sign.html`/`sign.js`/`sign.css` are the
+  signer's own page — no login, no account, just the token in the URL —
+  showing the document inline (a same-origin `<iframe>` onto
+  `/api/sign/:token/document`, which the CSP's `default-src 'self'`
+  already allows with no policy change needed), a "type your full name
+  to sign" field plus an explicit consent checkbox, and a "Decline to
+  sign" option.
+
+What this doesn't do: let a client sign through the client portal (the
+signer is deliberately outside that surface entirely, reached only
+through the emailed/shared token link), support any source document
+type other than a PDF or a released `WorkProduct`'s rendered text,
+offer multiple signers a defined signing *order* (every signer's link
+works the moment the envelope is sent — there's no "wait for signer 1
+before signer 2 can sign" sequencing), or let anyone — including an
+attorney — edit a signer list or swap the underlying document once a
+single signature has been collected. It's a real, legally-meaningful
+click-to-sign capture (typed name, explicit consent, IP/timestamp,
+document hash, a certificate of completion), not a cryptographic
+PKI-backed signature the way some paid vendors offer.
+
 ## Matters and conflict-of-interest screening
 
 The one thing a law firm is *ethically obliged* to get right before
@@ -2602,13 +2722,13 @@ message-shaped surface in this project.
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over twenty-four panels — Home, My Matters, Search,
+between sections) over twenty-five panels — Home, My Matters, Search,
 Review Queue, Deadlines,
-Scheduling, Live Intake Demo, Drafting, Cases, Conflicts, Trust, Invoices,
+Scheduling, Live Intake Demo, Drafting, Cases, Signatures, Conflicts, Trust, Invoices,
 Time Clock, Payroll, Research, Assistant,
 Staff, Messages, Schedule, Billing, Security, Analytics, Accounts, and
 Audit Log (Drafting/
-Cases/Research/Assistant/Billing and Analytics/Accounts/Audit Log hidden from the
+Cases/Signatures/Research/Assistant/Billing and Analytics/Accounts/Audit Log hidden from the
 nav for roles that can't use them; Staff/Messages/Schedule are open to
 every logged-in *staff* human so they're never hidden **for a staff
 role** — a client account is denied those surfaces server-side, see
@@ -2645,6 +2765,10 @@ nav item is hidden except **My Matters** and **Security** — see below.
 - `documents-service.ts` / `cases-service.ts` — `DocumentsService` and
   `CasesService`, backing the "Cases" panel — see `document-store.ts`'s
   entry above for what they do.
+- `esignature-service.ts` — `ESignatureService`, backing the
+  "Signatures" panel (plus the public, session-less `/api/sign/:token*`
+  routes a signer uses directly, no login at all) — see "E-signature"
+  above for what it does.
 - `research-service.ts` — `ResearchService`, backing the "Research" panel
   — see "Legal research — CourtListener" above for what it does.
 - `assistant-service.ts` — `AssistantService`, backing the "Assistant"
@@ -2669,16 +2793,18 @@ nav item is hidden except **My Matters** and **Security** — see below.
   for the calendar integration's machine credential. `GET /` redirects to
   `/login.html` when there's no valid session; `POST /api/logout` clears
   it. `/api/intake/*`, `/api/accounts*`, `/api/drafting/*`,
-  `/api/documents/*`, `/api/cases*`, `/api/audit*`, `/api/research/*`,
+  `/api/documents/*`, `/api/cases*`, `/api/esignature/*`, `/api/audit*`, `/api/research/*`,
   `/api/assistant/*`, `/api/staff`, `/api/messages/*`,
   `/api/staff-schedule/*`, `/api/billing-hours/*`, `/api/pdf-reports/*`,
   and `/api/analytics/*`
   are 404 if no `IntakeDemoSessions`/`AccountsService`/`DraftingService`/
-  `DocumentsService`/`CasesService`/`AuditService`/`ResearchService`/
+  `DocumentsService`/`CasesService`/`ESignatureService`/`AuditService`/`ResearchService`/
   `AssistantService`/`StaffService`/`MessagingService`/
   `StaffScheduleService`/`BillingHoursService`/`PdfReportService`/
   `AnalyticsService` was
-  passed to `createReviewServer`, respectively. `npm run build` copies
+  passed to `createReviewServer`, respectively (the public
+  `/api/sign/:token*` bucket 404s the same way, same `ESignatureService`
+  check). `npm run build` copies
   `public/` into `dist/` since `tsc` only compiles `.ts` files.
 - `public/manifest.webmanifest` / `public/sw.js` / `public/icons/` —
   PWA support: Docket is installable (a home-screen icon, a standalone
@@ -2738,7 +2864,9 @@ nav item is hidden except **My Matters** and **Security** — see below.
   document-report drafting, and PDF condensing" above) — alongside its
   drafted work product and a "Client messages" thread with whichever
   client accounts are granted the matter (see "Client-firm messaging"
-  above); same role gate as Drafting), Research (search
+  above); same role gate as Drafting), Signatures (pick a matter,
+  pick an uploaded PDF or a released draft, add signers, send — see
+  "E-signature" above — same role gate as Drafting), Research (search
   case law, "Save to
   matter" on any result, and a per-matter quick-access list with a
   Remove action — same role gate as Drafting), Assistant (a chat window
@@ -2768,10 +2896,10 @@ nav item is hidden except **My Matters** and **Security** — see below.
   grant/denial and work-product transition, append-only, optionally
   filtered by matter id, with a "Download CSV" button for the currently
   filtered entries — nav item hidden unless role is `attorney`). The
-  Drafting/Cases/Research/Assistant/Billing and Analytics/Accounts/Audit Log hides
+  Drafting/Cases/Signatures/Research/Assistant/Billing and Analytics/Accounts/Audit Log hides
   are client-side convenience only; the real gate is server-side in
   `AccountsService`/`DraftingService`/`DocumentsService`/`CasesService`/
-  `ResearchService`/`AssistantService`/`BillingHoursService`/`AuditService`/
+  `ESignatureService`/`ResearchService`/`AssistantService`/`BillingHoursService`/`AuditService`/
   `AnalyticsService`.
   Any `401` from the API redirects the browser back to `/login.html`.
   Every field that names a person is a `<select>` populated from
@@ -2926,6 +3054,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run send:deadline-alerts  # one-shot: email each matter's responsible attorney their own at-risk deadlines (run on a schedule, e.g. daily cron); add DEADLINE_ALERT_RECIPIENT=partners@firm.example as a catch-all for matters with no responsible attorney/email on file
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # SMTP_HOST=smtp.example.com SMTP_FROM=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable self-service "forgot password" email links (reuses PUBLIC_BASE_URL and whichever SMTP_* vars are already set for invoices — see "Self-service password reset")
+# PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui     # enable the Signatures panel's e-signature requests (see "E-signature") — needs no new vendor; emails each signer's link whenever SMTP_* is also set, otherwise the panel shows the raw link for staff to share
 # STRIPE_SECRET_KEY=sk_... STRIPE_WEBHOOK_SECRET=whsec_... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable a "Pay now" button on outstanding invoices in the client portal (see "Online invoice payment (Stripe Checkout)"); also point a Stripe webhook endpoint at $PUBLIC_BASE_URL/api/stripe/webhook listening for checkout.session.completed in the Stripe dashboard
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # SPEECH_TOOLS=true npm run start:review-ui                               # enable the dashboard's "Listen" buttons (drafts/messages/Live Intake Demo script preview) — independent of Twilio, reuses VOICEBOX_BASE_URL/VOICEBOX_PROFILE_ID

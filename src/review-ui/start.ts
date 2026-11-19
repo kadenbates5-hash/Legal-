@@ -52,6 +52,7 @@ import { SmtpEmailSender } from "../integrations/smtp-email.js";
 import { PdfLibInvoicePdfRenderer } from "../integrations/invoice-pdf.js";
 import { MultiAnchorTarget, type AuditAnchorTarget } from "../core/audit-anchor.js";
 import { EmailAnchorTarget, FileAnchorTarget } from "../integrations/audit-anchor-targets.js";
+import { ESignatureService } from "./esignature-service.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -769,6 +770,33 @@ const passwordResetOptions: Pick<ReviewServerOptions, "passwordReset"> =
     : {};
 
 /**
+ * E-signature (see "Online invoice payment" and "Self-service password
+ * reset" above for the same shape — a staff-initiated action that ends
+ * in a public, token-bearing link someone outside the firm opens).
+ * Needs `PUBLIC_BASE_URL` to build a link that actually resolves
+ * anywhere; unlike password reset, a real `EmailSender` is optional
+ * rather than required — `ESignatureService.send()` always returns each
+ * signer's raw signing URL in its response, so staff can still deliver
+ * it by hand (copy/paste, their own mail client) when no SMTP transport
+ * is configured, the same "degrade, don't block the whole feature"
+ * reasoning as `InvoicingService`'s preview-and-send-yourself fallback.
+ */
+const esignatureOptions: Pick<ReviewServerOptions, "esignature"> = PUBLIC_BASE_URL
+  ? {
+      esignature: new ESignatureService({
+        store: state.esignatures,
+        accessControl: state.accessControl,
+        auditLog: state.auditLog,
+        documents: state.documentStore,
+        workProducts: state.workProductStore,
+        baseUrl: PUBLIC_BASE_URL.replace(/\/+$/, ""),
+        ...(emailSender.canSend ? { email: emailSender } : {}),
+        ...(firmConfig?.firmName ? { firmName: firmConfig.firmName } : {}),
+      }),
+    }
+  : {};
+
+/**
  * Self-service "connect your own Google Calendar" (see "Google
  * Calendar integration" in CLAUDE.md) — the per-attorney alternative
  * to the one firm-wide shared service-account calendar. Needs a real
@@ -858,6 +886,7 @@ const server = createReviewServer(service, state.auth, {
   ...voiceOptions,
   ...speechOptions,
   ...passwordResetOptions,
+  ...esignatureOptions,
   ...calendarConnectionOptions,
   ...stripeWebhookOptions,
 });

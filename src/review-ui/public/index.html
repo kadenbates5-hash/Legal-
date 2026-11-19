@@ -26,6 +26,7 @@
     <symbol id="i-calendar-check" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="13" height="12" rx="1.5"/><path d="M3.5 8.2h13M7 3v3M13 3v3M7.3 12.1l1.6 1.6 3.4-3.6"/></g></symbol>
     <symbol id="i-chat" viewBox="0 0 20 20"><path d="M4 5h12a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 16 14H9.5L6 17v-3H4A1.5 1.5 0 0 1 2.5 12.5v-6A1.5 1.5 0 0 1 4 5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-pen" viewBox="0 0 20 20"><path d="M12.6 4.4 15.6 7.4 7 16H4v-3L12.6 4.4Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-signature" viewBox="0 0 20 20"><path d="M3 14.5c1.3.6 2.3.2 3-1 .9-1.6.6-4.3-.6-4.3-1.1 0-1.4 3.3-.3 4.6.9 1.1 2.4 1 3.4-.2.8-1 1-2.6 1.8-2.6s-.1 2.3 1 2.6c1 .3 2-.9 2.6-1.8.5-.8 1.3-.8 1.9 0" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17h12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
     <symbol id="i-folder" viewBox="0 0 20 20"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3l1.5 2H16a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 16 16H4.5A1.5 1.5 0 0 1 3 14.5v-8Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-shield-alert" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 16 5v5c0 4-2.7 6.2-6 7-3.3-.8-6-3-6-7V5l6-2Z"/><path d="M10 7.8v3"/><circle cx="10" cy="13" r="0.15" fill="currentColor" stroke="currentColor" stroke-width="1.3"/></g></symbol>
     <symbol id="i-shield-check" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 16 5v5c0 4-2.7 6.2-6 7-3.3-.8-6-3-6-7V5l6-2Z"/><path d="M7.3 10l1.8 1.8L13 8"/></g></symbol>
@@ -58,6 +59,7 @@
     <button data-panel="intake"><svg class="nav-icon"><use href="#i-chat"/></svg>Live Intake Demo</button>
     <button data-panel="drafting" id="navDrafting" hidden><svg class="nav-icon"><use href="#i-pen"/></svg>Drafting</button>
     <button data-panel="cases" id="navCases" hidden><svg class="nav-icon"><use href="#i-folder"/></svg>Cases</button>
+    <button data-panel="signatures" id="navSignatures" hidden><svg class="nav-icon"><use href="#i-signature"/></svg>Signatures</button>
     <button data-panel="conflicts" id="navConflicts" hidden><svg class="nav-icon"><use href="#i-shield-alert"/></svg>Conflicts</button>
     <button data-panel="research" id="navResearch" hidden><svg class="nav-icon"><use href="#i-search"/></svg>Research</button>
     <button data-panel="assistant" id="navAssistant" hidden><svg class="nav-icon"><use href="#i-sparkle"/></svg>Assistant</button>
@@ -359,6 +361,45 @@
         <ul id="casesList" class="list"></ul>
       </div>
       <div id="caseDetail"></div>
+    </section>
+
+    <!-- ===== Signatures (paralegal/attorney) ===== -->
+    <section class="panel" id="panel-signatures">
+      <p class="subtitle">Get an already-uploaded PDF or an attorney-released draft actually signed. A draft can only be sent once it's <code>released</code> — this is never a second way around the Review Queue.</p>
+      <div class="card">
+        <div class="field-row">
+          <label class="field">Matter ID <input id="signaturesMatterId" list="matterOptions" autocomplete="off" placeholder="matter to send from" /></label>
+          <button class="btn" id="loadSignatures">Load matter</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Send for signature</h3>
+        <div class="field-row">
+          <label class="field grow">Title <input id="sigTitle" type="text" placeholder="Engagement Letter" /></label>
+          <label class="field">Source
+            <select id="sigSourceKind">
+              <option value="document">Uploaded document (PDF)</option>
+              <option value="work_product">Released draft</option>
+            </select>
+          </label>
+          <label class="field grow">Document/draft
+            <select id="sigSourceId"></select>
+          </label>
+        </div>
+        <div class="field-row">
+          <h4 class="row-title">Signers</h4>
+          <button class="btn" type="button" id="addSigner">Add signer</button>
+        </div>
+        <div id="sigSignersList" class="signer-rows"></div>
+        <button class="btn primary" id="sendForSignature">Send for signature</button>
+        <div id="sigSendResult"></div>
+      </div>
+
+      <div class="card">
+        <h3>Signature requests on this matter</h3>
+        <ul id="signaturesList" class="list"></ul>
+      </div>
     </section>
 
     <!-- ===== Conflicts (paralegal/attorney) ===== -->

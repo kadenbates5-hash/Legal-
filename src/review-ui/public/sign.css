@@ -1,0 +1,25 @@
+/* Page-specific overrides on top of login.css's shared card/brand/form
+   styling — the signing card needs to be wider (it holds a document
+   preview) and needs a couple of elements login.css has no use for. */
+.sign-card { max-width: 560px; }
+.doc-title { font-family: var(--font-serif); font-size: 1.1rem; margin: 0 0 0.75rem; }
+.pdf-frame {
+  width: 100%;
+  height: 50vh;
+  min-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f4f5f7;
+}
+.consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--text);
+  margin-top: 1.1rem;
+}
+.consent input { width: auto; margin-top: 0.2rem; accent-color: var(--accent); flex-shrink: 0; }
+.done-message { margin: 0.5rem 0 0; }
+#declineBtn { color: var(--danger); }

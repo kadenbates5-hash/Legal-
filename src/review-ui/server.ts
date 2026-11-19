@@ -38,6 +38,8 @@ import { TimeClockError, type BucketKind } from "../core/time-clock.js";
 import { InvoicingError, type LineItemSource, type PaymentMethod } from "../core/invoicing.js";
 import { PayrollError } from "../core/payroll.js";
 import { TrustAccountingError, type TrustEntryType } from "../core/trust-ledger.js";
+import { EsignatureError } from "../core/esignature.js";
+import type { ESignatureService } from "./esignature-service.js";
 import type { MatterStatus, PartyRole } from "../core/matters.js";
 import { MatterClosingError } from "./matters-service.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
@@ -268,12 +270,13 @@ function sendBinary(
   contentType: string,
   filename: string,
   data: Buffer,
+  disposition: "attachment" | "inline" = "attachment",
 ): void {
   const safe = filename.replace(/[\r\n"\\]/g, "").slice(0, 120) || "download";
   res.writeHead(200, {
     "Content-Type": contentType,
     "Content-Length": String(data.byteLength),
-    "Content-Disposition": `attachment; filename="${safe}"`,
+    "Content-Disposition": `${disposition}; filename="${safe}"`,
     ...SECURITY_HEADERS,
   });
   res.end(data);
@@ -328,6 +331,21 @@ function errorStatus(err: unknown): number {
   if (err instanceof Error && err.message.startsWith("matter access only applies")) return 400;
   if (err instanceof SchedulingError) {
     return err.message.startsWith("no appointment") ? 404 : 409;
+  }
+  if (err instanceof EsignatureError) {
+    if (
+      err.message.startsWith("no signature envelope") ||
+      err.message.startsWith("no document") ||
+      err.message.startsWith("no draft") ||
+      err.message.startsWith("no signer") ||
+      err.message.startsWith("this signing link")
+    ) {
+      return 404;
+    }
+    // "must be released first", "no longer open for signing", and
+    // "already signed/declined"/"not yet fully signed" are all conflicts
+    // with the envelope's current state, not malformed input.
+    return /is required|not a PDF|type your name/.test(err.message) ? 400 : 409;
   }
   return 400;
 }
@@ -468,6 +486,8 @@ export interface ReviewServerOptions {
   payroll?: PayrollService;
   timeClock?: TimeClockService;
   analytics?: AnalyticsService;
+  /** Enables `/api/esignature/*` (staff) and the public `/api/sign/:token*` routes (the signer, no Docket session). Absent means both 404, same "absent config means the surface doesn't exist" pattern as everything else optional here. */
+  esignature?: ESignatureService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
   /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
@@ -576,6 +596,7 @@ async function handleRequest(
     payroll,
     timeClock,
     analytics,
+    esignature,
     voiceCalls,
     audioClips,
     twilio,
@@ -814,6 +835,59 @@ async function handleRequest(
       res.writeHead(302, { Location: `/?calendarError=${encodeURIComponent(err instanceof Error ? err.message : "unknown error")}`, ...SECURITY_HEADERS });
     }
     res.end();
+    return;
+  }
+
+  /**
+   * The signer's side of e-signature — public, unauthenticated, same
+   * "the token itself is the authentication" reasoning as the password-
+   * reset link above. A signer is deliberately not assumed to be a
+   * Docket user of any kind (a client, a witness, opposing counsel on a
+   * stipulation), so there is no session to check here at all.
+   */
+  if (url.pathname.startsWith("/api/sign/")) {
+    if (!esignature) {
+      sendJson(res, 404, { error: "e-signature is not configured on this server" });
+      return;
+    }
+    const segments = url.pathname.replace(/^\/api\/sign\/?/, "").split("/").filter(Boolean);
+    const token = segments[0] ? decodeURIComponent(segments[0]) : "";
+    if (!token) {
+      sendJson(res, 404, { error: "not found" });
+      return;
+    }
+    try {
+      if (segments.length === 1 && req.method === "GET") {
+        sendJson(res, 200, esignature.getForSigner(token));
+        return;
+      }
+      if (segments.length === 2 && segments[1] === "document" && req.method === "GET") {
+        sendBinary(res, "application/pdf", "document.pdf", esignature.getDocumentForSigner(token), "inline");
+        return;
+      }
+      if (segments.length === 1 && req.method === "POST") {
+        const body = await readJsonBody(req);
+        await esignature.sign(token, {
+          signatureText: String(body["signatureText"] ?? ""),
+          ipAddress: clientIpFor(req, trustProxy),
+          ...(typeof req.headers["user-agent"] === "string" ? { userAgent: req.headers["user-agent"] } : {}),
+        });
+        sendJson(res, 200, { ok: true });
+        onMutated?.();
+        return;
+      }
+      if (segments.length === 2 && segments[1] === "decline" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        esignature.decline(token, String(body["reason"] ?? ""));
+        sendJson(res, 200, { ok: true });
+        onMutated?.();
+        return;
+      }
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+      return;
+    }
+    sendJson(res, 404, { error: "not found" });
     return;
   }
 
@@ -1141,6 +1215,15 @@ async function handleRequest(
         return;
       }
       await handleDocumentsRequest(documents, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/esignature")) {
+      if (!esignature) {
+        sendJson(res, 404, { error: "e-signature is not configured on this server" });
+        return;
+      }
+      await handleESignatureRequest(esignature, req, res, actor, url, onMutated);
       return;
     }
 
@@ -1858,6 +1941,73 @@ async function handleDocumentsRequest(
     const result = documents.setClientVisibility(actor, matterId, id, body["visible"] === true);
     sendJson(res, 200, result);
     onMutated?.();
+    return;
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleESignatureRequest(
+  esignature: ESignatureService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  const segments = url.pathname.replace(/^\/api\/esignature\/?/, "").split("/").filter(Boolean);
+  if (segments[0] !== "matters" || !segments[1]) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const matterId = segments[1]!;
+
+  if (segments.length === 2 && req.method === "GET") {
+    sendJson(res, 200, esignature.listByMatter(actor, matterId));
+    return;
+  }
+
+  if (segments.length === 2 && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const signers = Array.isArray(body["signers"])
+      ? (body["signers"] as unknown[]).map((s) => ({
+          name: String((s as Record<string, unknown>)?.["name"] ?? ""),
+          email: String((s as Record<string, unknown>)?.["email"] ?? ""),
+        }))
+      : [];
+    const result = await esignature.send(actor, {
+      matterId,
+      title: String(body["title"] ?? ""),
+      sourceKind: body["sourceKind"] === "work_product" ? "work_product" : "document",
+      sourceId: String(body["sourceId"] ?? ""),
+      signers,
+    });
+    sendJson(res, 200, result);
+    onMutated?.();
+    return;
+  }
+
+  const id = segments[2];
+  if (!id) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+
+  if (segments.length === 3 && req.method === "GET") {
+    sendJson(res, 200, esignature.get(actor, matterId, id));
+    return;
+  }
+
+  if (segments.length === 4 && segments[3] === "void" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    sendJson(res, 200, esignature.void(actor, matterId, id, String(body["reason"] ?? "")));
+    onMutated?.();
+    return;
+  }
+
+  if (segments.length === 4 && segments[3] === "final-pdf" && req.method === "GET") {
+    const { filename, data } = await esignature.downloadFinal(actor, matterId, id);
+    sendBinary(res, "application/pdf", filename, data);
     return;
   }
 

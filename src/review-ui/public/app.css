@@ -604,6 +604,9 @@
 .mt-sm { margin-top: 0.3rem; }
 .mt-md { margin-top: 0.4rem; }
 .matter-input { margin-left: 0.5rem; width: 110px; }
+.signer-rows { margin-bottom: 0.5rem; }
+.signer-row { padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+.signer-row:last-child { border-bottom: none; }
 
 /* ---------- Home ---------- */
 .stat-grid {

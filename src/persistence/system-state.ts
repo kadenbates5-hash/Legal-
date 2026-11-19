@@ -19,6 +19,7 @@ import { PayrollStore, type PayrollSnapshot } from "../core/payroll.js";
 import { TimeClock, type TimeClockSnapshot } from "../core/time-clock.js";
 import { ClientMessageStore, type ClientMessage } from "../core/client-messages.js";
 import { CalendarConnectionStore, type CalendarConnection } from "../core/calendar-connections.js";
+import { ESignatureStore, type SignatureEnvelope } from "../core/esignature.js";
 import type { FirmConfig } from "../config/firm-config.js";
 import { fileStateStore, type StateStore } from "./state-store.js";
 
@@ -79,6 +80,8 @@ export interface SystemStateSnapshot {
   clientMessages?: ClientMessage[];
   /** Who has connected their own Google Calendar (see core/calendar-connections.ts), backing the Security panel's calendar card. */
   calendarConnections?: CalendarConnection[];
+  /** E-signature envelopes (see core/esignature.ts), backing the Signatures panel and the public signer-facing /api/sign/:token routes. */
+  esignatures?: SignatureEnvelope[];
 }
 
 export interface SystemState {
@@ -104,6 +107,7 @@ export interface SystemState {
   timeClock: TimeClock;
   clientMessages: ClientMessageStore;
   calendarConnections: CalendarConnectionStore;
+  esignatures: ESignatureStore;
 }
 
 export interface LoadSystemStateOptions {
@@ -137,6 +141,7 @@ function emptySnapshot(): SystemStateSnapshot {
     timeClock: { shifts: [], nextId: 1 },
     clientMessages: [],
     calendarConnections: [],
+    esignatures: [],
   };
 }
 
@@ -171,6 +176,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const timeClock = TimeClock.fromSnapshot(snapshot.timeClock ?? { shifts: [], nextId: 1 });
   const clientMessages = ClientMessageStore.fromSnapshot(snapshot.clientMessages ?? []);
   const calendarConnections = CalendarConnectionStore.fromSnapshot(snapshot.calendarConnections ?? []);
+  const esignatures = ESignatureStore.fromSnapshot(snapshot.esignatures ?? []);
   return {
     auditLog,
     auditAnchors: (snapshot.auditAnchors ?? []).map((a) => ({ ...a })),
@@ -193,6 +199,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
     timeClock,
     clientMessages,
     calendarConnections,
+    esignatures,
   };
 }
 
@@ -221,6 +228,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     timeClock: state.timeClock.toSnapshot(),
     clientMessages: state.clientMessages.toSnapshot(),
     calendarConnections: state.calendarConnections.toSnapshot(),
+    esignatures: state.esignatures.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }
