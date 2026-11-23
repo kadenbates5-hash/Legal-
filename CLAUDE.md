@@ -189,6 +189,45 @@ was far less safe than its tests said:
   `normalizeCallerText()` collapses whitespace and straightens quotes
   once, before any matching.
 
+**A second round** widened the corpus to how people actually type and
+talk outside the textbook phrasing — and found 38 more emergencies that
+never escalated, at any point in a call:
+
+- *Texting shorthand*: "hes in jail rn", "court 2moro", "court is in
+  1hr", "the police wanna talk to me", "kms". `expandShorthand()` now
+  rewrites shorthand ("2moro", "rn", "wanna", "kms", "5-0", and
+  apostrophe-less contractions like "isnt", so the negation guard still
+  sees them) before the escalation patterns run — and *only* there:
+  party names for conflicts screening come from the caller's own words,
+  where turning "R" into "are" would mangle them.
+- *Slang and regional custody*: "he's at county", "behind bars", "got
+  nicked… in the cells", "remanded", "the cops picked him up", "taken
+  in", "cuffed", "they won't let me leave", ICE/immigration detention.
+  "At county" deliberately excludes county court, the clerk and the
+  courthouse.
+- *Protective-order abbreviations*: TRO, RO, PFA, DVRO, "order of
+  protection" — and contact with the protected person ("she has a no
+  contact order and I texted her") now counts as the issue, as does an
+  order newly taken out against the caller.
+- *Crisis in the past tense and nearby weapons*: "my husband just hit
+  me", "my ex is outside with a gun", "ending my life", "unalive
+  myself". A weapon only counts when it's *here* (outside, at the door,
+  coming over) — "I got caught with a gun in my car" is an ordinary call
+  to a criminal practice, not a crisis, and is pinned as benign.
+- *Code-switching*: Spanish custody ("mi esposo está en la cárcel", "lo
+  arrestaron anoche"), police ("la policía está en mi casa"), court
+  ("tengo corte mañana") and crisis ("me quiero morir"), with a Spanish
+  "no" before the verb read as a denial.
+- *Rambling openers*: an emergency buried at the end of a long
+  paragraph still escalates (it did; now it's pinned).
+
+Two false alarms were fixed along the way: "lol no he's not locked up"
+(the word between the verb and "locked up" can no longer be the
+negation itself), and — introduced by this round, caught by the
+existing suite — "No, there's no protective order against me", now
+read as denying the order. Every new phrasing runs in all seven variants
+at all seven points in a call, like the first round.
+
 The "Family member calling on someone's behalf" training scenario's
 script changed as a result: its old opening ("my son, he's been
 arrested") is now, correctly, a custody emergency, so it no longer

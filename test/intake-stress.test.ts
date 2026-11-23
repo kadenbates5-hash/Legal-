@@ -72,6 +72,24 @@ const EMERGENCIES: Record<string, { trigger: string; lines: string[] }> = {
       "my daughter was arrested this morning",
       "he's not out of jail yet",
       "I need to post bail for my son",
+      // Second round: slang, regional, texting shorthand, Spanish.
+      "hes in jail rn",
+      "the cops picked him up an hour ago",
+      "he got nicked last night and he's in the cells",
+      "my husband was remanded in custody",
+      "hes locked up at county",
+      "he's at county",
+      "they hauled him in",
+      "my brother is behind bars",
+      "ICE took my husband",
+      "immigration detained my wife",
+      "my wife got taken in by the police",
+      "he got cuffed and taken in",
+      "i got arrested an hour ago and they won't let me leave",
+      "mi esposo está en la cárcel",
+      "mi hijo está detenido",
+      "my son está en la cárcel",
+      "lo arrestaron anoche",
     ],
   },
   police: {
@@ -84,6 +102,12 @@ const EMERGENCIES: Record<string, { trigger: string; lines: string[] }> = {
       "officers want to interview me this afternoon",
       "a detective called and wants a statement from me",
       "the police want to question me",
+      "5-0 is at my door",
+      "the police wanna talk to me",
+      "theres cops at my door rn",
+      "FBI agents came to my house and want to talk to me",
+      "I've been asked to attend a voluntary interview at the police station",
+      "la policía está en mi casa",
     ],
   },
   court: {
@@ -98,6 +122,16 @@ const EMERGENCIES: Record<string, { trigger: string; lines: string[] }> = {
       "my hearing is in two hours",
       "my court date is Friday",
       "sentencing is tonight",
+      "court 2moro",
+      "court tmrw",
+      "my court date is 2day",
+      "court is in 1hr",
+      "I gotta be in court in the morning",
+      "I'm due in court on Thursday",
+      "my case is called tomorrow",
+      "I've got a court date day after tomorrow",
+      "I'm due at the magistrates' court tomorrow",
+      "tengo corte mañana",
     ],
   },
   "protective order": {
@@ -108,6 +142,12 @@ const EMERGENCIES: Record<string, { trigger: string; lines: string[] }> = {
       "there's a no-contact order and she says I broke it",
       "the police came because of the restraining order",
       "I just got served with a protective order",
+      "she took out a TRO on me",
+      "there's an RO against me and he says I broke it",
+      "he got a PFA against me",
+      "I was served with a DVRO",
+      "an order of protection was issued against me yesterday",
+      "she has a no contact order and I texted her",
     ],
   },
   crisis: {
@@ -122,6 +162,13 @@ const EMERGENCIES: Record<string, { trigger: string; lines: string[] }> = {
       "she's threatening to kill me",
       "I took a bunch of pills",
       "I'm in danger",
+      "i wanna kms",
+      "kms",
+      "i want to unalive myself",
+      "i'm thinking about ending my life",
+      "my husband just hit me",
+      "my ex is outside with a gun",
+      "me quiero morir",
     ],
   },
 };
@@ -164,6 +211,25 @@ describe("every emergency, every phrasing, every point in the call", () => {
   }
 });
 
+describe("an emergency buried at the end of a long, rambling opener still escalates", () => {
+  const ramble = (end: string) =>
+    "Hi so this is kind of a long story, my cousin recommended you guys and I've been meaning to call for a while because things have been crazy with work and the kids and the house and honestly everything, and I wasn't sure who to call or whether this was even the right kind of firm, anyway the reason I'm calling is " +
+    end;
+  const cases: Array<[string, string]> = [
+    ["in_custody", "my husband got arrested last night and he is still in jail"],
+    ["court_appearance_imminent", "I have to be in court tomorrow morning and I have no idea what to do"],
+    ["crisis_risk", "I honestly don't want to live anymore"],
+    ["imminent_police_questioning", "a detective wants me to come in and talk tomorrow"],
+  ];
+  for (const [trigger, end] of cases) {
+    it(`escalates a ramble ending "${end}"`, () => {
+      const result = makeSession().handleMessage(ramble(end));
+      expect(result.done).toBe(true);
+      expect(result.trace.triggers).toContain(trigger);
+    });
+  }
+});
+
 describe("legal questions are redirected to a person, never answered or skipped", () => {
   const questions = [
     "should I plead guilty?",
@@ -202,6 +268,17 @@ describe("ordinary answers don't end the call", () => {
     "Will I need to come in to the office?",
     "the officer gave me a ticket and I want to come in to your office",
     "🙏",
+    // Second round: denials and ordinary answers in the new styles.
+    "lol no he's not locked up",
+    "no court date yet",
+    "court isnt till next yr",
+    "idk when court is, they didnt say",
+    "mi esposo no está detenido",
+    "I got caught with a gun in my car last month",
+    "I'm charged with carrying a knife",
+    "the hearing is at the county courthouse next month",
+    "No, there's no protective order against me.",
+    "nah there isnt any restraining order on me",
   ];
   for (const line of benign) {
     it(`continues after "${line}"`, () => {

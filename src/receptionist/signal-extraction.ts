@@ -18,19 +18,30 @@ import type { EscalationSignals } from "../core/escalation.js";
  * doesn't cancel a match, because "No, my husband is in jail" is exactly
  * the call this exists for.
  */
-const CUSTODY_PLACE = String.raw`(?:jail|prison|lockup|lock-up|detention(?: center| facility)?|juvie|juvenile hall|holding(?: cell)?|precinct|police station)`;
+const CUSTODY_PLACE = String.raw`(?:jail|prison|lockup|lock-up|detention(?: center| facility)?|juvie|juvenile hall|holding(?: cell)?|precinct|police station|the cells|slammer|clink)`;
 const CUSTODY_RES: RegExp[] = [
   /\bin (?:\w+ )?cust[oa]?dy\b/i, // "in custody", "in police custody", "in custdy"
   new RegExp(String.raw`(?<!released )\b(?:in|at|inside|from)\s+(?:the\s+|a\s+)?(?:\w+\s+)?${CUSTODY_PLACE}\b`, "i"),
   new RegExp(String.raw`\b(?:took|taken|hauled|carted|brought|sent)\s+(?:\w+\s+){0,2}(?:to|into)\s+(?:the\s+)?(?:\w+\s+)?(?:${CUSTODY_PLACE}|custody|the station)\b`, "i"),
-  /(?:\b(?:was|were|got|gotten|been|is|are|am|im|being|just|still)|'s|'re|'m)\s+(?:\w+\s+)?(?:arrested|detained|booked\s+in(?:to)?|picked up|taken into custody|locked up|handcuffed|in handcuffs)\b/i,
-  /\b(?:they|police|cops|officers?|deput(?:y|ies)|ice|feds|agents)\s+(?:just\s+)?(?:arrested|detained|picked up|took|locked up|booked)\s+(?:him|her|them|me|my|our|us)\b/i,
-  /\b(?:under arrest|collect call|being held|been held|(?:holding|detaining|keeping) (?:me|him|her|them|my \w+)(?! back))\b/i,
+  // The optional word between the verb and the participle is never a
+  // negation, so "he's not locked up" is a denial rather than a match.
+  /(?:\b(?:was|were|got|gotten|been|is|are|am|im|being|just|still)|'s|'re|'m)\s+(?:(?!not\b|never\b)\w+\s+)?(?:arrested|detained|booked\s+in(?:to)?|picked up|taken into custody|taken in|hauled in|brought in|locked up|handcuffed|cuffed|in handcuffs|nicked|remanded|busted)\b/i,
+  /\b(?:they|police|cops|officers?|deput(?:y|ies)|ice|immigration|border patrol|feds|agents|marshals|troopers?|sheriffs?)\s+(?:just\s+)?(?:arrested|detained|picked up|took|locked up|booked|hauled|cuffed)\s+(?:him|her|them|me|my|our|us)\b/i,
+  /\b(?:under arrest|collect call|being held|been held|behind bars|(?:holding|detaining|keeping) (?:me|him|her|them|my \w+)(?! back))\b/i,
   /\b(?:post|posting|make|making|pay|paying)\s+(?:his |her |their |my )?(?:bail|bond)\b/i,
   // "not out of jail yet" means still in it — the one place a negation adds custody rather than removing it.
   /\b(?:not|n't|never)\s+(?:\w+\s+)?(?:out of|released from|let out of|bailed out)\b/i,
+  // "the cops picked him up", "they hauled her in", "took my son away".
+  /\b(?:they|police|cops|officers?|deput(?:y|ies)|ice|immigration|feds|agents)\s+(?:just\s+)?(?:picked|hauled|took|dragged|carted|brought|locked)\s+(?:him|her|them|me|my \w+)\s+(?:up|in|away|downtown)\b/i,
+  // "He's at county" — the county jail — but not county court, the clerk, or a county line.
+  /\b(?:at|from) (?:the )?county\b(?! (?:court|clerk|office|hospital|line|fair|records?|building))/i,
+  // Being kept there right now, whatever the caller said happened first.
+  /\b(?:won't|will not|aren't|are not|not) (?:let(?:ting)?|allow(?:ing)?) (?:me|him|her|them|us) (?:leave|go)\b/i,
+  // Spanish, from code-switching callers: "mi esposo está en la cárcel", "lo arrestaron anoche".
+  // A Spanish "no" directly before the verb is a denial: "no está detenido".
+  /(?:(?<!\bno )\ben la c[aá]rcel|\ben (?:la )?prisi[oó]n|(?<!\bno )\best[aá]n? (?:pres[oa]s?|detenid[oa]s?|arrestad[oa]s?)|\b(?:lo|la|los|las|me|nos) (?:arrestaron|detuvieron|agarraron|llevaron preso)|\bfue (?:arrestad|detenid)[oa]|\bbajo custodia|\bla migra)/i,
 ];
-const CUSTODY_NEGATABLE = new Set([0, 1, 3, 5]);
+const CUSTODY_NEGATABLE = new Set([0, 1, 3, 5, 8, 9]);
 /** Index of the "was/got/been arrested" pattern, which also skips a caller's own *past* arrest — see below. */
 const ARREST_EVENT_INDEX = 3;
 /**
@@ -44,14 +55,20 @@ const OWN_PAST_ARREST_RE = /\b(?:i|i've|ive|i have|i had)\s+(?:just\s+|already\s
 
 /* Imminent police contact: someone from law enforcement *and* a sign they want to talk now or soon. */
 const LAW_ENFORCEMENT_RE = /\b(?:police|cops?|detectives?|officers?|investigators?|agents?|fbi|dea|atf|sheriff'?s?|deput(?:y|ies)|troopers?|feds|law enforcement)\b/i;
-const POLICE_CONTACT_RE = /\b(?:want(?:s|ed)? to (?:talk|speak|question|interview|meet|see|ask)(?: (?:to|with))? (?:me|him|her|them|us|my \w+)|want(?:s|ed)? (?:me|him|her|them|us|my \w+) to (?:come|talk|meet|answer|go)|(?:at|outside|on) (?:my|the|our) (?:door|house|home|porch|work|job|apartment|place)|outside|knocking|asking (?:me )?questions|question(?:ing)? me|interview me|(?:give|make|take|get|want|wants|need|needs) (?:a |my )?statement|come (?:in|down) (?:to the (?:station|precinct)|for (?:questioning|an interview))|left (?:me )?a (?:card|message|voicemail|note)|called me|showed up|came (?:to|by)|(?:is|are) here|on (?:their|the|his|her) way)\b/i;
+const POLICE_CONTACT_RE = /\b(?:(?:attend|come in for|go (?:in )?for|do) (?:a |an |the )?(?:voluntary |police )?interview|want(?:s|ed)? to (?:talk|speak|question|interview|meet|see|ask)(?: (?:to|with))? (?:me|him|her|them|us|my \w+)|want(?:s|ed)? (?:me|him|her|them|us|my \w+) to (?:come|talk|meet|answer|go)|(?:at|outside|on) (?:my|the|our) (?:door|house|home|porch|work|job|apartment|place)|outside|knocking|asking (?:me )?questions|question(?:ing)? me|interview me|(?:give|make|take|get|want|wants|need|needs) (?:a |my )?statement|come (?:in|down) (?:to the (?:station|precinct)|for (?:questioning|an interview))|left (?:me )?a (?:card|message|voicemail|note)|called me|showed up|came (?:to|by)|(?:is|are) here|on (?:their|the|his|her) way)\b/i;
 const IMMINENT_POLICE_RE = /\b(police (?:want|are going|is going) to (?:question|interview|talk to) me|(?:talking|about to talk) to (?:the )?police (?:now|tonight|today)|detective(?:s)? (?:want|need) to (?:speak|talk) (?:with|to) me)\b/i;
+/* Spanish: "la policía está en mi casa", "la policía quiere hablar conmigo". */
+const SPANISH_POLICE_RE = /\b(?:polic[ií]as?|detectives?|agentes?)\b.{0,30}(?:est[aá]n? (?:aqu[ií]|afuera|en (?:mi|la) (?:casa|puerta))|vin(?:o|ieron)|viene|quieren? (?:hablar|interrogar)|toc(?:a|an|ando))/i;
 
 /* A court appearance is named many ways; the timing is parsed separately (parseHoursUntil). */
-const COURT_MENTION_RE = /\b(?:court|hearing|arraignment|arraigned|trial|judge|sentencing|docket|magistrate|appearance|appear)\b/i;
+const COURT_MENTION_RE = /\b(?:court|hearing|arraignment|arraigned|trial|judge|sentencing|docket|magistrates?|appearance|appear|(?:case|matter) is (?:called|heard|up|on|set|scheduled|listed)|corte|audiencia|juicio|juez|tribunal)\b/i;
 
-const PROTECTIVE_ORDER_RE = /\b(?:(?:protective|restraining|no[- ]contact|stay[- ]away|protection) order|order of protection|pfa|tro)\b/i;
-const PROTECTIVE_ORDER_ISSUE_RE = /\b(?:violat|broke|break|arrest|warrant|police|cops|served|showed up|came (?:to|by|over)|they said i|says? i)/i;
+const PROTECTIVE_ORDER_RE = /\b(?:(?:protective|restraining|no[- ]contact|stay[- ]away|protection) order|order of protection|pfa|tro|dvro|epo|ppo|cpo|an? ro (?:against|on))\b/i;
+// What makes an order an *issue* rather than background: a breach, the
+// police, being served, or one newly taken out against the caller — and
+// any contact with the protected person, which is how a breach is usually
+// described ("she has a no contact order and I texted her").
+const PROTECTIVE_ORDER_ISSUE_RE = /\b(?:violat|broke|break|arrest|warrant|police|cops|served|showed up|came (?:to|by|over)|they said i|says? i|took out|filed|issued|against me|on me|texted|called|messaged|contacted|went (?:to|near|by|over)|go (?:to|near)|saw (?:her|him|them)|ran into)/i;
 
 const LEGAL_ADVICE_RE = /\b(am i going to (?:jail|prison)|do i have a case|should i (?:talk|speak) to (?:the )?police|what should i (?:do|say)|is (?:this|that) legal|can they (?:do that|arrest me)|will i (?:go to jail|get convicted))\b/i;
 // The questions callers actually ask, beyond the first-person patterns above.
@@ -71,8 +88,13 @@ const VULNERABLE_RE = /\b(i(?:'ve| have) been drinking|i(?:'m| am) (?:scared|ter
 // caller" gentler-handoff path — a crisis needs resource information (988),
 // not just a faster human handoff. Never negation-guarded: "I'm not
 // suicidal" reaching a human costs nothing.
-const CRISIS_SELF_HARM_RE = /\b(kill myself|end my life|want to die|don'?t want to (?:live|be here anymore)|hurt myself|suicidal|suicide|self[- ]harm|end it all|end things|want to end it|(?:no|don'?t see (?:the|any)|there'?s no) (?:point|reason) (?:in |to |of )?(?:living|going on|life|being alive)|better off dead|wish i (?:was|were) dead|take my (?:own )?life|not worth living|can'?t go on|cut(?:ting)? myself|overdos(?:e|ed|ing)|(?:took|swallowed|taking|take) (?:a bunch of|too many|all (?:my|the|of my)|a lot of|a handful of) (?:pills|meds|medication|tablets))\b/i;
-const CRISIS_DANGER_RE = /\b(he'?s going to (?:kill|hurt) me|she'?s going to (?:kill|hurt) me|(?:someone|he|she|they) (?:is|are) (?:trying to (?:kill|hurt|attack) me|attacking me)|i(?:'m| am|m)? not safe|i need help right now|(?:he|she|they) (?:has|have|got|pulled|is pointing|are pointing) a (?:gun|knife|weapon)|(?:is|are|keeps?|he'?s|she'?s|they'?re|been) (?:hitting|beating|choking|strangling|hurting|attacking|punching|kicking) me|threaten(?:ing|ed|s)? to (?:kill|hurt|shoot|stab) (?:me|us|my)|i(?:'m| am|m)? in danger)\b/i;
+const CRISIS_SELF_HARM_RE = /\b(kill myself|end(?:ing)? my life|ending it all|want to die|don'?t want to (?:live|be here anymore)|hurt myself|suicidal|suicide|self[- ]harm|end it all|end things|want to end it|(?:no|don'?t see (?:the|any)|there'?s no) (?:point|reason) (?:in |to |of )?(?:living|going on|life|being alive)|better off dead|wish i (?:was|were) dead|take my (?:own )?life|not worth living|can'?t go on|cut(?:ting)? myself|overdos(?:e|ed|ing)|(?:took|swallowed|taking|take) (?:a bunch of|too many|all (?:my|the|of my)|a lot of|a handful of) (?:pills|meds|medication|tablets))\b/i;
+const CRISIS_DANGER_RE = /\b(he'?s going to (?:kill|hurt) me|she'?s going to (?:kill|hurt) me|(?:someone|he|she|they) (?:is|are) (?:trying to (?:kill|hurt|attack) me|attacking me)|i(?:'m| am|m)? not safe|i need help right now|(?:he|she|they) (?:has|have|got|pulled|is pointing|are pointing) a (?:gun|knife|weapon)|(?:is|are|keeps?|he'?s|she'?s|they'?re|been) (?:hitting|beating|choking|strangling|hurting|attacking|punching|kicking) me|threaten(?:ing|ed|s)? to (?:kill|hurt|shoot|stab) (?:me|us|my)|i(?:'m| am|m)? in danger|(?:just|has|have|he|she|they|husband|wife|boyfriend|girlfriend|partner|ex|dad|mom|father|mother)\s+(?:just\s+)?(?:hit|punched|kicked|choked|strangled|beat|attacked|stabbed|shot|slapped|shoved|pushed) me|beat me up)\b/i;
+// A weapon *here, now* — outside, at the door, in the house, on the way. Not
+// "charged with a gun", which is an ordinary call to a criminal practice.
+const CRISIS_WEAPON_NEARBY_RE = /\b(?:outside|here|at (?:my|the) (?:door|house|window)|in (?:my|the) (?:house|home|yard)|on (?:his|her|their) way|coming (?:over|here))\b.{0,30}\b(?:gun|knife|weapon|firearm)\b|\b(?:gun|knife|weapon|firearm)\b.{0,30}\b(?:outside|at (?:my|the) (?:door|house|window)|in (?:my|the) (?:house|home|yard)|coming (?:over|here))\b/i;
+// Spanish: "me quiero morir", "me está pegando", "me quiere matar".
+const SPANISH_CRISIS_RE = /(?:\bme quiero (?:morir|matar)|\bquiero morir|\bno quiero vivir|\bme voy a matar|\bme (?:est[aá]n? )?(?:pegando|golpeando)|\bme (?:quiere|quieren|va a|van a) matar|\bsuicid)/i;
 const OPT_OUT_RE = /\b(don'?t want (?:an? )?ai|no ai|human only|talk to a human please|opt out of ai)\b/i;
 const INTERPRETER_RE = /\b(i (?:don'?t|do not) speak english well|necesito un int[eé]rprete|interpreter|translator)\b/i;
 // §7 red-teaming: explicit refusal of recording consent, distinct from
@@ -88,6 +110,44 @@ export const RECORDING_CONSENT_REFUSAL_RE = /\b(no,? (?:i (?:don'?t|do not)|don'
  */
 export function normalizeCallerText(text: string): string {
   return text.replace(/[\u2018\u2019\u02bc\u0060\u00b4]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Texting shorthand, expanded before the escalation patterns run — so
+ * "court 2moro", "hes in jail rn", "the police wanna talk to me", "kms"
+ * and "5-0 is at my door" read as what they say. Only the escalation
+ * matchers see this: party names for conflicts screening are taken from
+ * the caller's own words, where turning "R" into "are" would mangle them.
+ */
+const SHORTHAND: Array<[RegExp, string]> = [
+  [/\b(?:2mor+ow|2moro|2mrw|tmrw|tmw|tomoz|tomor+ow|tom+or+ow)\b/gi, "tomorrow"],
+  [/\b2day\b/gi, "today"],
+  [/\b(?:2nite|2night|tonite)\b/gi, "tonight"],
+  [/\bnite\b/gi, "night"],
+  [/\brn\b/gi, "right now"],
+  [/\bwanna\b/gi, "want to"],
+  [/\bgonna\b/gi, "going to"],
+  [/\bgotta\b/gi, "got to"],
+  [/\btryna\b/gi, "trying to"],
+  [/\bu\b/gi, "you"],
+  [/\br\b/gi, "are"],
+  [/\bur\b/gi, "your"],
+  [/\bb4\b/gi, "before"],
+  [/\byr\b/gi, "year"],
+  [/\b(hes|shes|theyre|im|ive|dont|cant|wont|isnt|arent|wasnt|werent|didnt|doesnt|hasnt|havent|wouldnt|couldnt|shouldnt|aint)\b/gi, "\u0000$1"],
+  [/\bkms\b/gi, "kill myself"],
+  [/\bunalive (?:my ?self)\b/gi, "kill myself"],
+  [/\b(?:5-?0|five-?o|po-?po)\b/gi, "police"],
+];
+const CONTRACTIONS: Record<string, string> = {
+  hes: "he's", shes: "she's", theyre: "they're", im: "i'm", ive: "i've", dont: "don't", cant: "can't", wont: "won't",
+  isnt: "isn't", arent: "aren't", wasnt: "wasn't", werent: "weren't", didnt: "didn't", doesnt: "doesn't", hasnt: "hasn't",
+  havent: "haven't", wouldnt: "wouldn't", couldnt: "couldn't", shouldnt: "shouldn't", aint: "ain't",
+};
+export function expandShorthand(text: string): string {
+  let out = text;
+  for (const [re, replacement] of SHORTHAND) out = out.replace(re, replacement);
+  return out.replace(/\u0000(\w+)/g, (_, word: string) => CONTRACTIONS[word.toLowerCase()] ?? word);
 }
 
 const NEGATION_WORD_RE = /^(?:not|never|\w+n't|\w+n’t|cannot)$/i;
@@ -123,10 +183,10 @@ const NUMBER_WORDS: Record<string, number> = {
   a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
   "a few": 3, "a couple": 2, "a couple of": 2, couple: 2, few: 3,
 };
-const RELATIVE_RE = /\bin\s+(?:about\s+|around\s+|like\s+|roughly\s+|maybe\s+|approximately\s+|just\s+)?(\d{1,3}|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a few|a couple(?: of)?)\s+(hours?|hrs?|days?|weeks?)\b/gi;
-const SAME_DAY_RE = /\b(?:today|tonight|this (?:morning|afternoon|evening)|right now|in an hour)\b/i;
-const TOMORROW_RE = /\b(?:tomorrow|tmrw|tmr)\b/i;
-const THIS_WEEK_RE = /\b(?:this week|in a day or two|in the next (?:day|two days|couple (?:of )?days))\b/i;
+const RELATIVE_RE = /\bin\s+(?:about\s+|around\s+|like\s+|roughly\s+|maybe\s+|approximately\s+|just\s+)?(\d{1,3}(?=\s*(?:hours?|hrs?|days?|weeks?)\b)|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a few|a couple(?: of)?)\s*(hours?|hrs?|days?|weeks?)\b/gi;
+const SAME_DAY_RE = /\b(?:today|tonight|this (?:morning|afternoon|evening)|right now|in an hour|hoy|esta (?:noche|tarde))\b/i;
+const TOMORROW_RE = /(?:\b(?:tomorrow|tmrw|tmr|in the morning|first thing)\b|\bma[nñ]ana)/i;
+const THIS_WEEK_RE = /\b(?:this week|in a day or two|in the next (?:day|two days|couple (?:of )?days)|day after tomorrow|pasado ma[nñ]ana)\b/i;
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_RE = /\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i;
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
@@ -155,7 +215,7 @@ function hoursUntilDate(month: number, day: number, now: Date): number | undefin
  * if no recognizable timing phrase is present.
  */
 export function parseHoursUntil(rawText: string, now?: Date): number | undefined {
-  const text = normalizeCallerText(rawText);
+  const text = expandShorthand(normalizeCallerText(rawText));
   const found: number[] = [];
   for (const match of text.matchAll(RELATIVE_RE)) {
     const raw = match[1]!.toLowerCase();
@@ -187,7 +247,7 @@ export function parseHoursUntil(rawText: string, now?: Date): number | undefined
 }
 
 export function extractSignalsFromText(rawText: string, now?: Date): Partial<EscalationSignals> {
-  const text = normalizeCallerText(rawText);
+  const text = expandShorthand(normalizeCallerText(rawText));
   const signals: Partial<EscalationSignals> = {};
 
   if (
@@ -197,7 +257,7 @@ export function extractSignalsFromText(rawText: string, now?: Date): Partial<Esc
   ) {
     signals.inCustody = true;
   }
-  if (IMMINENT_POLICE_RE.test(text) || (LAW_ENFORCEMENT_RE.test(text) && POLICE_CONTACT_RE.test(text))) {
+  if (IMMINENT_POLICE_RE.test(text) || SPANISH_POLICE_RE.test(text) || (LAW_ENFORCEMENT_RE.test(text) && POLICE_CONTACT_RE.test(text))) {
     signals.imminentPoliceQuestioning = true;
   }
 
@@ -206,7 +266,11 @@ export function extractSignalsFromText(rawText: string, now?: Date): Partial<Esc
     if (hours !== undefined) signals.courtAppearanceWithinHours = hours;
   }
 
-  if (PROTECTIVE_ORDER_RE.test(text) && PROTECTIVE_ORDER_ISSUE_RE.test(text)) {
+  // "There's no protective order against me" denies the order itself, so
+  // the order mention has to survive negation — including a bare "no"
+  // right before it, which elsewhere doesn't count ("No, he violated the
+  // order" is still a violation).
+  if (matchesUnnegated(PROTECTIVE_ORDER_RE, text, (before) => /\b(?:no|without|any)\s+(?:active\s+|current\s+|kind of\s+)?$/i.test(before)) && PROTECTIVE_ORDER_ISSUE_RE.test(text)) {
     signals.activeProtectiveOrderIssue = true;
   }
 
@@ -215,7 +279,9 @@ export function extractSignalsFromText(rawText: string, now?: Date): Partial<Esc
   }
   if (NARRATIVE_RE.test(text)) signals.callerNarratingFacts = true;
   if (MINOR_RE.test(text) || MINOR_AGE_RE.test(text) || VULNERABLE_RE.test(text)) signals.vulnerableCaller = true;
-  if (CRISIS_SELF_HARM_RE.test(text) || CRISIS_DANGER_RE.test(text)) signals.crisisRisk = true;
+  if (CRISIS_SELF_HARM_RE.test(text) || CRISIS_DANGER_RE.test(text) || CRISIS_WEAPON_NEARBY_RE.test(text) || SPANISH_CRISIS_RE.test(text)) {
+    signals.crisisRisk = true;
+  }
   if (OPT_OUT_RE.test(text)) signals.clientRequestedOptOut = true;
   if (INTERPRETER_RE.test(text)) signals.interpreterNeeded = true;
 
