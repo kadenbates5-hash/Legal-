@@ -3100,7 +3100,16 @@ nav item is hidden except **My Matters** and **Security** — see below.
   with `prefers-reduced-motion` or on a touch screen the pages are flat
   and still (verified: computed transform `none`, scene hidden on a
   phone, no sideways scroll). `sw.js`'s shell cache gained the file and
-  moved to `docket-shell-v2`.
+  moved to `docket-shell-v2`. The second pass carries depth across every
+  panel, all in `app.css`: panels swing up into place when switched to
+  (a transform only for the animation's length, so it never becomes a
+  containing block for the toasts/palette, which live outside panels
+  anyway); every `.card` sits on a short stack of paper — two sheets
+  drawn as extra box-shadows, so layout is untouched — that fans out on
+  hover; the active nav item is a raised, bevelled tab; and chat bubbles
+  arrive from a little way back. The flat entrance animations that
+  predate depth.js now also stop under `prefers-reduced-motion`, which
+  they previously ignored.
 - `public/index.html` / `public/app.js` / `public/app.css` — the Docket
   app shell: a dark sidebar (brand + panel nav), a top bar showing who's
   signed in, and one panel each for **Home** (the landing panel: a

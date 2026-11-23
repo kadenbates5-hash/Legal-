@@ -790,6 +790,64 @@ html.depth-on .stat.is-tilting .sheen { opacity: 1; }
 html.depth-on .stat .n { transform: translateZ(26px); transition: transform 0.4s var(--ease); }
 html.depth-on .stat .k { transform: translateZ(12px); }
 
+/* Panels swing up into place when you switch to one — a transform only
+   for the length of the animation, so nothing is left as a containing
+   block for fixed elements (the toasts and command palette live outside
+   the panels anyway). */
+html.depth-on section.panel.active { animation: panel-in-3d 0.45s var(--ease); transform-origin: 50% 0; }
+@keyframes panel-in-3d {
+  from { opacity: 0; transform: perspective(1400px) rotateX(5deg) translateY(10px) translateZ(-36px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Cards sit on a short stack of paper: two sheets peek out beneath, drawn
+   as extra box-shadows so nothing about layout or positioning changes.
+   Static decoration, so it shows with depth off too; the sheets fanning
+   out on hover is the motion part. */
+.card {
+  box-shadow:
+    var(--shadow),
+    0 4px 0 -1px var(--surface),
+    0 4px 0 0 var(--border),
+    0 8px 0 -3px var(--surface-2),
+    0 8px 0 -2px var(--border);
+  margin-bottom: 1.35rem;
+}
+html.depth-on .card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 12px 28px -14px rgba(20, 23, 31, 0.22),
+    0 6px 0 -1px var(--surface),
+    0 6px 0 0 var(--border),
+    0 11px 0 -3px var(--surface-2),
+    0 11px 0 -2px var(--border);
+}
+
+/* The active nav item is a raised tab: a light top edge and a dark bottom
+   edge, and it stands a little proud of the rail. */
+nav.nav button.active {
+  box-shadow: 0 6px 16px -4px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -2px 0 rgba(0, 0, 0, 0.2);
+}
+html.depth-on nav.nav button { transition: background 0.15s var(--ease), color 0.15s var(--ease), transform 0.2s var(--ease); }
+html.depth-on nav.nav button:hover { transform: translateX(2px); }
+html.depth-on nav.nav button.active { transform: translateX(3px); }
+
+/* Chat bubbles arrive from a little way back rather than just fading in. */
+html.depth-on .bubble { animation: bubble-in-3d 0.35s var(--ease); }
+html.depth-on .bubble.agent { transform-origin: 0 100%; }
+html.depth-on .bubble.caller { transform-origin: 100% 100%; }
+@keyframes bubble-in-3d {
+  from { opacity: 0; transform: perspective(600px) translateZ(-60px) rotateX(16deg); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The flat entrance animations that predate depth.js still moved with
+   reduced motion asked for; they don't now. */
+@media (prefers-reduced-motion: reduce) {
+  section.panel, .bubble { animation: none !important; }
+  .card { transition: none; }
+}
+
 /* The brand mark takes one full turn on hover, like a coin. */
 html.depth-on .brand .mark { transition: transform 0.9s var(--ease); transform-style: preserve-3d; }
 html.depth-on .brand:hover .mark { transform: perspective(300px) rotateY(360deg); }
