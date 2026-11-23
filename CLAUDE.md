@@ -3423,6 +3423,15 @@ SaaS template.
   sideways scroll; the sweep found one regression (a select with long
   options pushing the Deadlines card past a phone screen), fixed by
   capping fields at their container's width.
+- **Dark-mode pass.** Every panel screenshotted in dark mode and checked
+  side by side. Two things were off-palette in *both* themes: search
+  result titles got the browser's own pure-yellow `<mark>` (only the
+  snippet's marks were styled), and the native file picker's button
+  stayed a flat grey slab. Every `<mark>` now uses a `--highlight`
+  token (a highlighter stroke by day, amber at night), and
+  `::file-selector-button` is drawn as one of the app's own buttons.
+  The booking form's focus outline was stamp red, against the
+  "red never means click me" rule; it's verdigris now.
 
 ### Accessibility
 

@@ -59,6 +59,8 @@
   /* Stamp red: brand, the tab you're on, nothing else. */
   --accent-2: #c2432a;
   --manila: #dcc9a0;
+  /* A highlighter stroke for search matches, not the browser's pure yellow. */
+  --highlight: #f4dc8c;
 
   --danger: #b3261e;
   --danger-soft: #f9e4e1;
@@ -100,7 +102,7 @@
     --text: #efe8da; --text-muted: #a99f8d; --rail-text: #b4a994; --rail-muted: #978b76; --stamp-text: #ef8a72;
     --ink: #efe6d4; --ink-edge: #b9ad96; --on-ink: #1b1915;
     --accent: #79bfb2; --accent-hover: #9dd3c8; --accent-soft: rgba(121, 191, 178, 0.14); --accent-glow: rgba(121, 191, 178, 0.22);
-    --accent-2: #e2694e; --manila: #8c7a55;
+    --accent-2: #e2694e; --manila: #8c7a55; --highlight: rgba(226, 171, 85, 0.38);
     --danger: #f08a7e; --danger-soft: rgba(240, 138, 126, 0.13);
     --warn: #e2ab55; --warn-soft: rgba(226, 171, 85, 0.13);
     --ok: #7cc48c; --ok-soft: rgba(124, 196, 140, 0.13);
@@ -118,7 +120,7 @@
   --text: #efe8da; --text-muted: #a99f8d; --rail-text: #b4a994; --rail-muted: #978b76; --stamp-text: #ef8a72;
   --ink: #efe6d4; --ink-edge: #b9ad96; --on-ink: #1b1915;
   --accent: #79bfb2; --accent-hover: #9dd3c8; --accent-soft: rgba(121, 191, 178, 0.14); --accent-glow: rgba(121, 191, 178, 0.22);
-  --accent-2: #e2694e; --manila: #8c7a55;
+  --accent-2: #e2694e; --manila: #8c7a55; --highlight: rgba(226, 171, 85, 0.38);
   --danger: #f08a7e; --danger-soft: rgba(240, 138, 126, 0.13);
   --warn: #e2ab55; --warn-soft: rgba(226, 171, 85, 0.13);
   --ok: #7cc48c; --ok-soft: rgba(124, 196, 140, 0.13);
@@ -924,7 +926,8 @@ html.depth-on .brand:hover .mark { transform: perspective(300px) rotateY(360deg)
   color: var(--text-muted);
 }
 .hit-snippet { font-size: 0.84rem; margin-top: 0.25rem; line-height: 1.5; }
-.hit-snippet mark { background: color-mix(in srgb, #f2c94c 45%, transparent); color: inherit; padding: 0 0.1rem; border-radius: 2px; }
+/* Every <mark>, title and snippet alike — the titles were getting the browser's own #ff0. */
+mark { background: var(--highlight); color: inherit; padding: 0 0.12rem; border-radius: 2px; }
 
 /* ---------- Security panel ---------- */
 .mono { font-family: var(--font-mono); font-size: 0.85rem; letter-spacing: 0.06em; word-break: break-all; }
@@ -1113,3 +1116,20 @@ nav.nav button:focus-visible { outline-offset: -3px; }
 }
 .skip-link:focus { top: 0.75rem; }
 .content:focus { outline: none; }
+
+/* The native file picker's button, drawn as one of ours so it stops
+   being a flat grey slab in both themes. */
+input[type="file"] { font-size: 0.84rem; color: var(--text-muted); max-width: 100%; }
+input[type="file"]::file-selector-button {
+  margin-right: 0.65rem;
+  padding: 0.38rem 0.85rem;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover { background: var(--surface-2); }
