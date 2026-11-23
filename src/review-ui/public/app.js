@@ -272,12 +272,20 @@ function showToast(message, kind) {
 
 let currentRole = null;
 let currentActorId = null;
+/** Whether the server has text-to-speech configured (SPEECH_TOOLS) — see canUseSpeechTools. */
+let speechAvailable = false;
 
 async function loadWhoami() {
   try {
     const me = await api("/api/me");
     currentRole = me.role;
     currentActorId = me.id;
+    // Best-effort: absent or failing, Listen buttons simply stay hidden.
+    api("/api/speech/status")
+      .then((status) => {
+        speechAvailable = status.available === true;
+      })
+      .catch(() => {});
     document.getElementById("whoami").textContent = `Signed in as ${me.username || me.id} (${me.role})`;
     const name = me.username || me.id;
     document.getElementById("sidebarUserAvatar").textContent = name.slice(0, 2).toUpperCase();
@@ -1270,7 +1278,7 @@ async function playSynthesizedSpeech(text, button) {
 // system/client/anonymous) — rendering the button for a role the
 // backend will refuse would just be a control that always 403s.
 function canUseSpeechTools() {
-  return currentRole && currentRole !== "system" && currentRole !== "client" && currentRole !== "anonymous";
+  return speechAvailable && currentRole && currentRole !== "system" && currentRole !== "client" && currentRole !== "anonymous";
 }
 
 function listenButton(text) {
@@ -1511,6 +1519,11 @@ let intakeTranscript = [];
 
 async function loadIntakeScenarios() {
   try {
+    api("/api/intake/capabilities")
+      .then((caps) => {
+        document.getElementById("intakeNaturalPhrasingField").hidden = !caps.naturalPhrasing;
+      })
+      .catch(() => {});
     intakeScenarios = await api("/api/intake/scenarios");
     const select = document.getElementById("intakeScenarioId");
     for (const scenario of intakeScenarios) {
@@ -1531,24 +1544,38 @@ document.getElementById("intakeScenarioId").addEventListener("change", () => {
   document.getElementById("intakeScenarioDescription").textContent = scenario ? scenario.description : "";
 });
 
-/** What just happened, rendered as a small badge under the agent's bubble — the whole point of a *training* panel over a plain chat window. */
-function appendBubble(kind, text, trace) {
+/**
+ * What just happened, rendered as a small badge under the agent's bubble —
+ * the whole point of a *training* panel over a plain chat window. When
+ * natural phrasing added an acknowledgement, it's set apart in italics so a
+ * trainee can see exactly which words were the script.
+ */
+function appendBubble(kind, text, trace, acknowledgement) {
   const log = document.getElementById("chatLog");
   const bubble = document.createElement("div");
   bubble.className = `bubble ${kind}`;
-  bubble.textContent = text;
+  if (acknowledgement && text.startsWith(`${acknowledgement} `)) {
+    const added = document.createElement("span");
+    added.className = "ack-text";
+    added.title = "Added by Claude. Everything after it is the exact script.";
+    added.textContent = acknowledgement;
+    bubble.appendChild(added);
+    bubble.appendChild(document.createTextNode(text.slice(acknowledgement.length)));
+  } else {
+    bubble.textContent = text;
+  }
   if (kind === "agent" && canUseSpeechTools()) {
     bubble.appendChild(listenButton(text));
   }
   if (trace) {
     const badge = document.createElement("span");
     badge.className = "trace-badge";
-    badge.textContent = trace.label + (trace.triggers.length ? ` · ${trace.triggers.join(", ")}` : "");
+    badge.textContent = trace.label + (trace.triggers.length ? ` · ${trace.triggers.join(", ")}` : "") + (acknowledgement ? " · + acknowledgement" : "");
     bubble.appendChild(badge);
   }
   log.appendChild(bubble);
   log.scrollTop = log.scrollHeight;
-  intakeTranscript.push({ speaker: kind, text, trace: trace || null });
+  intakeTranscript.push({ speaker: kind, text, trace: trace || null, acknowledgement: acknowledgement || null });
 }
 
 const INTAKE_STATUS_FIELDS = [
@@ -1625,7 +1652,8 @@ async function startIntake() {
     document.getElementById("chatLog").innerHTML = "";
     resetIntakeTraining();
     currentIntakeScenario = intakeScenarios.find((s) => s.id === document.getElementById("intakeScenarioId").value) || null;
-    const { sessionId, reply, trace } = await api("/api/intake/start", { method: "POST", body: "{}" });
+    const naturalPhrasing = !document.getElementById("intakeNaturalPhrasingField").hidden && document.getElementById("intakeNaturalPhrasing").checked;
+    const { sessionId, reply, trace } = await api("/api/intake/start", { method: "POST", body: JSON.stringify({ naturalPhrasing }) });
     intakeSessionId = sessionId;
     appendBubble("agent", reply, trace);
     renderIntakeStatus(trace?.state);
@@ -1644,11 +1672,11 @@ async function sendIntakeTurn(text) {
   appendBubble("caller", text);
   showError("");
   try {
-    const { reply, done, trace } = await api(`/api/intake/${intakeSessionId}/message`, {
+    const { reply, done, trace, acknowledgement } = await api(`/api/intake/${intakeSessionId}/message`, {
       method: "POST",
       body: JSON.stringify({ text }),
     });
-    appendBubble("agent", reply, trace);
+    appendBubble("agent", reply, trace, acknowledgement);
     renderIntakeStatus(trace?.state);
     if (done) {
       appendBubble("system", "Conversation ended. Start a new one to try another scenario.");
@@ -1694,7 +1722,7 @@ async function playScenarioThrough() {
 function downloadIntakeTranscript() {
   const lines = intakeTranscript.map((t) => {
     const who = t.speaker === "caller" ? "Caller" : t.speaker === "agent" ? "Agent" : "System";
-    const traceNote = t.trace ? `  [${t.trace.label}${t.trace.triggers.length ? ` · ${t.trace.triggers.join(", ")}` : ""}]` : "";
+    const traceNote = t.trace ? `  [${t.trace.label}${t.trace.triggers.length ? ` · ${t.trace.triggers.join(", ")}` : ""}${t.acknowledgement ? ` · added: "${t.acknowledgement}"` : ""}]` : "";
     return `${who}: ${t.text}${traceNote}`;
   });
   const blob = new Blob([lines.join("\n")], { type: "text/plain" });

@@ -69,7 +69,15 @@ describe("speech HTTP API", () => {
       body: JSON.stringify({ text: "hi" }),
     });
     expect(res.status).toBe(404);
+    const status = await fetch(`${url}/api/speech/status`, { headers: { Cookie: cookie } });
+    expect(await status.json()).toEqual({ available: false });
     await new Promise<void>((resolve) => bare.close(() => resolve()));
+  });
+
+  it("reports speech as available when configured, so the dashboard can show Listen buttons", async () => {
+    const res = await fetch(`${baseUrl}/api/speech/status`, { headers: { Cookie: attorneyCookie } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ available: true });
   });
 
   it("returns synthesized audio bytes for an attorney", async () => {

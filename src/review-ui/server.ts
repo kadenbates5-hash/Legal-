@@ -1294,6 +1294,13 @@ async function handleRequest(
       return;
     }
 
+    // Lets the dashboard show "Listen" buttons only where they'd work, rather
+    // than offering a button that 404s on a server without SPEECH_TOOLS.
+    if (url.pathname === "/api/speech/status" && req.method === "GET") {
+      sendJson(res, 200, { available: speech !== undefined });
+      return;
+    }
+
     if (url.pathname === "/api/speech/synthesize" && req.method === "POST") {
       if (!speech) {
         sendJson(res, 404, { error: "text-to-speech is not configured on this server" });
@@ -1695,8 +1702,14 @@ async function handleIntakeRequest(
     return;
   }
 
+  if (url.pathname === "/api/intake/capabilities" && req.method === "GET") {
+    sendJson(res, 200, { naturalPhrasing: intake.naturalPhrasingAvailable });
+    return;
+  }
+
   if (url.pathname === "/api/intake/start" && req.method === "POST") {
-    const { sessionId, turn } = intake.start(actor);
+    const body = await readJsonBody(req);
+    const { sessionId, turn } = intake.start(actor, { naturalPhrasing: body["naturalPhrasing"] === true });
     sendJson(res, 200, { sessionId, ...turn });
     return;
   }
@@ -1705,7 +1718,7 @@ async function handleIntakeRequest(
   if (segments.length === 2 && segments[1] === "message" && req.method === "POST") {
     const sessionId = segments[0]!;
     const body = await readJsonBody(req);
-    const turn = intake.handleMessage(sessionId, String(body["text"] ?? ""));
+    const turn = await intake.respond(sessionId, String(body["text"] ?? ""));
     sendJson(res, 200, turn);
     return;
   }

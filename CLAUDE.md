@@ -85,6 +85,41 @@ escalation/access-control logic itself, only:
   `greetingFor()`/`recordingConsentScriptFor()` which layer optional
   `FirmConfig` branding/jurisdiction wording on top of the generic
   fallback text — cosmetic only, never a gate.
+- `acknowledgements.ts` — **natural phrasing**, the confirmed follow-up
+  to the Live Intake training work: Claude may put *one short
+  acknowledgement* ("I understand, that sounds really stressful.") in
+  front of an ordinary intake question, and nothing else. The design is
+  the limit on what it can touch:
+  - `ReceptionistChatSession` marks only an intake-question turn after
+    the first `acknowledgeable` (`ChatTurnResult`). Greeting,
+    caller-type, consent, conflict, every escalation, every handoff and
+    the wrap-up never reach this code, and the question after the
+    acknowledgement is always the exact script. Routing has already
+    happened by the time an acknowledgement is requested, so nothing
+    the model says can change a decision.
+  - `vetAcknowledgement()` checks every sentence before anyone sees it:
+    one sentence, letters/commas/apostrophes/dashes only, at most 16
+    words, no question (with or without a `?`), no number or date or
+    weekday or timeframe, and a broad block-list covering advice,
+    outcomes, reassurance, promises, the law/case/firm, fees, and
+    identity claims. Failures are dropped, never repaired. A timeout
+    (3.5s), API error or `NONE` also gives the plain script, which is
+    what the receptionist said before this existed.
+  - The caller's words go to the model as tagged data with `<`/`>`
+    stripped, and the prompt says to ignore instructions in them — but
+    the validator is the real defence. Verified live: a fake model
+    induced to answer "You are not guilty, an attorney will call you"
+    had that line dropped and the plain question delivered.
+  - Opt-in on its own flag, `INTAKE_NATURAL_PHRASING=true` (plus
+    `ANTHROPIC_API_KEY`), not implied by the Assistant panel's key,
+    because it sends caller text to Anthropic. Wired only into the Live
+    Intake Demo for now (`IntakeDemoSessions.respond()`, a per-
+    conversation checkbox, `GET /api/intake/capabilities`); the panel
+    shows the added words in italics and the transcript records them,
+    so a trainee can always see which words were the script. Putting it
+    on a real channel (`voice-agent.ts`, a chat widget) means real
+    caller words leave the building, so §5's vendor due-diligence
+    applies first.
 - `voice-agent.ts` — `VoiceReceptionistSession`, the voice channel (§8
   build order step 6). Wraps the exact same `ReceptionistChatSession`
   behind vendor-agnostic `SpeechToText`/`TextToSpeech` interfaces — no
@@ -781,7 +816,10 @@ detail view, every message/announcement bubble, and the Live Intake
 Demo's agent-reply bubbles specifically — not the demo caller's own
 typed lines, since this is a preview of the *script*, not a transcript
 reader. Each is gated client-side by the same role check the backend
-enforces, so the button never appears somewhere it would just 403.
+enforces, so the button never appears somewhere it would just 403 —
+and, since a fix, also on `GET /api/speech/status` reporting a
+configured `SpeechService`. Before that the buttons showed on every
+server, including those without `SPEECH_TOOLS`, where every click 404ed.
 
 ## Telephony integration — Twilio (§8 build order step 6, fully resolved)
 
@@ -3174,6 +3212,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # SPEECH_TOOLS=true npm run start:review-ui                               # enable the dashboard's "Listen" buttons (drafts/messages/Live Intake Demo script preview) — independent of Twilio, reuses VOICEBOX_BASE_URL/VOICEBOX_PROFILE_ID
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
 # ANTHROPIC_API_KEY=sk-ant-...  ANTHROPIC_MODEL=claude-sonnet-5  npm run start:review-ui  # enable the Assistant panel; ANTHROPIC_MODEL/ANTHROPIC_BASE_URL are optional overrides
+# INTAKE_NATURAL_PHRASING=true ANTHROPIC_API_KEY=sk-ant-... npm run start:review-ui  # let Claude add a short acknowledgement before Live Intake questions (sends caller text to Anthropic; gates and questions stay scripted — see "acknowledgements.ts")
 # AUDIT_ANCHOR_FILE=/mnt/append-only/anchors.jsonl AUDIT_ANCHOR_EMAILS=partner@firm.example npm run start:review-ui  # publish the audit head hash outside this database (see "Anchoring")
 # ... && npm run anchor:audit                                             # one-shot anchor, meant for cron — refuses if the chain is already broken
 # fileRetentionYears in FIRM_CONFIG_FILE                                  # optional — how long a closed file is kept; absent, matters close with no retention date

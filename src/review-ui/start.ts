@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createReviewServer, maxRequestBodyBytesFor } from "./server.js";
 import { ReviewGateService } from "./review-service.js";
 import { IntakeDemoSessions } from "./intake-demo.js";
+import { ClaudeAcknowledgementSource } from "../receptionist/acknowledgements.js";
 import { AccountsService } from "./accounts-service.js";
 import { DraftingService } from "./drafting-service.js";
 import { DocumentsService } from "./documents-service.js";
@@ -239,6 +240,26 @@ const service = new ReviewGateService(state.workProductStore, state.deadlineTrac
  */
 const conflictChecker = new ConflictChecker(state.matters);
 
+/**
+ * Natural phrasing for live intake (see receptionist/acknowledgements.ts):
+ * Claude may put one short acknowledgement in front of an ordinary intake
+ * question, never touching the question or any gate. Opt-in on its own
+ * flag rather than riding on ANTHROPIC_API_KEY, because it sends the
+ * caller's words to Anthropic — a firm that set up the Assistant panel
+ * hasn't thereby agreed to that for intake.
+ */
+const intakeAcknowledgements =
+  process.env["INTAKE_NATURAL_PHRASING"] === "true" && process.env["ANTHROPIC_API_KEY"]
+    ? new ClaudeAcknowledgementSource(
+        new AnthropicClient({
+          apiKey: process.env["ANTHROPIC_API_KEY"],
+          ...(process.env["ANTHROPIC_MODEL"] ? { model: process.env["ANTHROPIC_MODEL"] } : {}),
+          ...(process.env["ANTHROPIC_BASE_URL"] ? { baseUrl: process.env["ANTHROPIC_BASE_URL"] } : {}),
+          maxTokens: 60,
+        }),
+      )
+    : undefined;
+
 const intake = new IntakeDemoSessions({
   accessControl: new AccessControl(state.auditLog),
   auditLog: state.auditLog,
@@ -248,6 +269,7 @@ const intake = new IntakeDemoSessions({
   // Live intake screens against the firm's real matter records, not a
   // hardcoded name list — see core/conflicts.ts.
   conflictChecker,
+  ...(intakeAcknowledgements ? { acknowledgements: intakeAcknowledgements } : {}),
 });
 
 /**

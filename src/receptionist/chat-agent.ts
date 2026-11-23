@@ -35,6 +35,15 @@ export interface ChatTurnResult {
   reply: string;
   done: boolean;
   trace: TurnTrace;
+  /**
+   * True only on an ordinary intake-question turn after the first, where
+   * the caller has just answered the previous question. It's the one place
+   * a channel may put a short acknowledgement in front of `reply` (see
+   * `acknowledgements.ts`); `reply` itself is still the exact script.
+   * Never set on an escalation, consent, conflict, handoff, or wrap-up
+   * turn, so those are always delivered word for word.
+   */
+  acknowledgeable?: true;
 }
 
 const DIRECTIVE_LABELS: Record<RouteDirective, string> = {
@@ -277,8 +286,15 @@ export class ReceptionistChatSession {
       return this.#finish(WRAP_UP, "Intake complete");
     }
     this.#pendingGate = "intake_question";
-    const prefix = this.#intakeQuestionIndex === 0 ? `${OUTRO_CLEARED_FOR_INTAKE} ` : "";
-    return { reply: `${prefix}${question.prompt}`, done: false, trace: { ...trace, label: `Intake question: ${question.id}` } };
+    const first = this.#intakeQuestionIndex === 0;
+    const prefix = first ? `${OUTRO_CLEARED_FOR_INTAKE} ` : "";
+    return {
+      reply: `${prefix}${question.prompt}`,
+      done: false,
+      trace: { ...trace, label: `Intake question: ${question.id}` },
+      // The first question already opens with the scripted outro.
+      ...(first ? {} : { acknowledgeable: true as const }),
+    };
   }
 
   #finish(reply: string, label: string, triggers: string[] = []): ChatTurnResult {

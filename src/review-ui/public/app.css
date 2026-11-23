@@ -595,6 +595,8 @@
     opacity: 0.6;
   }
   .bubble.caller .trace-badge { color: rgba(255, 255, 255, 0.85); }
+  /* Natural phrasing: the added acknowledgement, set apart from the exact script that follows it. */
+  .bubble .ack-text { font-style: italic; color: var(--text-muted); border-bottom: 1px dotted var(--border); cursor: help; }
 
   .intake-live-grid { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 1rem; align-items: start; }
   @media (max-width: 860px) { .intake-live-grid { grid-template-columns: 1fr; } }
