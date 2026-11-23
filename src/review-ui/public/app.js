@@ -284,6 +284,7 @@ async function loadWhoami() {
     api("/api/speech/status")
       .then((status) => {
         speechAvailable = status.available === true;
+        updateVoiceStatus();
       })
       .catch(() => {});
     document.getElementById("whoami").textContent = `Signed in as ${me.username || me.id} (${me.role})`;
@@ -1220,50 +1221,140 @@ function mkButton(label, onClick) {
   return btn;
 }
 
-/**
- * Backs every "Listen" button (a draft's content, a chat message, a
- * Live Intake Demo script reply) — POSTs the already-on-screen text to
- * /api/speech/synthesize and plays back whatever comes back. Not a raw
- * fetch inline at each call site because every one of them needs the
- * same three things: the 401-redirects-to-login handling every other
- * API call gets, a busy state on the button that triggered it (so a
- * second click mid-synthesis can't stack two requests), and the blob
- * URL cleaned up once playback actually finishes rather than leaking
- * one per click.
+/*
+ * Speech. Two engines, tried in order:
+ *
+ * 1. The firm's voice server (Voicebox, SPEECH_TOOLS=true) via
+ *    /api/speech/synthesize, played from a blob: URL.
+ * 2. This device's own built-in voice (the browser's speechSynthesis), so
+ *    read-aloud works with no server set up at all.
+ *
+ * The browser engine only ever uses a voice the device reports as
+ * `localService`. Some browsers offer network voices (Chrome's "Google …"
+ * voices synthesize on Google's servers), and drafts and messages are
+ * privileged — read-aloud must not quietly send them to a third party.
+ * No local voice means no browser engine, and the Listen buttons don't
+ * appear rather than falling back to a network voice.
  */
+let browserVoice = null;
+let callerVoice = null;
+let currentAudio = null;
+let speakingCount = 0;
+
+function pickLocalVoices() {
+  if (!("speechSynthesis" in window)) return;
+  const local = window.speechSynthesis.getVoices().filter((v) => v.localService);
+  const english = local.filter((v) => /^en/i.test(v.lang));
+  browserVoice = english.find((v) => v.default) || english[0] || local[0] || null;
+  // A second voice for the caller's side of a sample call, so the two
+  // speakers are distinguishable; the same voice if the device has one.
+  callerVoice = english.find((v) => v !== browserVoice) || browserVoice;
+  updateVoiceStatus();
+}
+if ("speechSynthesis" in window) {
+  pickLocalVoices();
+  window.speechSynthesis.addEventListener("voiceschanged", pickLocalVoices);
+}
+
+function speechEngine() {
+  if (speechAvailable) return "server";
+  if (browserVoice) return "browser";
+  return null;
+}
+
+function setSpeaking(delta) {
+  speakingCount = Math.max(0, speakingCount + delta);
+  const stop = document.getElementById("intakeStopAudio");
+  if (stop) stop.hidden = speakingCount === 0 && !intakePlayingThrough;
+}
+
+/** Stops whatever is being spoken right now, on either engine. */
+function stopSpeaking() {
+  if (currentAudio) {
+    const audio = currentAudio;
+    currentAudio = null;
+    audio.pause();
+    audio.dispatchEvent(new Event("ended"));
+  }
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+}
+
+async function speakViaServer(text) {
+  const res = await fetch("/api/speech/synthesize", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (res.status === 401) {
+    window.location.href = "/login.html";
+    return;
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Couldn't synthesize speech.");
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const audio = new Audio(url);
+  currentAudio = audio;
+  try {
+    await new Promise((resolve, reject) => {
+      audio.addEventListener("ended", resolve, { once: true });
+      audio.addEventListener("error", () => reject(new Error("Couldn't play the synthesized audio.")), { once: true });
+      audio.play().catch(reject);
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+    if (currentAudio === audio) currentAudio = null;
+  }
+}
+
+function speakViaBrowser(text, voice) {
+  return new Promise((resolve) => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.voice = voice;
+    utterance.lang = voice.lang;
+    // Resolve on error too: a cancelled utterance (Stop, or a new
+    // conversation) must not leave a sample call waiting forever.
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve();
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
+/**
+ * Speaks `text` and resolves once it has finished, so callers can take
+ * turns (a sample call waits for each line before the next). `speaker:
+ * "caller"` picks the second browser voice.
+ */
+async function speak(text, { speaker = "agent" } = {}) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return;
+  const engine = speechEngine();
+  if (!engine) throw new Error("No offline voice is available in this browser.");
+  setSpeaking(1);
+  try {
+    if (engine === "server") await speakViaServer(trimmed);
+    else await speakViaBrowser(trimmed, speaker === "caller" ? callerVoice : browserVoice);
+  } finally {
+    setSpeaking(-1);
+  }
+}
+
+/** Backs every "Listen" button: a busy label while speaking, errors to the banner. */
 async function playSynthesizedSpeech(text, button) {
   showError("");
-  const trimmed = (text || "").trim();
-  if (!trimmed) {
+  if (!(text || "").trim()) {
     showError("Nothing to read aloud.");
     return;
   }
   const originalLabel = button ? button.textContent : null;
   if (button) {
     button.disabled = true;
-    button.textContent = "Synthesizing…";
+    button.textContent = "Speaking…";
   }
   try {
-    const res = await fetch("/api/speech/synthesize", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: trimmed }),
-    });
-    if (res.status === 401) {
-      window.location.href = "/login.html";
-      return;
-    }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      showError(body.error || "Couldn't synthesize speech.");
-      return;
-    }
-    const url = URL.createObjectURL(await res.blob());
-    const audio = new Audio(url);
-    audio.addEventListener("ended", () => URL.revokeObjectURL(url));
-    audio.addEventListener("error", () => URL.revokeObjectURL(url));
-    await audio.play();
+    await speak(text);
   } catch (err) {
     showError(err.message || "Couldn't play synthesized speech.");
   } finally {
@@ -1275,15 +1366,33 @@ async function playSynthesizedSpeech(text, button) {
 }
 
 // Matches SpeechService's own gate (every logged-in staff human; not
-// system/client/anonymous) — rendering the button for a role the
-// backend will refuse would just be a control that always 403s.
+// system/client/anonymous), and needs a working engine — a button that
+// can't make a sound is worse than none.
 function canUseSpeechTools() {
-  return speechAvailable && currentRole && currentRole !== "system" && currentRole !== "client" && currentRole !== "anonymous";
+  return speechEngine() !== null && currentRole && currentRole !== "system" && currentRole !== "client" && currentRole !== "anonymous";
 }
 
 function listenButton(text) {
   const btn = mkButton("Listen", () => playSynthesizedSpeech(text, btn));
   return btn;
+}
+
+/** Live Intake's voice line: which engine will speak, or why none can. */
+function updateVoiceStatus() {
+  const status = document.getElementById("intakeVoiceStatus");
+  if (!status) return;
+  const engine = speechEngine();
+  const usable = engine !== null;
+  document.getElementById("intakeReadAloud").disabled = !usable;
+  document.getElementById("intakePlaySample").disabled = !usable;
+  if (engine === "server") {
+    status.textContent = "Voice: the firm's voice server.";
+  } else if (engine === "browser") {
+    status.textContent = `Voice: ${browserVoice.name}, built into this device. Nothing is sent anywhere to speak it.`;
+  } else {
+    status.textContent =
+      "No offline voice in this browser, so read-aloud is off. Try another browser or device, or ask an admin to turn on the firm's voice server (SPEECH_TOOLS).";
+  }
 }
 
 const REVIEW_ACTION_LABEL = {
@@ -1516,6 +1625,21 @@ let intakeRunId = 0;
 // Every turn's { speaker, text, trace } — the record the debrief and the
 // transcript download are both built from, so they can never disagree.
 let intakeTranscript = [];
+// Replies are spoken one after another, never over each other: each new
+// one chains onto whatever is still being said.
+let intakeSpeech = Promise.resolve();
+
+function readAloudOn() {
+  return document.getElementById("intakeReadAloud").checked && speechEngine() !== null;
+}
+
+function queueIntakeSpeech(text) {
+  if (!readAloudOn()) return;
+  const runId = intakeRunId;
+  intakeSpeech = intakeSpeech
+    .then(() => (runId === intakeRunId ? speak(text) : undefined))
+    .catch((err) => showError(err.message || "Couldn't read that aloud."));
+}
 
 async function loadIntakeScenarios() {
   try {
@@ -1621,6 +1745,9 @@ function resetIntakeTraining() {
   intakeScenarioLineIndex = 0;
   intakePlayingThrough = false;
   intakeRunId += 1;
+  stopSpeaking();
+  intakeSpeech = Promise.resolve();
+  setSpeaking(0);
   document.getElementById("intakeDebrief").hidden = true;
   renderIntakeStatus(null);
   updateScenarioProgress();
@@ -1656,6 +1783,7 @@ async function startIntake() {
     const { sessionId, reply, trace } = await api("/api/intake/start", { method: "POST", body: JSON.stringify({ naturalPhrasing }) });
     intakeSessionId = sessionId;
     appendBubble("agent", reply, trace);
+    queueIntakeSpeech(reply);
     renderIntakeStatus(trace?.state);
     document.getElementById("chatText").disabled = false;
     document.getElementById("chatSend").disabled = false;
@@ -1677,6 +1805,7 @@ async function sendIntakeTurn(text) {
       body: JSON.stringify({ text }),
     });
     appendBubble("agent", reply, trace, acknowledgement);
+    queueIntakeSpeech(reply);
     renderIntakeStatus(trace?.state);
     if (done) {
       appendBubble("system", "Conversation ended. Start a new one to try another scenario.");
@@ -1705,18 +1834,61 @@ async function sendNextScenarioLine() {
   await sendIntakeTurn(line);
 }
 
+/**
+ * Plays the selected scenario's scripted lines into the real session. With
+ * read-aloud on, it becomes a call you can listen to: it waits for the
+ * receptionist to finish speaking, speaks the caller's line in a second
+ * voice, then sends it — so nothing ever talks over anything else.
+ */
 async function playScenarioThrough() {
   if (intakePlayingThrough) return;
   intakePlayingThrough = true;
+  setSpeaking(0);
   const runId = intakeRunId;
+  const live = () => runId === intakeRunId && currentIntakeScenario && intakeScenarioLineIndex < currentIntakeScenario.lines.length && intakeSessionId;
   try {
-    while (runId === intakeRunId && currentIntakeScenario && intakeScenarioLineIndex < currentIntakeScenario.lines.length && intakeSessionId) {
-      await sendNextScenarioLine();
-      await new Promise((resolve) => setTimeout(resolve, 650));
+    while (live()) {
+      if (readAloudOn()) {
+        await intakeSpeech;
+        if (!live()) break;
+        await speak(currentIntakeScenario.lines[intakeScenarioLineIndex], { speaker: "caller" }).catch(() => {});
+        if (!live()) break;
+        await sendNextScenarioLine();
+      } else {
+        await sendNextScenarioLine();
+        await new Promise((resolve) => setTimeout(resolve, 650));
+      }
     }
+    if (runId === intakeRunId) await intakeSpeech;
   } finally {
-    if (runId === intakeRunId) intakePlayingThrough = false;
+    if (runId === intakeRunId) {
+      intakePlayingThrough = false;
+      setSpeaking(0);
+    }
   }
+}
+
+/** One click: pick a scenario (the routine call if none is chosen), turn read-aloud on, and play the whole call out loud. */
+async function playSampleCall() {
+  const select = document.getElementById("intakeScenarioId");
+  if (!select.value) {
+    select.value = "routine-new-client";
+    select.dispatchEvent(new Event("change"));
+  }
+  document.getElementById("intakeReadAloud").checked = true;
+  await startIntake();
+  if (intakeSessionId) await playScenarioThrough();
+}
+
+function stopIntakeAudio() {
+  // Bumping the run id ends a play-through at its next check; the session
+  // itself stays open so the trainee can carry on typing.
+  intakeRunId += 1;
+  intakePlayingThrough = false;
+  stopSpeaking();
+  intakeSpeech = Promise.resolve();
+  setSpeaking(0);
+  updateScenarioProgress();
 }
 
 function downloadIntakeTranscript() {
@@ -1739,7 +1911,13 @@ document.getElementById("chatText").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendChat();
 });
 document.getElementById("scenarioNextLine").addEventListener("click", sendNextScenarioLine);
-document.getElementById("scenarioPlayAll").addEventListener("click", playScenarioThrough);
+document.getElementById("scenarioPlayAll").addEventListener("click", () => playScenarioThrough());
+document.getElementById("intakePlaySample").addEventListener("click", () => playSampleCall());
+document.getElementById("intakeStopAudio").addEventListener("click", stopIntakeAudio);
+document.getElementById("intakeReadAloud").addEventListener("change", (e) => {
+  if (!e.target.checked) stopIntakeAudio();
+});
+updateVoiceStatus();
 document.getElementById("downloadTranscript").addEventListener("click", downloadIntakeTranscript);
 
 /* ===== Drafting ===== */

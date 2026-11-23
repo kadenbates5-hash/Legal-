@@ -100,6 +100,14 @@ describe("security headers", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("x-frame-options")).toBe("DENY");
   });
+
+  it("lets the page play speech it synthesized (blob: media) without opening scripts to blob:", async () => {
+    const res = await fetch(`${baseUrl}/api/me`);
+    const directives = (res.headers.get("content-security-policy") ?? "").split(";").map((d) => d.trim());
+    expect(directives).toContain("media-src 'self' blob:");
+    expect(directives.find((d) => d.startsWith("script-src"))).toBe("script-src 'self'");
+    expect(directives.find((d) => d.startsWith("default-src"))).toBe("default-src 'self'");
+  });
 });
 
 describe("lockout escape hatch", () => {

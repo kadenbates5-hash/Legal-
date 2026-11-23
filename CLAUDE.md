@@ -810,16 +810,55 @@ may want dashboard read-aloud without real-call telephony configured at
 all (or the reverse). Reuses the same `VOICEBOX_BASE_URL`/
 `VOICEBOX_PROFILE_ID` vars either way.
 
-The dashboard's shared `playSynthesizedSpeech()`/`listenButton()`
-(`app.js`) back three "Listen" buttons: the Drafting panel's draft
-detail view, every message/announcement bubble, and the Live Intake
-Demo's agent-reply bubbles specifically — not the demo caller's own
-typed lines, since this is a preview of the *script*, not a transcript
-reader. Each is gated client-side by the same role check the backend
-enforces, so the button never appears somewhere it would just 403 —
-and, since a fix, also on `GET /api/speech/status` reporting a
-configured `SpeechService`. Before that the buttons showed on every
-server, including those without `SPEECH_TOOLS`, where every click 404ed.
+The dashboard's shared `speak()`/`playSynthesizedSpeech()`/
+`listenButton()` (`app.js`) back three "Listen" buttons: the Drafting
+panel's draft detail view, every message/announcement bubble, and the
+Live Intake Demo's agent-reply bubbles specifically — not the demo
+caller's own typed lines, since this is a preview of the *script*, not a
+transcript reader.
+
+**Two engines, tried in order.** `GET /api/speech/status` says whether
+the server has a `SpeechService`; if so, speech is synthesized there
+(Voicebox) and played from a `blob:` URL. Otherwise the browser's own
+`speechSynthesis` speaks it, so read-aloud works with no voice server at
+all. The browser engine **only uses voices the device reports as
+`localService`**: some browsers offer network voices (Chrome's "Google …"
+voices synthesize on Google's servers), and drafts and messages are
+privileged, so read-aloud must never quietly ship them to a third party.
+No local voice means no browser engine, and no Listen button — a button
+that can't make a sound is worse than none. Each button is also gated by
+the same role check the backend enforces.
+
+**Three bugs fixed alongside this, all found by actually trying to hear
+it** (each was invisible to the unit suite):
+
+- *Listen had never played anything in a real browser.* The CSP had no
+  `media-src`, so media fell back to `default-src 'self'`, which a
+  `blob:` URL doesn't satisfy; Voicebox synthesized the audio and the
+  browser refused to play it. `media-src 'self' blob:` fixes it without
+  touching `script-src` (pinned by `login-security-server.test.ts`).
+- *Listen buttons appeared on servers without `SPEECH_TOOLS`*, where
+  every click 404ed — fixed by the status check above.
+- *`hidden` didn't hide.* `.btn`'s `all: unset` (and `login.css`'s
+  `label { display: block }`) reset `display`, which beats the browser's
+  own `[hidden]` rule. The Time Clock showed "Clock in" and "Clock out"
+  at once, the calendar card "Connect" and "Disconnect", the sign-in
+  page the two-factor code field to everyone, and Live Intake the
+  natural-phrasing checkbox on servers that can't offer it. Each
+  stylesheet now opens with `[hidden] { display: none !important; }`.
+
+**Live Intake read-aloud.** A "Read replies aloud" toggle speaks each
+receptionist reply as it arrives, queued so replies never talk over
+each other. "Play a sample call out loud" picks the selected scenario
+(the routine call if none is chosen) and plays the whole call: it waits
+for the receptionist to finish, speaks the caller's scripted line in a
+second voice, sends it through the real session, and repeats. "Stop"
+silences it mid-call without ending the conversation, and starting a new
+conversation always cancels the old one's audio. A status line says
+which engine will speak, or why none can. Verified live against a fake
+Voicebox (every line synthesized and played, in turn order), a fake
+device voice list that included a default network voice (never used),
+and a voiceless headless browser (controls disabled, no dead buttons).
 
 ## Telephony integration — Twilio (§8 build order step 6, fully resolved)
 
@@ -3003,9 +3042,10 @@ nav item is hidden except **My Matters** and **Security** — see below.
   pick a training scenario or go free-form, "Start new demo conversation",
   then type caller turns or step/play through the scripted ones; each
   agent reply carries a trace badge, a live call-status list and an
-  end-of-call debrief + transcript download, with a "Listen" button on
-  each of the agent's own scripted replies when `SPEECH_TOOLS=true` —
-  see "Training mode" above), Drafting (pick a
+  end-of-call debrief + transcript download, a "Listen" button on each
+  of the agent's own scripted replies, and "Read replies aloud"/"Play a
+  sample call out loud" — see "Training mode" above and "Dashboard
+  'Listen' buttons"), Drafting (pick a
   matter, draft from a template/research summary/risk assessment/billing narrative, then
   revise/submit, plus a "Listen" button on a draft's content — nav item
   hidden unless `GET /api/me` reports role
@@ -3209,7 +3249,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui     # enable the Signatures panel's e-signature requests (see "E-signature") — needs no new vendor; emails each signer's link whenever SMTP_* is also set, otherwise the panel shows the raw link for staff to share
 # STRIPE_SECRET_KEY=sk_... STRIPE_WEBHOOK_SECRET=whsec_... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable a "Pay now" button on outstanding invoices in the client portal (see "Online invoice payment (Stripe Checkout)"); also point a Stripe webhook endpoint at $PUBLIC_BASE_URL/api/stripe/webhook listening for checkout.session.completed in the Stripe dashboard
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
-# SPEECH_TOOLS=true npm run start:review-ui                               # enable the dashboard's "Listen" buttons (drafts/messages/Live Intake Demo script preview) — independent of Twilio, reuses VOICEBOX_BASE_URL/VOICEBOX_PROFILE_ID
+# SPEECH_TOOLS=true npm run start:review-ui                               # use the firm's Voicebox voice for "Listen"/read-aloud (otherwise the browser's own offline voice is used, where the device has one) — independent of Twilio, reuses VOICEBOX_BASE_URL/VOICEBOX_PROFILE_ID
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit
 # ANTHROPIC_API_KEY=sk-ant-...  ANTHROPIC_MODEL=claude-sonnet-5  npm run start:review-ui  # enable the Assistant panel; ANTHROPIC_MODEL/ANTHROPIC_BASE_URL are optional overrides
 # INTAKE_NATURAL_PHRASING=true ANTHROPIC_API_KEY=sk-ant-... npm run start:review-ui  # let Claude add a short acknowledgement before Live Intake questions (sends caller text to Anthropic; gates and questions stay scripted — see "acknowledgements.ts")

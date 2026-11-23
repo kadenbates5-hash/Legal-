@@ -1,3 +1,9 @@
+/* `hidden` must always hide: element rules that set `display` (e.g.
+   `label { display: block }`) otherwise beat the browser's own [hidden]
+   rule — the sign-in page showed the authentication-code field to
+   everyone, two-factor or not. */
+[hidden] { display: none !important; }
+
 /* Page-specific overrides on top of login.css's shared card/brand/form
    styling — the signing card needs to be wider (it holds a document
    preview) and needs a couple of elements login.css has no use for. */

@@ -283,6 +283,12 @@
           <input type="checkbox" id="intakeNaturalPhrasing" checked />
           Natural phrasing — Claude may add a short acknowledgement before an intake question (shown in italics). Questions, consent, conflict and escalation lines stay word for word.
         </label>
+        <div class="field-row mt-xs voice-row">
+          <label class="field checkbox"><input type="checkbox" id="intakeReadAloud" /> Read replies aloud</label>
+          <button class="btn" id="intakePlaySample" type="button">Play a sample call out loud</button>
+          <button class="btn" id="intakeStopAudio" type="button" hidden>Stop</button>
+          <span class="meta-xs" id="intakeVoiceStatus"></span>
+        </div>
         <div id="intakeScenarioDescription" class="meta"></div>
         <div class="field-row mt-xs" id="intakeScenarioControls" hidden>
           <button class="btn" id="scenarioNextLine" type="button">Send next scripted line</button>

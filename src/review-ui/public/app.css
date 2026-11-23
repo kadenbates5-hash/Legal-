@@ -1,3 +1,9 @@
+/* `hidden` must always hide. Component rules that set `display` (or reset
+   it, like `.btn`'s `all: unset`) otherwise beat the browser's own
+   [hidden] rule: the Time Clock showed "Clock in" and "Clock out" at
+   once, and the calendar card both "Connect" and "Disconnect". */
+[hidden] { display: none !important; }
+
 :root {
     --bg: #eef0f4;
     --surface: #ffffff;
@@ -595,6 +601,7 @@
     opacity: 0.6;
   }
   .bubble.caller .trace-badge { color: rgba(255, 255, 255, 0.85); }
+  .voice-row { align-items: center; }
   /* Natural phrasing: the added acknowledgement, set apart from the exact script that follows it. */
   .bubble .ack-text { font-style: italic; color: var(--text-muted); border-bottom: 1px dotted var(--border); cursor: help; }
 

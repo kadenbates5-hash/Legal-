@@ -1,3 +1,9 @@
+/* `hidden` must always hide: element rules that set `display` (e.g.
+   `label { display: block }`) otherwise beat the browser's own [hidden]
+   rule — the sign-in page showed the authentication-code field to
+   everyone, two-factor or not. */
+[hidden] { display: none !important; }
+
 :root {
     --bg: #0c0e14;
     --surface: #ffffff;

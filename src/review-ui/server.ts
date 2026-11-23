@@ -381,6 +381,10 @@ const SECURITY_HEADERS: Record<string, string> = {
     "style-src 'self'",
     "img-src 'self' data:",
     "font-src 'self'",
+    // Synthesized speech is fetched, then played from a blob: URL the page
+    // itself created. Without this, media falls back to default-src 'self',
+    // which blob: doesn't satisfy, and every Listen button stays silent.
+    "media-src 'self' blob:",
     "connect-src 'self'",
     "object-src 'none'",
     "base-uri 'none'",
