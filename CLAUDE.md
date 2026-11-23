@@ -1648,6 +1648,84 @@ any client or adversary actually was.
   (Basics, Court & docket, Opposing counsel, Key dates, Parties, Notes)
   rather than one flat block, now that it covers this many fields.
 
+### Importing from another system (CSV)
+
+`core/csv.ts` / `core/data-import.ts` / `review-ui/import-service.ts` —
+the attorney-only **Import** panel, which brings matters (with their
+clients and adverse parties) and time entries over from Clio, MyCase,
+PracticePanther or a spreadsheet. A firm that can't get its history in
+tends not to switch, or keeps the old system running "for reference",
+which is how records end up in two places disagreeing. But an import is
+also the fastest way to put a lot of wrong data into a system at once,
+so most of the design is about what it refuses to do quietly:
+
+- **Preview, then commit exactly what was previewed.** `planImport()` is
+  pure: it reads the file and today's records and says, row by row, what
+  it would create, skip (and why), or can't make sense of (with the line
+  number a spreadsheet shows). The commit re-plans from the same file
+  and refuses with **409** if the plan's `fingerprint` differs at all —
+  someone created a matter meanwhile, or the column mapping changed — so
+  what the attorney approved is what lands. A preview writes nothing:
+  no records, no audit entries, no save.
+- **Nothing existing is overwritten or merged.** A matter number already
+  in Docket is skipped and left alone. Party lists drive every future
+  conflicts check; an import rewriting them would weaken screening
+  invisibly.
+- **Time already billed in the old system stays out.** Imported hours
+  can be added to a new invoice here, and billing a client twice for the
+  same work is a fee violation. A "Billed"/"Status"/"Invoice #" column
+  decides it; a value the planner can't read is a refused row, not a
+  guess; a file with no such column gets a warning saying anything
+  imported is billable again. Expenses and non-billable time are skipped
+  too, and importing the same file twice adds nothing the second time —
+  counted as a multiset, so two genuinely identical 0.1-hour calls in
+  one file both still import.
+- **Imported matters are conflict-screened** against every existing
+  record *and* each other, by building the post-import book in a scratch
+  `MatterStore` (Rule 1.10 makes the whole firm the scope). A hit
+  doesn't block — these engagements already exist, and refusing to
+  record one would hide the conflict rather than remove it — but a
+  direct or former-client hit requires an explicit acknowledgement
+  before the commit button works.
+- **Time is credited to real accounts only.** A timekeeper with no
+  matching attorney/paralegal account (by username or name, "Brooks,
+  Ada" included) is a refused row, never "the person importing", since
+  who did the work is what an itemised bill states. A disabled former
+  colleague's account still matches, with a note.
+- A matter can't be imported as **closed** while the trust ledger holds
+  funds under its id, the same rule `MattersService.close()` enforces.
+  Closed matters keep their real open/close dates
+  (`MatterStore.upsert`'s `historical` option, which no HTTP body can
+  reach and which never overrides an existing date), get a closing note
+  naming the source, and a retention date from `fileRetentionYears`.
+- Column names differ between tools, so each field has header aliases,
+  each column is used for one field at most, and the preview shows which
+  column each field came from with a dropdown to correct it. The aliases
+  are written from these tools' documented export layouts and common
+  spreadsheet conventions — **best guesses, not verified against live
+  exports** (same caveat as CourtListener's field names); the "looks like
+  a Clio export" line is cosmetic and decides nothing.
+- `csv.ts` is a hand-rolled RFC 4180 reader (quoted commas, doubled
+  quotes, line breaks inside values normalised to `\n`, CRLF/LF/CR, a
+  BOM, semicolon- and tab-separated files). The browser reads the file
+  as UTF-8 and falls back to Windows-1252 if that produced replacement
+  characters, so "Muñoz" from an older Windows export still screens as
+  Muñoz. Limits: 5 MB and 5,000 rows per file.
+
+Audited as one `matter_imported` per matter (its history starts with
+where it came from), one `billing_hours_imported` per matter receiving
+time (count and total), and a `data_import_committed` summary with the
+file name, counts, and whether conflicts were acknowledged. Routes:
+`POST /api/import/preview` and `/api/import/commit` (attorney-only; a
+non-attorney gets 403 even for a preview, which runs a firm-wide
+conflicts screen). Always on — no vendor, no key. The Home "Getting
+started" checklist offers it next to "Create your first matter".
+
+What this doesn't do: import contacts on their own, documents, invoices,
+payments or trust balances (trust history belongs to the old system's
+ledger and its reconciliation; recreating it here would produce a ledger
+that reconciles to nothing), or update records that already exist.
+
 ### Closing a matter, and file retention
 
 `MattersService.close()` / `.reopen()` / `.listRetentionDue()`.
@@ -2161,6 +2239,14 @@ internal review where the entries need to leave the browser. RFC
 being guessed into a legacy codepage. The same `downloadCsv()` helper
 (`app.js`) backs the Billing panel's two CSV exports below — one place
 that does the quoting/BOM/blob-download mechanics, not three.
+
+That one place also guards against **spreadsheet formula injection**:
+a cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is
+prefixed with `'`, because Excel and its kin run such a cell as a
+formula. Party names and descriptions can now arrive from outside the
+firm (a CSV import, the public booking form), so a name like
+`=HYPERLINK(...)` must not become live when someone exports the audit
+log. Plain numbers such as `-4` (days overdue) are left alone.
 
 ## Search
 
@@ -2986,13 +3072,13 @@ message-shaped surface in this project.
 in-memory registry that makes drafted `WorkProduct`s discoverable (a
 `ParalegalDraftingSession` given a `store` registers into it automatically).
 Branded **Docket**: one app shell (sidebar nav, no full-page reloads
-between sections) over twenty-five panels — Home, My Matters, Search,
+between sections) over twenty-six panels — Home, My Matters, Search,
 Review Queue, Deadlines,
 Scheduling, Live Intake Demo, Drafting, Cases, Signatures, Conflicts, Trust, Invoices,
 Time Clock, Payroll, Research, Assistant,
-Staff, Messages, Schedule, Billing, Security, Analytics, Accounts, and
+Staff, Messages, Schedule, Billing, Security, Analytics, Accounts, Import, and
 Audit Log (Drafting/
-Cases/Signatures/Research/Assistant/Billing and Analytics/Accounts/Audit Log hidden from the
+Cases/Signatures/Research/Assistant/Billing and Analytics/Accounts/Import/Audit Log hidden from the
 nav for roles that can't use them; Staff/Messages/Schedule are open to
 every logged-in *staff* human so they're never hidden **for a staff
 role** — a client account is denied those surfaces server-side, see
@@ -3164,6 +3250,10 @@ nav item is hidden except **My Matters** and **Security** — see below.
   arrive from a little way back. The flat entrance animations that
   predate depth.js now also stop under `prefers-reduced-motion`, which
   they previously ignored.
+  A phone-width sweep of every panel (390px) found the whole dashboard
+  scrolled sideways by about 200px: the top bar's account row (search,
+  theme, name, "Change password", "Log out") never wrapped. It now wraps
+  under the panel title, and no panel scrolls sideways at that width.
 - `public/index.html` / `public/app.js` / `public/app.css` — the Docket
   app shell: a dark sidebar (brand + panel nav), a top bar showing who's
   signed in, and one panel each for **Home** (the landing panel: a
@@ -3236,7 +3326,11 @@ nav item is hidden except **My Matters** and **Security** — see below.
   username/full name/email/temporary password/role, disable/re-enable
   one, set or change an account's email, and
   for paralegal accounts specifically, assign/unassign a matter — nav
-  item hidden unless role is `attorney`), and Audit Log (every access
+  item hidden unless role is `attorney`), Import (bring matters and
+  time entries over from another system as CSV, with a row-by-row
+  preview, column overrides and a conflicts acknowledgement before
+  anything is written — see "Importing from another system (CSV)";
+  nav item hidden unless role is `attorney`), and Audit Log (every access
   grant/denial and work-product transition, append-only, optionally
   filtered by matter id, with a "Download CSV" button for the currently
   filtered entries — nav item hidden unless role is `attorney`). The
@@ -3398,6 +3492,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run send:deadline-alerts  # one-shot: email each matter's responsible attorney their own at-risk deadlines (run on a schedule, e.g. daily cron); add DEADLINE_ALERT_RECIPIENT=partners@firm.example as a catch-all for matters with no responsible attorney/email on file
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # SMTP_HOST=smtp.example.com SMTP_FROM=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable self-service "forgot password" email links (reuses PUBLIC_BASE_URL and whichever SMTP_* vars are already set for invoices — see "Self-service password reset")
+# (no config needed) the Import panel is always on for attorneys — CSV exports from Clio/MyCase/PracticePanther or a spreadsheet; see "Importing from another system (CSV)"
 # PUBLIC_BOOKING=true npm run start:review-ui                            # turn on the public /book.html consultation-request page (requests land in the Scheduling panel; staff accept and pick the time — see "Self-service public booking")
 # PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui     # enable the Signatures panel's e-signature requests (see "E-signature") — needs no new vendor; emails each signer's link whenever SMTP_* is also set, otherwise the panel shows the raw link for staff to share
 # STRIPE_SECRET_KEY=sk_... STRIPE_WEBHOOK_SECRET=whsec_... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable a "Pay now" button on outstanding invoices in the client portal (see "Online invoice payment (Stripe Checkout)"); also point a Stripe webhook endpoint at $PUBLIC_BASE_URL/api/stripe/webhook listening for checkout.session.completed in the Stripe dashboard

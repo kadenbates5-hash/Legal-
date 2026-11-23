@@ -146,7 +146,18 @@ export class MatterStore {
    * work product or documents long before anyone fills in who the client
    * is — the record catches up with reality, it doesn't gate it.
    */
-  upsert(matterId: string, input: MatterInput): Matter {
+  upsert(
+    matterId: string,
+    input: MatterInput,
+    /**
+     * Only the import tool (`data-import.ts`) passes this: a matter brought
+     * over from another system was opened (and perhaps closed) years ago,
+     * and stamping today's date would misdate it — and its retention
+     * period. Never reachable from an HTTP body, and it never overrides a
+     * date an existing record already has.
+     */
+    historical: { openedAt?: string; closedAt?: string } = {},
+  ): Matter {
     const id = matterId.trim();
     if (!id) throw new Error("matterId is required");
     const now = new Date().toISOString();
@@ -164,10 +175,10 @@ export class MatterStore {
       opposingCounsel: input.opposingCounsel ?? existing?.opposingCounsel,
       keyDates: (input.keyDates ?? existing?.keyDates ?? []).map((d) => ({ ...d })),
       parties: (input.parties ?? existing?.parties ?? []).map((p) => ({ ...p })),
-      openedAt: existing?.openedAt ?? now,
+      openedAt: existing?.openedAt ?? historical.openedAt ?? now,
       // Closing stamps a date; reopening clears it, so "closed" and
       // "closedAt" can never disagree.
-      closedAt: status === "closed" ? existing?.closedAt ?? now : undefined,
+      closedAt: status === "closed" ? existing?.closedAt ?? historical.closedAt ?? now : undefined,
       // Retention and the closing note belong to a closed file. Reopening
       // clears them rather than leaving a stale retention date on a live
       // matter, which would eventually surface it as "due for review"

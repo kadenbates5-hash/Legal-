@@ -71,6 +71,9 @@ const PANEL_TITLES = {
   payroll: "Payroll",
   security: "Security",
   accounts: "Accounts",
+  import: "Import",
+  analytics: "Analytics",
+  "my-matters": "My Matters",
   audit: "Audit Log",
 };
 
@@ -324,6 +327,7 @@ async function loadWhoami() {
       document.getElementById("navAccounts").hidden = false;
       document.getElementById("navAudit").hidden = false;
       document.getElementById("navAnalytics").hidden = false;
+      document.getElementById("navImport").hidden = false;
     }
     if (me.role === "attorney" || me.role === "paralegal") {
       document.getElementById("globalSearch").hidden = false;
@@ -3397,6 +3401,308 @@ document.getElementById("createAccount").addEventListener("click", createAccount
 document.getElementById("refreshAccounts").addEventListener("click", loadAccounts);
 document.getElementById("navAccounts").addEventListener("click", loadAccounts);
 
+/* ===== Import ===== */
+// The file is read in the browser and sent as text; the server re-plans
+// it from scratch on commit and refuses unless the plan matches the one
+// on screen (`fingerprint`), so nothing here needs to be trusted.
+const IMPORT_MAX_BYTES = 5 * 1024 * 1024;
+const IMPORT_ROWS_SHOWN = 300;
+const IMPORT_TEMPLATES = {
+  matters: ["Matter Number", "Matter Name", "Client", "Client Email", "Client Phone", "Adverse Party", "Status", "Responsible Attorney", "Practice Area", "Court", "Court Case Number", "Opposing Counsel", "Description", "Open Date", "Close Date"],
+  time_entries: ["Date", "Matter", "Timekeeper", "Hours", "Description", "Billed"],
+};
+const IMPORT_KIND_HINTS = {
+  matters: "One row per matter. Clients and adverse parties are screened for conflicts against everything already in Docket and against each other. Separate several names in one cell with a semicolon.",
+  time_entries: "One row per entry. Import matters first: each entry is matched to a matter already in Docket, and credited to the attorney or paralegal account with that name.",
+};
+const importState = { csv: "", fileName: "", mapping: {}, plan: null };
+
+function importKind() {
+  return document.getElementById("importKind").value;
+}
+
+async function readImportFile(file) {
+  // Exports from older Windows tools are often Windows-1252 rather than
+  // UTF-8; read as UTF-8 first and fall back if that produced replacement
+  // characters, so "Muñoz" doesn't arrive as "Mu�oz" and then fail to
+  // match in a conflicts check.
+  const buffer = await file.arrayBuffer();
+  const utf8 = new TextDecoder("utf-8").decode(buffer);
+  if (!utf8.includes("\uFFFD")) return utf8;
+  try {
+    return new TextDecoder("windows-1252").decode(buffer);
+  } catch {
+    return utf8;
+  }
+}
+
+function resetImport(keepFile) {
+  importState.mapping = {};
+  importState.plan = null;
+  if (!keepFile) {
+    importState.csv = "";
+    importState.fileName = "";
+    document.getElementById("importFile").value = "";
+  }
+  document.getElementById("importPreviewCard").hidden = true;
+  document.getElementById("importCommitCard").hidden = true;
+  document.getElementById("importKindHint").textContent = IMPORT_KIND_HINTS[importKind()];
+}
+
+async function previewImport() {
+  showError("");
+  if (!importState.csv) return;
+  const refresh = document.getElementById("importRefresh");
+  refresh.disabled = true;
+  try {
+    importState.plan = await api("/api/import/preview", {
+      method: "POST",
+      body: JSON.stringify({ kind: importKind(), csv: importState.csv, mapping: importState.mapping, fileName: importState.fileName }),
+    });
+    renderImportPlan();
+  } catch (err) {
+    importState.plan = null;
+    document.getElementById("importPreviewCard").hidden = true;
+    document.getElementById("importCommitCard").hidden = true;
+    showError(err.message);
+  } finally {
+    refresh.disabled = false;
+  }
+}
+
+function renderImportPlan() {
+  const plan = importState.plan;
+  const isMatters = plan.kind === "matters";
+  const noun = isMatters ? "matter" : "time entry";
+  const plural = (n) => `${n} ${n === 1 ? noun : isMatters ? "matters" : "time entries"}`;
+  document.getElementById("importPreviewCard").hidden = false;
+  document.getElementById("importFileMeta").textContent = `${importState.fileName} · ${plan.rows.length || "no"} rows read`;
+
+  const tiles = [
+    ["To import", plan.counts.create],
+    ["Skipped", plan.counts.skip],
+    ["Problems", plan.counts.error],
+  ];
+  if (!isMatters) tiles.push(["Hours to import", plan.hoursToCreate ?? 0]);
+  document.getElementById("importCounts").innerHTML = tiles
+    .map(([k, n]) => `<div class="stat"><div class="n">${escapeHtml(String(n))}</div><div class="k">${escapeHtml(k)}</div></div>`)
+    .join("");
+
+  const notes = document.getElementById("importNotes");
+  notes.innerHTML = "";
+  const addNote = (text, kind) => {
+    const li = document.createElement("li");
+    li.className = kind;
+    li.textContent = text;
+    notes.appendChild(li);
+  };
+  if (plan.missingRequired.length) {
+    addNote(`This file needs a column for: ${plan.missingRequired.join(", ")}. Choose one under "Columns" below.`, "bad");
+  }
+  if (plan.sourceGuess) addNote(`The column names look like a ${plan.sourceGuess} export.`, "info");
+  for (const note of plan.notes) addNote(note, "warn");
+  if (plan.needsConflictAcknowledgement) {
+    addNote("Some of these matters may conflict with matters already in Docket or with each other. Read them below before importing.", "bad");
+  }
+
+  // Columns: a select per field, showing what was guessed.
+  const grid = document.getElementById("importColumns");
+  grid.innerHTML = "";
+  for (const column of plan.columns) {
+    const label = document.createElement("label");
+    if (column.required) label.classList.add("required");
+    if (!column.header) label.classList.add("unmapped");
+    const span = document.createElement("span");
+    span.textContent = column.label;
+    const select = document.createElement("select");
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "(not in this file)";
+    select.appendChild(none);
+    for (const header of plan.headers) {
+      if (!header) continue;
+      const option = document.createElement("option");
+      option.value = header;
+      option.textContent = header;
+      select.appendChild(option);
+    }
+    select.value = column.header || "";
+    select.addEventListener("change", () => {
+      importState.mapping[column.field] = select.value;
+      previewImport();
+    });
+    label.append(span, select);
+    grid.appendChild(label);
+  }
+  document.getElementById("importUnused").textContent = plan.unusedHeaders.length
+    ? `Not imported: ${plan.unusedHeaders.join(", ")}.`
+    : "Every column in the file is used.";
+  // Open the column chooser when something essential is missing.
+  if (plan.missingRequired.length) document.getElementById("importColumnsBox").open = true;
+
+  renderImportRows();
+
+  const commitCard = document.getElementById("importCommitCard");
+  const canCommit = plan.counts.create > 0 && plan.missingRequired.length === 0;
+  commitCard.hidden = !canCommit;
+  if (canCommit) {
+    const leftOut = plan.counts.error ? ` ${plan.counts.error} row${plan.counts.error === 1 ? "" : "s"} with problems will be left out — fix them in the file and import it again later; what's already imported will be skipped.` : "";
+    const hours = isMatters ? "" : ` (${plan.hoursToCreate} hours)`;
+    document.getElementById("importCommitSummary").textContent = `This will add ${plural(plan.counts.create)}${hours} and change nothing that's already in Docket.${leftOut}`;
+    document.getElementById("importCommit").textContent = `Import ${plural(plan.counts.create)}`;
+    const ack = document.getElementById("importAckField");
+    ack.hidden = !plan.needsConflictAcknowledgement;
+    document.getElementById("importAck").checked = false;
+    document.getElementById("importCommit").disabled = plan.needsConflictAcknowledgement;
+  }
+}
+
+const IMPORT_ACTION_BADGE = { create: ["approved", "import"], skip: ["muted", "skip"], error: ["rejected", "problem"] };
+const CONFLICT_SEVERITY_LABEL = { direct: "direct conflict", former_client: "former client", same_side: "same side", informational: "note" };
+
+function renderImportRows() {
+  const plan = importState.plan;
+  if (!plan) return;
+  const filter = document.getElementById("importRowFilter").value;
+  const rows = plan.rows.filter((r) =>
+    filter === "all" ? true : filter === "conflict" ? Boolean(r.conflicts && r.conflicts.length) : r.action === filter,
+  );
+  // Problems and conflicts first: they're what needs reading.
+  const rank = (r) => (r.action === "error" ? 0 : r.conflicts && r.conflicts.length ? 1 : r.action === "create" ? 2 : 3);
+  rows.sort((a, b) => rank(a) - rank(b) || a.line - b.line);
+  const list = document.getElementById("importRows");
+  list.innerHTML = "";
+  for (const row of rows.slice(0, IMPORT_ROWS_SHOWN)) {
+    const li = document.createElement("li");
+    li.classList.add("static");
+    if (row.action === "error") li.classList.add("is-error");
+    if (row.conflicts && row.conflicts.some((c) => c.severity === "direct" || c.severity === "former_client")) li.classList.add("is-conflict");
+    const [badgeClass, badgeText] = IMPORT_ACTION_BADGE[row.action];
+    li.innerHTML =
+      `<span class="import-line">line ${row.line}</span>` +
+      `<span class="import-what"><span class="badge ${badgeClass}">${badgeText}</span> <strong>${escapeHtml(row.summary)}</strong></span>` +
+      (row.reason ? `<span class="import-reason">${escapeHtml(row.reason)}</span>` : "") +
+      // Plain divs, not nested <li>s: `ul.list li` styles every descendant
+      // item as a card, which would box each warning inside the row.
+      (row.warnings.length ? `<div class="import-warnings">${row.warnings.map((w) => `<p>${escapeHtml(w)}</p>`).join("")}</div>` : "") +
+      (row.conflicts && row.conflicts.length
+        ? `<div class="import-conflicts">${row.conflicts
+            .map(
+              (c) =>
+                `<div class="import-conflict"><span class="badge ${c.severity === "direct" || c.severity === "former_client" ? "rejected" : "muted"}">${escapeHtml(CONFLICT_SEVERITY_LABEL[c.severity] || c.severity)}</span> <strong>${escapeHtml(c.searchedName)}</strong> on ${escapeHtml(c.matterTitle)} (${escapeHtml(c.matterId)})<p>${escapeHtml(c.explanation)}</p></div>`,
+            )
+            .join("")}</div>`
+        : "");
+    list.appendChild(li);
+  }
+  if (rows.length === 0) {
+    list.innerHTML = '<li class="static empty">Nothing in this view.</li>';
+  }
+  document.getElementById("importRowCount").textContent =
+    rows.length > IMPORT_ROWS_SHOWN ? `Showing the first ${IMPORT_ROWS_SHOWN} of ${rows.length}.` : `${rows.length} row${rows.length === 1 ? "" : "s"}.`;
+}
+
+async function commitImport() {
+  showError("");
+  const plan = importState.plan;
+  if (!plan) return;
+  const button = document.getElementById("importCommit");
+  button.disabled = true;
+  try {
+    const res = await fetch("/api/import/commit", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: plan.kind,
+        csv: importState.csv,
+        mapping: importState.mapping,
+        fileName: importState.fileName,
+        fingerprint: plan.fingerprint,
+        acknowledgeConflicts: document.getElementById("importAck").checked,
+      }),
+    });
+    if (res.status === 401) {
+      window.location.href = "/login.html";
+      return;
+    }
+    const body = await res.json();
+    if (res.status === 409) {
+      // Something moved since the preview: show the new plan rather than
+      // importing anything the attorney hasn't looked at.
+      showToast("Records changed since the preview — check the updated preview, then import again.", "error");
+      await previewImport();
+      return;
+    }
+    if (!res.ok) throw new Error(body.error || res.statusText);
+
+    const isMatters = body.kind === "matters";
+    const card = document.getElementById("importResultCard");
+    card.hidden = false;
+    const result = document.getElementById("importResult");
+    result.innerHTML = "";
+    const p = document.createElement("p");
+    p.textContent = isMatters
+      ? `${body.created} matter${body.created === 1 ? "" : "s"} imported${body.skipped ? `, ${body.skipped} already in Docket` : ""}${body.leftOut ? `, ${body.leftOut} left out` : ""}. Recorded in the audit log as ${body.importId}.`
+      : `${body.created} time entr${body.created === 1 ? "y" : "ies"} imported (${body.hoursCreated} hours)${body.skipped ? `, ${body.skipped} skipped` : ""}${body.leftOut ? `, ${body.leftOut} left out` : ""}. Recorded in the audit log as ${body.importId}.`;
+    result.appendChild(p);
+    const next = document.createElement("div");
+    next.className = "field-row";
+    if (isMatters) {
+      next.append(
+        mkButton("Review them in Conflicts", () => goToPanel("conflicts")),
+        mkButton("Import time entries next", () => {
+          document.getElementById("importKind").value = "time_entries";
+          resetImport(false);
+        }),
+      );
+    } else {
+      next.append(mkButton("Open Billing", () => goToPanel("billing")));
+    }
+    result.appendChild(next);
+    showToast(isMatters ? `Imported ${body.created} matters.` : `Imported ${body.created} time entries.`, "success");
+    refreshPickers();
+    // Re-plan the same file, which now reads as "already in Docket" —
+    // the plainest confirmation that it landed.
+    await previewImport();
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    if (importState.plan) button.disabled = importState.plan.needsConflictAcknowledgement && !document.getElementById("importAck").checked;
+  }
+}
+
+document.getElementById("importKind").addEventListener("change", () => {
+  resetImport(true);
+  previewImport();
+});
+document.getElementById("importFile").addEventListener("change", async (e) => {
+  showError("");
+  const file = e.target.files && e.target.files[0];
+  resetImport(true);
+  document.getElementById("importResultCard").hidden = true;
+  if (!file) return;
+  if (file.size > IMPORT_MAX_BYTES) {
+    showError("That file is larger than 5 MB. Split it and import the parts one at a time.");
+    e.target.value = "";
+    return;
+  }
+  importState.fileName = file.name;
+  importState.csv = await readImportFile(file);
+  await previewImport();
+});
+document.getElementById("importRefresh").addEventListener("click", previewImport);
+document.getElementById("importRowFilter").addEventListener("change", renderImportRows);
+document.getElementById("importAck").addEventListener("change", (e) => {
+  document.getElementById("importCommit").disabled = !e.target.checked;
+});
+document.getElementById("importCommit").addEventListener("click", commitImport);
+document.getElementById("importTemplate").addEventListener("click", () => {
+  const kind = importKind();
+  downloadCsv(kind === "matters" ? "docket-matters-template.csv" : "docket-time-entries-template.csv", IMPORT_TEMPLATES[kind], []);
+});
+document.getElementById("importKindHint").textContent = IMPORT_KIND_HINTS.matters;
+
 /* ===== Analytics ===== */
 function minutesLabel(minutes) {
   if (minutes < 60) return `${Math.round(minutes)}m`;
@@ -3598,8 +3904,13 @@ async function verifyAuditIntegrity() {
 
 /** Quotes a CSV field per RFC 4180 — only when it actually needs it. */
 function csvField(value) {
-  const s = value === undefined || value === null ? "" : String(value);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let s = value === undefined || value === null ? "" : String(value);
+  // A cell starting with = + - @ (or a tab/CR) is run as a formula by
+  // spreadsheet programs. Names and descriptions can come from imported
+  // files or the public booking form, so neutralise them on the way out —
+  // but leave plain numbers like "-4" (days overdue) alone.
+  if (/^[=+\-@\t\r]/.test(s) && !/^[-+]?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 /** Shared by every "Download CSV" button — builds, downloads, and revokes the blob URL. */
@@ -3761,8 +4072,9 @@ function renderGettingStarted({ isAttorney, cases, emailTransport }) {
     {
       done: hasRealMatter,
       label: "Create your first matter",
-      detail: "Record who the client and adverse parties are — the input to conflicts screening.",
+      detail: "Record who the client and adverse parties are — the input to conflicts screening. Coming from another system? Import them instead.",
       panel: "conflicts",
+      alsoPanel: { panel: "import", label: "Import" },
     },
     {
       done: emailTransport ? emailTransport.canSend : false,
@@ -3787,6 +4099,9 @@ function renderGettingStarted({ isAttorney, cases, emailTransport }) {
     if (!item.done && item.panel) {
       const goBtn = mkButton("Go", () => goToPanel(item.panel));
       li.appendChild(goBtn);
+    }
+    if (!item.done && item.alsoPanel) {
+      li.appendChild(mkButton(item.alsoPanel.label, () => goToPanel(item.alsoPanel.panel)));
     }
     list.appendChild(li);
   }

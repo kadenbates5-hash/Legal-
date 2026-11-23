@@ -637,6 +637,39 @@
 .meta { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.3rem; }
 .meta-list { margin: 0.35rem 0 0; padding-left: 1.1rem; color: var(--danger); font-size: 0.8rem; line-height: 1.45; }
 .meta-tight { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem; }
+
+/* ===== Import panel ===== */
+.check-row { display: flex; gap: 0.55rem; align-items: flex-start; margin: 0.4rem 0 0.8rem; font-size: 0.88rem; line-height: 1.45; cursor: pointer; }
+.check-row input { margin-top: 0.2rem; flex-shrink: 0; }
+.import-notes { list-style: none; margin: 0.9rem 0; padding: 0; display: grid; gap: 0.45rem; }
+.import-notes li { padding: 0.55rem 0.75rem; border-radius: 8px; background: var(--surface-2); font-size: 0.85rem; line-height: 1.45; border-left: 3px solid var(--border); }
+.import-notes li.warn { background: var(--warn-soft); border-left-color: var(--warn); }
+.import-notes li.bad { background: var(--danger-soft); border-left-color: var(--danger); color: var(--danger); }
+.import-notes li.info { border-left-color: var(--accent); }
+.import-columns { margin: 0 0 1rem; }
+.import-columns summary { cursor: pointer; font-weight: 600; font-size: 0.88rem; padding: 0.3rem 0; }
+.import-column-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.6rem 0.9rem; margin: 0.6rem 0; }
+.import-column-grid label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--text-muted); }
+.import-column-grid label.required span::after { content: " (required)"; color: var(--danger); font-weight: 500; }
+.import-column-grid select { width: 100%; }
+.import-column-grid label.unmapped select { border-style: dashed; }
+.import-rows > li { display: grid; grid-template-columns: 3.6rem minmax(0, 1fr); gap: 0.2rem 0.6rem; align-items: baseline; }
+.import-rows .import-line { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.75rem; color: var(--text-muted); grid-row: span 4; }
+.import-rows .import-what { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; min-width: 0; overflow-wrap: anywhere; }
+.import-rows .import-reason, .import-rows .import-warnings, .import-rows .import-conflicts { grid-column: 2; }
+.import-rows .import-reason { font-size: 0.82rem; color: var(--text-muted); }
+.import-rows > li.is-error .import-reason { color: var(--danger); }
+.import-rows .import-warnings p { margin: 0.1rem 0 0; font-size: 0.8rem; color: var(--warn); line-height: 1.4; }
+.import-rows .import-warnings p::before { content: "▸ "; opacity: 0.6; }
+.import-rows .import-conflicts { display: grid; gap: 0.4rem; margin-top: 0.3rem; }
+.import-rows .import-conflict { font-size: 0.82rem; padding: 0.45rem 0.6rem; border-radius: 8px; background: var(--surface-2); }
+.import-rows .import-conflict p { margin: 0.2rem 0 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.45; }
+.import-rows > li.is-conflict { border-left: 3px solid var(--danger); }
+@media (max-width: 560px) {
+  .import-rows > li { grid-template-columns: minmax(0, 1fr); }
+  .import-rows .import-line { grid-row: auto; }
+  .import-rows .import-reason, .import-rows .import-warnings, .import-rows .import-conflicts { grid-column: 1; }
+}
 .meta-xs { color: var(--text-muted); font-size: 0.75rem; }
 .subtitle-inline { color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.6rem; }
 .body-sm { font-size: 0.85rem; margin-top: 0.3rem; }
@@ -1158,6 +1191,11 @@ kbd {
   nav.nav button.active::before { display: none; }
   .sidebar-user, .sidebar-footer, .sidebar-credit { display: none; }
   .topbar { padding: 0.75rem 1rem; flex-wrap: wrap; }
+  /* The account row (search, theme, name, change password, log out) is
+     wider than a phone on its own; let it wrap under the title instead of
+     pushing the whole page sideways. */
+  .topbar .who { flex-wrap: wrap; width: 100%; gap: 0.5rem; }
+  .topbar .who #whoami { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
   .content { padding: 1.1rem; }
   .global-search { min-width: 0; flex: 1 1 160px; }
   .palette-trigger kbd { display: none; }

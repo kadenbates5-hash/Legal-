@@ -10,6 +10,9 @@ import type { DeadlineType } from "../core/deadline.js";
 import { SchedulingError, type AppointmentType, type SchedulingService } from "../core/scheduling.js";
 import { BookingRequestError } from "../core/booking-requests.js";
 import type { BookingService } from "./booking-service.js";
+import type { ImportService } from "./import-service.js";
+import { DataImportError } from "../core/data-import.js";
+import { CsvError } from "../core/csv.js";
 import { ReviewGateService } from "./review-service.js";
 import type { IntakeDemoSessions } from "./intake-demo.js";
 import type { AccountsService } from "./accounts-service.js";
@@ -338,6 +341,10 @@ function errorStatus(err: unknown): number {
   if (err instanceof BookingRequestError) {
     return { invalid: 400, not_found: 404, conflict: 409, busy: 429 }[err.kind];
   }
+  // A stale import means the records moved on since the preview — the
+  // world says no, so 409; everything else about an import is the file.
+  if (err instanceof DataImportError) return err.kind === "stale" ? 409 : 400;
+  if (err instanceof CsvError) return 400;
   if (err instanceof EsignatureError) {
     if (
       err.message.startsWith("no signature envelope") ||
@@ -500,6 +507,8 @@ export interface ReviewServerOptions {
   esignature?: ESignatureService;
   /** Enables the public booking page's `/api/public/booking/*` routes (no session) and staff `/api/booking-requests*`. Absent means both 404. */
   booking?: BookingService;
+  /** Enables `/api/import/*` (the attorney-only Import panel). Absent means 404. */
+  dataImport?: ImportService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
   /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
@@ -610,6 +619,7 @@ async function handleRequest(
     analytics,
     esignature,
     booking,
+    dataImport,
     voiceCalls,
     audioClips,
     twilio,
@@ -1517,6 +1527,15 @@ async function handleRequest(
         return;
       }
       await handlePayrollRequest(payroll, req, res, actor, url, onMutated);
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/import/")) {
+      if (!dataImport) {
+        sendJson(res, 404, { error: "importing is not configured on this server" });
+        return;
+      }
+      await handleImportRequest(dataImport, req, res, actor, url, onMutated);
       return;
     }
 
@@ -2468,6 +2487,48 @@ function handleAnalyticsRequest(analytics: AnalyticsService, res: ServerResponse
     return;
   }
   sendJson(res, 404, { error: "not found" });
+}
+
+/**
+ * `POST /api/import/preview` and `POST /api/import/commit`. Both carry
+ * the whole CSV as text in a JSON body (the browser reads the file; there
+ * is no multipart parsing in this server), so the general request-body
+ * ceiling bounds them, and `ImportService` adds its own 5 MB limit.
+ */
+async function handleImportRequest(
+  dataImport: ImportService,
+  req: IncomingMessage,
+  res: ServerResponse,
+  actor: Actor,
+  url: URL,
+  onMutated?: () => void,
+): Promise<void> {
+  if (req.method !== "POST" || (url.pathname !== "/api/import/preview" && url.pathname !== "/api/import/commit")) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+  const body = await readJsonBody(req);
+  const mapping =
+    body["mapping"] && typeof body["mapping"] === "object" && !Array.isArray(body["mapping"])
+      ? Object.fromEntries(Object.entries(body["mapping"] as Record<string, unknown>).filter(([, v]) => typeof v === "string")) as Record<string, string>
+      : {};
+  const request = {
+    kind: body["kind"] as "matters" | "time_entries",
+    csv: typeof body["csv"] === "string" ? body["csv"] : "",
+    mapping,
+    ...(typeof body["fileName"] === "string" ? { fileName: body["fileName"] } : {}),
+  };
+  if (url.pathname === "/api/import/preview") {
+    sendJson(res, 200, dataImport.preview(actor, request));
+    return;
+  }
+  const result = dataImport.commit(actor, {
+    ...request,
+    fingerprint: typeof body["fingerprint"] === "string" ? body["fingerprint"] : "",
+    acknowledgeConflicts: body["acknowledgeConflicts"] === true,
+  });
+  sendJson(res, 200, result);
+  onMutated?.();
 }
 
 async function handleTrustRequest(

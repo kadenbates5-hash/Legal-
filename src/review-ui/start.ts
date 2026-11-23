@@ -43,6 +43,7 @@ import { ClientPortalService } from "./client-portal-service.js";
 import { ClientMessagingService } from "./client-messaging-service.js";
 import { PayrollService } from "./payroll-service.js";
 import { AnalyticsService } from "./analytics-service.js";
+import { ImportService } from "./import-service.js";
 import { CalendarConnectionService } from "./calendar-connection-service.js";
 import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
@@ -576,6 +577,27 @@ const analytics = new AnalyticsService({
 });
 
 /**
+ * Backs the "Import" panel: bringing matters and time entries over from
+ * Clio, MyCase, PracticePanther or a spreadsheet, as CSV. Always on — it
+ * needs no vendor and no key, and it's attorney-only with a mandatory
+ * preview. See core/data-import.ts.
+ */
+const dataImport = new ImportService({
+  matters: state.matters,
+  billingHours: state.billingHours,
+  auth: state.auth,
+  auditLog: state.auditLog,
+  trust: state.trustLedger,
+  matterIdsInUse: () => [
+    ...state.workProductStore.listAll().map((wp) => wp.matterId),
+    ...state.documentStore.listAll().map((d) => d.matterId),
+    ...state.billingHours.listAll().map((e) => e.matterId),
+    ...state.trustLedger.matterIds(),
+  ],
+  ...(firmConfig?.fileRetentionYears ? { retentionYears: firmConfig.fileRetentionYears } : {}),
+});
+
+/**
  * Backs the "Time Clock" panel — the capture side of payroll.
  * `FIRM_TIME_ZONE` decides where a day starts: bucketing punches by UTC
  * would put an evening shift on the wrong day, and therefore in the
@@ -919,6 +941,7 @@ const server = createReviewServer(service, state.auth, {
   payroll,
   timeClock,
   analytics,
+  dataImport,
   maxRequestBodyBytes,
   loginThrottle: state.loginThrottle,
   auditLog: state.auditLog,
