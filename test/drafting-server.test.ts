@@ -140,6 +140,42 @@ describe("drafting HTTP API", () => {
     expect(wp.flags).toContain("research_requires_attorney_verification");
   });
 
+  it("drafts a risk assessment whose level is computed server-side from severity and likelihood", async () => {
+    const res = await fetch(
+      `${baseUrl}/api/drafting/matters/m1/draft-risk-assessment`,
+      withCookie(paralegalCookie, {
+        method: "POST",
+        body: JSON.stringify({
+          description: "Possible enhancement",
+          severity: 5,
+          severityRationale: "Years of exposure",
+          likelihood: 2,
+          likelihoodRationale: "Weak evidence of the prior",
+          recommendedApproach: "Challenge it",
+          // A caller-supplied level must be ignored.
+          level: "low",
+          score: 1,
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const wp = await res.json();
+    expect(wp.kind).toBe("risk_assessment");
+    expect(wp.content).toMatch(/HIGH RISK \(score 10/);
+    expect(wp.flags).toContain("risk_assessment_requires_attorney_judgment");
+  });
+
+  it("rejects an out-of-range risk score with a 400", async () => {
+    const res = await fetch(
+      `${baseUrl}/api/drafting/matters/m1/draft-risk-assessment`,
+      withCookie(paralegalCookie, {
+        method: "POST",
+        body: JSON.stringify({ description: "x", severity: 9, severityRationale: "x", likelihood: 1, likelihoodRationale: "x", recommendedApproach: "x" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("drafts a billing narrative", async () => {
     const res = await fetch(
       `${baseUrl}/api/drafting/matters/m1/draft-billing`,

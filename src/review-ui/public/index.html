@@ -363,6 +363,69 @@
       </div>
 
       <div class="card">
+        <h3>Draft risk assessment</h3>
+        <p class="subtitle-inline">Rate the severity and likelihood and say why. The score and level are computed for you and the memo goes to the Review Queue — the reviewing attorney confirms or changes the rating before it can be approved.</p>
+        <div class="field-row">
+          <label class="field grow">Risk description
+            <textarea id="riskDescription" rows="2" placeholder="What could go wrong, and for whom?"></textarea>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field grow">Background
+            <textarea id="riskBackground" rows="2" placeholder="Relevant facts and context (optional)"></textarea>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field">Severity
+            <select id="riskSeverity">
+              <option value="1">1 — Negligible</option>
+              <option value="2">2 — Low</option>
+              <option value="3" selected>3 — Moderate</option>
+              <option value="4">4 — High</option>
+              <option value="5">5 — Critical</option>
+            </select>
+          </label>
+          <label class="field grow">Why this severity
+            <input id="riskSeverityRationale" type="text" placeholder="Impact if it happens" />
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field">Likelihood
+            <select id="riskLikelihood">
+              <option value="1">1 — Remote</option>
+              <option value="2">2 — Unlikely</option>
+              <option value="3" selected>3 — Possible</option>
+              <option value="4">4 — Likely</option>
+              <option value="5">5 — Almost certain</option>
+            </select>
+          </label>
+          <label class="field grow">Why this likelihood
+            <input id="riskLikelihoodRationale" type="text" placeholder="Precedent, triggers, current conditions" />
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field grow">Contributing factors (one per line)
+            <textarea id="riskContributing" rows="2"></textarea>
+          </label>
+          <label class="field grow">Mitigating factors (one per line)
+            <textarea id="riskMitigating" rows="2"></textarea>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field grow">Recommended approach
+            <textarea id="riskApproach" rows="2" placeholder="What should be done, and why"></textarea>
+          </label>
+          <label class="field grow">Next steps (one per line)
+            <textarea id="riskNextSteps" rows="2" placeholder="Action — owner — deadline"></textarea>
+          </label>
+        </div>
+        <div class="field-row">
+          <button class="btn primary" id="createRiskDraft">Create draft</button>
+          <span id="riskPreview" class="meta"></span>
+        </div>
+      </div>
+
+      <div class="card">
         <h3>Draft billing narrative</h3>
         <div class="field-row">
           <label class="field grow">Narrative

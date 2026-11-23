@@ -1,4 +1,5 @@
 import { AccessControl } from "../core/access-control.js";
+import { renderRiskMemo, type RiskAssessmentInput } from "../core/risk-assessment.js";
 import type { AuditLog } from "../core/audit.js";
 import { WorkProduct } from "../core/review-gate.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
@@ -37,6 +38,15 @@ export const RESEARCH_REQUIRES_VERIFICATION_FLAG = "research_requires_attorney_v
  * attorney sign-off before it can be treated as accurate.
  */
 export const PDF_EXTRACTION_REQUIRES_VERIFICATION_FLAG = "pdf_extraction_requires_attorney_verification";
+/**
+ * Unconditional, like the two above: a risk memo's severity and
+ * likelihood are professional judgments, and the score is only as good as
+ * those two inputs. The review gate already requires an attorney to
+ * approve any draft; this flag additionally makes the approving attorney
+ * explicitly clear it, so a memo whose rating nobody actually looked at
+ * can't be approved by reflex.
+ */
+export const RISK_ASSESSMENT_REQUIRES_ATTORNEY_JUDGMENT_FLAG = "risk_assessment_requires_attorney_judgment";
 /** Re-exported from core/deadline.ts, where it conceptually belongs, for backward compatibility. */
 export { DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG };
 
@@ -165,6 +175,19 @@ export class ParalegalDraftingSession {
     const content = `Document analysis report — ${request.sourceFileName} (${request.pageCount} page${request.pageCount === 1 ? "" : "s"})\n\n${request.extractedText}`;
     const workProduct = this.#startDraft("document_report", content, `draft report from ${request.sourceFileName}`);
     workProduct.addFlag(PDF_EXTRACTION_REQUIRES_VERIFICATION_FLAG);
+    return workProduct;
+  }
+
+  /**
+   * A risk memo (see `core/risk-assessment.ts`): the caller supplies the
+   * severity/likelihood and their reasoning, the score and level are
+   * computed, and the result is an ordinary draft carrying
+   * `RISK_ASSESSMENT_REQUIRES_ATTORNEY_JUDGMENT_FLAG`.
+   */
+  draftRiskAssessment(request: RiskAssessmentInput): WorkProduct {
+    const { content, risk } = renderRiskMemo(request);
+    const workProduct = this.#startDraft("risk_assessment", content, `draft risk assessment (${risk.level}, score ${risk.score})`);
+    workProduct.addFlag(RISK_ASSESSMENT_REQUIRES_ATTORNEY_JUDGMENT_FLAG);
     return workProduct;
   }
 

@@ -1304,6 +1304,65 @@ click-to-sign capture (typed name, explicit consent, IP/timestamp,
 document hash, a certificate of completion), not a cryptographic
 PKI-backed signature the way some paid vendors offer.
 
+## Legal risk assessment
+
+`src/core/risk-assessment.ts` / `ParalegalDraftingSession.draftRiskAssessment()`
+— a structured risk memo drafted from the Drafting panel's "Draft risk
+assessment" card. Adapted for a law firm from the `legal-risk-assessment`
+skill (see "Vendored skills" below): severity 1–5 × likelihood 1–5,
+banded 1–4 low / 5–9 medium / 10–15 high / 16–25 critical, with the
+action list each band calls for (critical: managing attorney, co-counsel,
+litigation hold, notify the malpractice carrier if a claim is
+conceivable).
+
+- **The score is computed in code, never accepted from a caller.**
+  `scoreRisk()` is the only place severity and likelihood become a score
+  and level; the route ignores any `score`/`level` in the request body,
+  and an out-of-range or fractional rating is a 400. A memo can't read
+  "low risk" over inputs that multiply to 20, whether the cause is a
+  typo, a model's arithmetic, or someone nudging the number. The panel
+  shows a live "Score 16 — critical risk" preview purely as a
+  convenience; the server recomputes it.
+- **Every rating needs its reason.** Description, severity rationale,
+  likelihood rationale and recommended approach are required — a bare
+  number is an opinion nobody can review.
+- **It's a draft like any other.** The memo is a `risk_assessment`
+  `WorkProduct` carrying the unconditional
+  `RISK_ASSESSMENT_REQUIRES_ATTORNEY_JUDGMENT_FLAG` — severity and
+  likelihood are judgements, so an attorney has to clear the flag
+  (confirming or changing the rating) before it can be approved. Same
+  `case_file` access check as every other draft.
+
+What this doesn't do: maintain a firm-wide risk register, re-score over
+time, or decide whether to escalate — it structures the analysis and
+says what each level usually calls for.
+
+## Vendored skills
+
+`.claude/skills/` holds Claude Code skills for developing this project,
+each vendored as **plain markdown only** — no scripts or executables —
+with its source and licence recorded at the top and a short "Docket
+context" note saying how it applies here. They were read before being
+added; upstream installers (`npx skills add …`) were deliberately not
+run, since that executes code fetched from the network.
+
+- `legal-risk-assessment` (anthropics/knowledge-work-plugins,
+  Apache-2.0) — the framework behind "Legal risk assessment" above.
+- `legal-response` (same source, Apache-2.0) — templated responses with
+  escalation checks; written for an in-house team, so most of it is
+  reference, not a feature.
+- `diagnosing-bugs` (mattpocock/skills, MIT) — the reproduce → hypothesise
+  → instrument → fix loop. Its helper script template was left out.
+- `code-review-two-axis` (mattpocock/skills, MIT, renamed from
+  `code-review` to avoid clashing with the built-in one) — Standards
+  (this file) vs Spec (`docs/spec.md`) review.
+
+Considered and not added: `persona-exec-assistant` (needs the
+Google Workspace `gws` binary installed and authenticated),
+`assistant-ui` (React-only; the dashboard is framework-free under a
+strict CSP), and `legal-writing` / `cocounsel-legal:deep-research`
+(not present in the archives provided).
+
 ## Matters and conflict-of-interest screening
 
 The one thing a law firm is *ethically obliged* to get right before
@@ -2909,7 +2968,7 @@ nav item is hidden except **My Matters** and **Security** — see below.
   end-of-call debrief + transcript download, with a "Listen" button on
   each of the agent's own scripted replies when `SPEECH_TOOLS=true` —
   see "Training mode" above), Drafting (pick a
-  matter, draft from a template/research summary/billing narrative, then
+  matter, draft from a template/research summary/risk assessment/billing narrative, then
   revise/submit, plus a "Listen" button on a draft's content — nav item
   hidden unless `GET /api/me` reports role
   `attorney` or `paralegal`), Cases (a clickable list of every matter,

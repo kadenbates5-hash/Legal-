@@ -1839,6 +1839,46 @@ async function createTemplateDraft() {
   }
 }
 
+// A convenience preview only — the memo's score and level are computed by
+// the server (core/risk-assessment.ts), which ignores anything sent here.
+function updateRiskPreview() {
+  const score = Number(document.getElementById("riskSeverity").value) * Number(document.getElementById("riskLikelihood").value);
+  const level = score <= 4 ? "low" : score <= 9 ? "medium" : score <= 15 ? "high" : "critical";
+  document.getElementById("riskPreview").textContent = `Score ${score} — ${level} risk`;
+}
+document.getElementById("riskSeverity").addEventListener("change", updateRiskPreview);
+document.getElementById("riskLikelihood").addEventListener("change", updateRiskPreview);
+updateRiskPreview();
+
+async function createRiskDraft() {
+  showError("");
+  const lines = (id) => document.getElementById(id).value.split("\n").map((l) => l.trim()).filter(Boolean);
+  try {
+    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-risk-assessment`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: document.getElementById("riskDescription").value,
+        background: document.getElementById("riskBackground").value,
+        severity: Number(document.getElementById("riskSeverity").value),
+        severityRationale: document.getElementById("riskSeverityRationale").value,
+        likelihood: Number(document.getElementById("riskLikelihood").value),
+        likelihoodRationale: document.getElementById("riskLikelihoodRationale").value,
+        contributingFactors: lines("riskContributing"),
+        mitigatingFactors: lines("riskMitigating"),
+        recommendedApproach: document.getElementById("riskApproach").value,
+        nextSteps: lines("riskNextSteps"),
+      }),
+    });
+    for (const id of ["riskDescription", "riskBackground", "riskSeverityRationale", "riskLikelihoodRationale", "riskContributing", "riskMitigating", "riskApproach", "riskNextSteps"]) {
+      document.getElementById(id).value = "";
+    }
+    await loadMatterDrafts();
+    showToast("Risk assessment drafted.", "success");
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 async function createResearchDraft() {
   showError("");
   try {
@@ -1877,6 +1917,7 @@ async function createBillingDraft() {
 
 document.getElementById("loadMatterDrafts").addEventListener("click", loadMatterDrafts);
 document.getElementById("createTemplateDraft").addEventListener("click", createTemplateDraft);
+document.getElementById("createRiskDraft").addEventListener("click", createRiskDraft);
 document.getElementById("createResearchDraft").addEventListener("click", createResearchDraft);
 document.getElementById("createBillingDraft").addEventListener("click", createBillingDraft);
 document.getElementById("navDrafting").addEventListener("click", () => {

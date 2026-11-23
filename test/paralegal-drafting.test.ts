@@ -4,6 +4,7 @@ import {
   RESEARCH_REQUIRES_VERIFICATION_FLAG,
   DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG,
   PDF_EXTRACTION_REQUIRES_VERIFICATION_FLAG,
+  RISK_ASSESSMENT_REQUIRES_ATTORNEY_JUDGMENT_FLAG,
 } from "../src/paralegal/drafting.js";
 import { AccessControl } from "../src/core/access-control.js";
 import { AuditLog } from "../src/core/audit.js";
@@ -186,5 +187,42 @@ describe("paralegal drafting session", () => {
     session.submitForReview(wp);
     const entries = auditLog.read("attorney", { matterId: "m1" });
     expect(entries.some((e) => e.action.includes("transition_pending_review"))).toBe(true);
+  });
+
+  describe("risk assessment", () => {
+    const request = {
+      description: "Possible sentence enhancement.",
+      background: "",
+      severity: 4,
+      severityRationale: "Adds years.",
+      likelihood: 4,
+      likelihoodRationale: "State flagged it.",
+      recommendedApproach: "Challenge the prior.",
+    };
+
+    it("drafts a risk_assessment work product with the computed level and the attorney-judgment flag", () => {
+      const { session } = makeSession();
+      const wp = session.draftRiskAssessment(request);
+      expect(wp.kind).toBe("risk_assessment");
+      expect(wp.status).toBe("draft");
+      expect(wp.content).toMatch(/CRITICAL RISK \(score 16/);
+      expect(wp.flags.has(RISK_ASSESSMENT_REQUIRES_ATTORNEY_JUDGMENT_FLAG)).toBe(true);
+    });
+
+    it("cannot be approved until an attorney explicitly clears the flag", () => {
+      const { session } = makeSession();
+      const wp = session.draftRiskAssessment(request);
+      session.submitForReview(wp);
+      expect(() => wp.approve(attorney)).toThrow(ReviewGateError);
+      wp.clearFlag(attorney, RISK_ASSESSMENT_REQUIRES_ATTORNEY_JUDGMENT_FLAG);
+      expect(() => wp.approve(attorney)).not.toThrow();
+    });
+
+    it("refuses an out-of-range score and an unassigned paralegal", () => {
+      const { session } = makeSession();
+      expect(() => session.draftRiskAssessment({ ...request, severity: 9 })).toThrow(/severity/);
+      const { session: unassigned } = makeSession({ assign: false });
+      expect(() => unassigned.draftRiskAssessment(request)).toThrow(AccessDeniedError);
+    });
   });
 });

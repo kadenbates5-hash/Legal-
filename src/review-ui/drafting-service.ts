@@ -6,6 +6,7 @@ import type { WorkProductStore } from "../core/work-product-store.js";
 import type { DeadlineTracker } from "../core/deadline.js";
 import type { PracticeAreaModule, DocumentTemplate } from "../config/practice-area.js";
 import type { UtilizationTracker } from "../core/utilization.js";
+import type { RiskAssessmentInput } from "../core/risk-assessment.js";
 import {
   ParalegalDraftingSession,
   type DraftFromTemplateRequest,
@@ -113,6 +114,12 @@ export class DraftingService {
   draftResearchSummary(actor: Actor, matterId: string, request: ResearchSummaryRequest): WorkProductDetail {
     requireDraftingRole(actor);
     const wp = this.#sessionFor(actor, matterId).draftResearchSummary(request);
+    return detail(wp);
+  }
+
+  draftRiskAssessment(actor: Actor, matterId: string, request: RiskAssessmentInput): WorkProductDetail {
+    requireDraftingRole(actor);
+    const wp = this.#sessionFor(actor, matterId).draftRiskAssessment(request);
     return detail(wp);
   }
 

@@ -1844,6 +1844,24 @@ async function handleDraftingRequest(
           citations: Array.isArray(body["citations"]) ? (body["citations"] as string[]) : [],
         });
         break;
+      case "draft-risk-assessment": {
+        const list = (v: unknown) => (Array.isArray(v) ? (v as unknown[]).map(String) : []);
+        result = drafting.draftRiskAssessment(actor, matterId, {
+          description: String(body["description"] ?? ""),
+          background: String(body["background"] ?? ""),
+          severity: Number(body["severity"]),
+          severityRationale: String(body["severityRationale"] ?? ""),
+          likelihood: Number(body["likelihood"]),
+          likelihoodRationale: String(body["likelihoodRationale"] ?? ""),
+          contributingFactors: list(body["contributingFactors"]),
+          mitigatingFactors: list(body["mitigatingFactors"]),
+          recommendedApproach: String(body["recommendedApproach"] ?? ""),
+          residualRisk: String(body["residualRisk"] ?? ""),
+          monitoringPlan: String(body["monitoringPlan"] ?? ""),
+          nextSteps: list(body["nextSteps"]),
+        });
+        break;
+      }
       case "draft-billing":
         result = drafting.draftBillingNarrative(actor, matterId, { content: String(body["content"] ?? "") });
         break;
