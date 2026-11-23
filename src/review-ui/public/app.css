@@ -454,7 +454,11 @@ section.panel.active { display: block; animation: fade-in 0.28s var(--ease); }
 }
 .field textarea { padding: 0.55rem 0.65rem; resize: vertical; line-height: 1.5; }
 .field input:hover, .field select:hover, .field textarea:hover { border-color: color-mix(in srgb, var(--text-muted) 60%, var(--border-strong)); }
-.field input:focus, .field select:focus, .field textarea:focus, .import-column-grid select:focus {
+/* :focus-within too, for date and time fields: tabbing into one puts focus
+   on its day/month/year sub-field inside the control, and Chromium then
+   matches :focus-within but not :focus — so keyboard users got no ring on
+   any date field while mouse users did. */
+.field input:focus, .field input:focus-within, .field select:focus, .field textarea:focus, .import-column-grid select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -481,6 +485,13 @@ ul.list li:hover { border-color: var(--border-strong); box-shadow: inset 3px 0 0
 ul.list li:active { transform: none; }
 /* Buttons inside a row are built by script with no whitespace between them. */
 ul.list li .btn { margin: 0.3rem 0.4rem 0 0.15rem; }
+/* A list nested inside a row (a booking request's conflict hits, say) is
+   part of that row, not a row of its own — without this it inherits the
+   row's card, hover lift and pointer cursor, and looks clickable while
+   doing nothing. Matches the keyboard hook, which only treats direct
+   children (ul.list > li) as rows. */
+ul.list li li { position: static; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; cursor: inherit; transition: none; }
+ul.list li li:hover { border-color: transparent; box-shadow: none; transform: none; }
 ul.list li.static { cursor: default; }
 ul.list li.static:hover { border-color: var(--border); box-shadow: none; transform: none; }
 

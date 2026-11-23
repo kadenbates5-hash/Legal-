@@ -3604,6 +3604,35 @@ plus keyboard-only Playwright runs. What that found and what changed:
   the Import panel's row count is a status region. The command palette
   already closed on Escape and returned focus to where it was opened.
 
+**Second pass — the remaining panels.** Scheduling, Conflicts,
+Invoices, Trust, Payroll, Time Clock, Accounts, Security and Signatures
+as an attorney, plus My Matters and Security as a client account — each
+with real content on screen (booking requests, a signature request,
+sent and draft invoices with the detail open, trust entries, a conflicts
+audit), in both themes. axe found nothing and every visible text node
+clears its contrast ratio (bar a disabled button, which WCAG exempts).
+Tabbing through every stop on every one of those panels found two
+things:
+
+- **No focus ring on any date or time field.** Tabbing into one puts
+  focus on its day/month/year part *inside* the control, and Chromium
+  then matches `:focus-within` but not `:focus` — so the field's ring
+  appeared for a mouse click and never for the keyboard. Fourteen fields
+  across Scheduling, Conflicts, Payroll and Time Clock, plus the public
+  booking page's preferred-day field. The field focus rule now covers
+  `:focus-within` too.
+- **Rows that looked clickable and weren't.** A booking request's
+  conflict hits are a list inside a list row, and `ul.list li` gave each
+  one the row's card, hover lift and pointer cursor. A list nested in a
+  row is now part of that row (`ul.list li li`), matching the keyboard
+  hook, which only ever treated direct children as rows. A probe of all
+  24 panels found no other nested list for the rule to touch.
+
+`test/stylesheet-a11y.test.ts` pins these, and the general rule behind
+the first pass's worst finding: any selector reset with `all: unset`
+must have a `:focus-visible` rule, so a new button style can't silently
+lose its ring again.
+
 `/api/appointments*` (see `scheduling.ts` above) is wired into the same
 server, gated by `SchedulingService`'s own optional `AccessControl`
 integration rather than `ReviewGateService` — scheduling is a
