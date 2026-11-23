@@ -688,6 +688,49 @@ credential for `calendar_system`) plus agent calculations that
 `agent`-sourced date over HTTP, since that source exists to be the one
 that needs checking.
 
+### Calendar file export (.ics)
+
+`core/ics.ts` / `review-ui/calendar-export-service.ts` — a "Download
+calendar (.ics)" button on the Deadlines panel's Coming due card and the
+Scheduling panel's Appointments card, giving one file any calendar app
+imports. No vendor and no key, so it's always on, and it is a separate
+thing from the Google Calendar sync below: a person adding dates to their
+own calendar, not the firm's integration.
+
+- **No new reads.** Deadlines come through
+  `ReviewGateService.listUpcomingDeadlines()` (attorney-only, as on the
+  panel) and appointments through `SchedulingService.listAll()`
+  (matter-scoped), so a paralegal's file holds their own matter's
+  appointments and no deadlines — exactly what their panels show. Both
+  buttons fetch the same `GET /api/calendar/export.ics`; the server
+  decides the contents from who's asking. Staff roles only.
+- **An unverified date never looks verified.** In a phone calendar
+  nobody opens Docket to check a status, so the title carries it: a
+  date only one source has seen is `UNVERIFIED:`, one the sources
+  disagree about is `DISPUTED:` and sits on the soonest proposed date
+  with every proposal in its description. Only a confirmed deadline gets
+  `STATUS:CONFIRMED`. Deadlines are all-day and don't block time.
+- **It leaves the building, so it says little.** Calendar apps sync to
+  their vendor's servers. Events carry matter numbers, dates, times and
+  the attorney's name — never a matter title (which usually names the
+  client), a party or a note. Each export is audited as
+  `calendar_exported` with its counts.
+- **Re-importing updates rather than duplicates**, mostly: event ids are
+  stable hashes, and a cancelled appointment is exported as
+  `STATUS:CANCELLED` rather than dropped, so a calendar that already has
+  it learns it's off. Some apps import a fresh copy regardless.
+- `ics.ts` handles the parts a string join gets wrong: TEXT escaping
+  (`,` `;` `\` newline), folding at 75 **octets** without splitting a
+  multi-byte character, CRLF throughout, an all-day event's exclusive
+  next-day end, and a reminder that isn't a valid duration refusing to
+  write a broken file. Deadlines from 30 days ago to a year out;
+  appointments from the start of today, completed ones left out.
+
+What this doesn't do: a live subscription feed. A feed URL is a
+long-lived credential sitting in a third-party calendar's settings, and
+anyone holding it reads the firm's dates; a download is a snapshot the
+person chose to take.
+
 ## Google Calendar integration (§7 item #1's remaining piece — resolved)
 
 `src/integrations/` — the real vendor behind the `calendar_system`
@@ -3677,6 +3720,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run send:deadline-alerts  # one-shot: email each matter's responsible attorney their own at-risk deadlines (run on a schedule, e.g. daily cron); add DEADLINE_ALERT_RECIPIENT=partners@firm.example as a catch-all for matters with no responsible attorney/email on file
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # SMTP_HOST=smtp.example.com SMTP_FROM=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable self-service "forgot password" email links (reuses PUBLIC_BASE_URL and whichever SMTP_* vars are already set for invoices — see "Self-service password reset")
+# (no config needed) "Download calendar (.ics)" on the Deadlines and Scheduling panels — the caller's own deadlines/appointments as a calendar file; see "Calendar file export (.ics)"
 # (no config needed) the Import panel is always on for attorneys — CSV exports from Clio/MyCase/PracticePanther or a spreadsheet; see "Importing from another system (CSV)"
 # PUBLIC_BOOKING=true npm run start:review-ui                            # turn on the public /book.html consultation-request page (requests land in the Scheduling panel; staff accept and pick the time — see "Self-service public booking")
 # PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui     # enable the Signatures panel's e-signature requests (see "E-signature") — needs no new vendor; emails each signer's link whenever SMTP_* is also set, otherwise the panel shows the raw link for staff to share

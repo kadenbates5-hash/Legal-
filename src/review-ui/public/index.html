@@ -248,8 +248,10 @@
           <label class="field">Within <input id="deadlineHorizon" type="number" min="1" max="365" value="14" /> days</label>
           <button class="btn" id="loadUpcoming">Refresh</button>
           <button class="btn" id="downloadDeadlinesCsv">Download CSV</button>
+          <button class="btn" data-calendar-export>Download calendar (.ics)</button>
         </div>
         <p class="subtitle-inline">Ordered by risk, not just by date: a date only one source has ever seen, or one two sources disagree about, outranks a confirmed date slightly closer — the confirmed one is a task, the other is a question nobody has asked yet.</p>
+        <p class="meta-tight">The calendar file carries every deadline from the last 30 days to a year out, plus your upcoming appointments. A date only one source has seen is titled <strong>UNVERIFIED</strong>, and one the sources disagree about <strong>DISPUTED</strong> (on the soonest date proposed), so a phone calendar never makes an unchecked date look settled.</p>
         <ul id="upcomingList" class="list"></ul>
       </div>
       <div class="card">
@@ -284,7 +286,9 @@
           <h3 class="row-title">Appointments</h3>
           <label class="field">Matter ID <input id="scheduleListMatterId" list="matterOptions" autocomplete="off" placeholder="matter to list" /></label>
           <button class="btn" id="refreshAppointments">Refresh</button>
+          <button class="btn" data-calendar-export>Download calendar (.ics)</button>
         </div>
+        <p class="meta-tight">The calendar file holds the upcoming appointments you can see here — plus, for an attorney, the deadlines on the Deadlines panel — for any calendar app to import. Matter numbers and times only, never client names or case details. It's a snapshot: download it again to pick up changes.</p>
         <ul id="appointmentList" class="list"></ul>
       </div>
       <div class="card">

@@ -44,6 +44,7 @@ import { ClientMessagingService } from "./client-messaging-service.js";
 import { PayrollService } from "./payroll-service.js";
 import { AnalyticsService } from "./analytics-service.js";
 import { ImportService } from "./import-service.js";
+import { CalendarExportService } from "./calendar-export-service.js";
 import { CalendarConnectionService } from "./calendar-connection-service.js";
 import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
@@ -577,6 +578,19 @@ const analytics = new AnalyticsService({
 });
 
 /**
+ * "Download calendar (.ics)" on the Deadlines and Scheduling panels.
+ * Always on — no vendor, no key; it only re-reads what the caller's own
+ * panels already show. See calendar-export-service.ts.
+ */
+const calendarExport = new CalendarExportService({
+  reviewGate: service,
+  scheduling: state.scheduling,
+  auditLog: state.auditLog,
+  nameFor: (actorId) => state.auth.listUsers().find((u) => u.actorId === actorId)?.displayName,
+  ...(firmConfig?.firmName ? { firmName: firmConfig.firmName } : {}),
+});
+
+/**
  * Backs the "Import" panel: bringing matters and time entries over from
  * Clio, MyCase, PracticePanther or a spreadsheet, as CSV. Always on — it
  * needs no vendor and no key, and it's attorney-only with a mandatory
@@ -942,6 +956,7 @@ const server = createReviewServer(service, state.auth, {
   timeClock,
   analytics,
   dataImport,
+  calendarExport,
   maxRequestBodyBytes,
   loginThrottle: state.loginThrottle,
   auditLog: state.auditLog,

@@ -4626,6 +4626,36 @@ async function runConflictAudit() {
   }
 }
 
+/* ===== Calendar file =====
+   Same blob-download shape as the invoice PDF: the response is binary,
+   so it can't go through api(), which parses JSON. Both buttons (Deadlines
+   and Scheduling) fetch the same file; the server decides what's in it
+   from who's asking. */
+async function downloadCalendarFile(e) {
+  showError("");
+  const button = e.currentTarget;
+  button.disabled = true;
+  try {
+    const res = await fetch("/api/calendar/export.ics", { credentials: "same-origin" });
+    if (res.status === 401) { window.location.href = "/login.html"; return; }
+    if (!res.ok) { showError((await res.json().catch(() => ({}))).error || res.statusText); return; }
+    const disposition = res.headers.get("content-disposition") || "";
+    const name = /filename="([^"]+)"/.exec(disposition)?.[1] || "docket-calendar.ics";
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("Calendar file downloaded — open it to add the events to your calendar app.");
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+for (const btn of document.querySelectorAll("[data-calendar-export]")) btn.addEventListener("click", downloadCalendarFile);
+
 function downloadConflictAuditCsv() {
   if (!lastConflictAudit || !lastConflictAudit.findings.length) return;
   const header = ["Finding", "Severity", "Match", "Both sides of one matter", "Role", "Matter ID", "Matter title", "Matter status", "Name as recorded", "Note"];

@@ -11,6 +11,7 @@ import { SchedulingError, type AppointmentType, type SchedulingService } from ".
 import { BookingRequestError } from "../core/booking-requests.js";
 import type { BookingService } from "./booking-service.js";
 import type { ImportService } from "./import-service.js";
+import type { CalendarExportService } from "./calendar-export-service.js";
 import { DataImportError } from "../core/data-import.js";
 import { CsvError } from "../core/csv.js";
 import { ReviewGateService } from "./review-service.js";
@@ -509,6 +510,8 @@ export interface ReviewServerOptions {
   booking?: BookingService;
   /** Enables `/api/import/*` (the attorney-only Import panel). Absent means 404. */
   dataImport?: ImportService;
+  /** Enables `GET /api/calendar/export.ics` (deadlines and appointments as a calendar file). Absent means 404. */
+  calendarExport?: CalendarExportService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
   /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
@@ -620,6 +623,7 @@ async function handleRequest(
     esignature,
     booking,
     dataImport,
+    calendarExport,
     voiceCalls,
     audioClips,
     twilio,
@@ -1527,6 +1531,19 @@ async function handleRequest(
         return;
       }
       await handlePayrollRequest(payroll, req, res, actor, url, onMutated);
+      return;
+    }
+
+    // One calendar file: whatever deadlines and appointments the caller's
+    // own panels already show. Writes an audit entry, so it's a mutation.
+    if (url.pathname === "/api/calendar/export.ics" && req.method === "GET") {
+      if (!calendarExport) {
+        sendJson(res, 404, { error: "calendar export is not configured on this server" });
+        return;
+      }
+      const result = calendarExport.export(actor);
+      sendBinary(res, "text/calendar; charset=utf-8", result.filename, Buffer.from(result.ics, "utf8"));
+      onMutated?.();
       return;
     }
 
