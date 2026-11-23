@@ -269,17 +269,46 @@
     <!-- ===== Live Intake Demo ===== -->
     <section class="panel" id="panel-intake">
       <p class="subtitle">Talk to the receptionist AI exactly as a caller would — same routing, escalation, and access-control code paths, running under your own logged-in session. Conversations here are throwaway previews, not real intake, and nothing here ever becomes a client record.</p>
+
       <div class="card">
+        <h3>Training scenario</h3>
+        <p class="subtitle-inline">Pick a scenario to watch a specific gate or escalation trigger fire correctly, or start a blank conversation and type your own caller turns.</p>
         <div class="field-row">
+          <label class="field grow">Scenario
+            <select id="intakeScenarioId"><option value="">— Free-form (type your own) —</option></select>
+          </label>
           <button class="btn primary" id="startIntake">Start new demo conversation</button>
         </div>
-        <div class="chat-window">
-          <div class="chat-log" id="chatLog"></div>
-          <div class="chat-input">
-            <input id="chatText" type="text" placeholder="Type a caller's message…" disabled />
-            <button class="btn primary" id="chatSend" disabled>Send</button>
+        <div id="intakeScenarioDescription" class="meta"></div>
+        <div class="field-row mt-xs" id="intakeScenarioControls" hidden>
+          <button class="btn" id="scenarioNextLine" type="button">Send next scripted line</button>
+          <button class="btn" id="scenarioPlayAll" type="button">Play through automatically</button>
+          <span class="meta-xs" id="intakeScenarioProgress"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="intake-live-grid">
+          <div class="chat-window">
+            <div class="chat-log" id="chatLog"></div>
+            <div class="chat-input">
+              <input id="chatText" type="text" placeholder="Type a caller's message…" disabled />
+              <button class="btn primary" id="chatSend" disabled>Send</button>
+            </div>
+          </div>
+          <div class="intake-status">
+            <h4>Call status</h4>
+            <ul id="intakeStatusList" class="status-list">
+              <li class="static empty">Start a conversation to see live status.</li>
+            </ul>
           </div>
         </div>
+      </div>
+
+      <div class="card" id="intakeDebrief" hidden>
+        <h3>Debrief</h3>
+        <div id="intakeDebriefBody"></div>
+        <div class="mt-md"><button class="btn" id="downloadTranscript" type="button">Download transcript</button></div>
       </div>
     </section>
 

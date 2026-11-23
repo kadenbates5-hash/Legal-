@@ -2757,6 +2757,58 @@ nav item is hidden except **My Matters** and **Security** — see below.
   ends, never touching `system-state.ts` or a real matter. A logged-in
   actor whose role wouldn't be allowed to run intake (e.g. `paralegal`)
   gets the same `AccessDeniedError` a misconfigured real session would.
+  - **Training mode.** The panel is a training tool, not just a chat
+    window. `ReceptionistChatSession.handleMessage()` now returns a
+    `TurnTrace` on every turn (`{ label, triggers, state }` — e.g.
+    "Emergency escalation · in_custody", "Conflict-of-interest check",
+    "Intake question: court_date", plus a snapshot of `IntakeState`). It
+    is **purely observational** — nothing in routing, escalation, or
+    access control reads it, so it can't weaken any gate. The UI shows
+    it as a badge under each agent bubble, a live "Call status" list
+    (caller type, interpreter, consent, conflict check), and an end-of-call
+    **debrief** (agent turns, final caller type, triggers fired) with a
+    plain-text **transcript download**.
+  - `review-ui/intake-scenarios.ts` — `INTAKE_SCENARIOS`, canned caller
+    scripts (routine call, in custody, imminent police questioning, court
+    within 48h, protective-order issue, crisis/self-harm, legal-advice
+    request, narrated facts, vulnerable caller, AI opt-out, interpreter
+    needed, consent refused, conflict of interest, billing call,
+    third-party caller). Served by `GET /api/intake/scenarios`; the panel
+    offers "Send next scripted line" and "Play through automatically".
+    They are content only — they type lines into the real session like a
+    human would, never shortcutting a gate. Practice-area-agnostic: every
+    scenario targets a core trigger, not a criminal-law-specific one.
+    `test/intake-scenarios.test.ts` plays each one through a real
+    `ReceptionistChatSession` and pins the outcome, because a training
+    script that silently stopped demonstrating its gate would be worse
+    than none. Party names are deliberately not `Smith`/`Doe`-style
+    common names: a "routine" scenario that fuzzy-matched the demo seed's
+    "Jordan Smith" ended in a (correct) conflict hit and stopped being a
+    baseline.
+  - **Two real bugs found by building the scenarios, both fixed and
+    pinned by tests in `receptionist-chat-agent.test.ts`.** (1) *The
+    interpreter-first gate (§2) could never fire from a caller's words.*
+    `extractSignalsFromText` detected "I need an interpreter", but nothing
+    carried it into `IntakeState.interpreterNeeded`, which `Router.route()`
+    reads (and which it folds in *over* the raw turn signal) — so the gate
+    was dead code outside a hand-built state in `router.test.ts`. The chat
+    agent now makes it sticky state. (2) *Every natural "no" to the custody
+    or protective-order question escalated.* The raw-text extractor matches
+    `in custody`/`protective order` as literal substrings with no negation
+    awareness, so "No, I'm not currently in custody" was flagged as an
+    emergency, and the caller's actual answer never overrode that false
+    positive. The existing tests missed both because they answered a bare
+    "no". Fixed narrowly: a **plain** custody denial now forwards an
+    explicit `inCustody: false` that wins over the substring match, but a
+    denial that also mentions an arrest/jail ("no, but they arrested me
+    this morning") is left to the extractor and still escalates, and the
+    protective-order answer never forwards `false` (the extractor needs
+    violation wording to flag it, so a plain "no" was never a false
+    positive and a forwarded `false` would hide a real violation). Follow-ups
+    from review: an interpreter-first caller is re-asked the caller-type
+    question after the language is given (otherwise they stay `unknown` and
+    get the third-party brush-off), and an interpreter request is not
+    counted as an answer to the recording-consent question.
 - `accounts-service.ts` — `AccountsService`, backing the "Accounts" panel
   — see "Real authentication" above for what it does and doesn't do.
 - `drafting-service.ts` — `DraftingService`, backing the "Drafting" panel
@@ -2851,9 +2903,12 @@ nav item is hidden except **My Matters** and **Security** — see below.
   conflict list/a "Download CSV" on the Coming due list), Scheduling
   (book/list/reschedule/cancel/complete/
   reminders), Live Intake Demo (a chat window driving `intake-demo.ts` —
-  "Start new demo conversation" then type caller turns, with a "Listen"
-  button on each of the agent's own scripted replies when
-  `SPEECH_TOOLS=true`), Drafting (pick a
+  pick a training scenario or go free-form, "Start new demo conversation",
+  then type caller turns or step/play through the scripted ones; each
+  agent reply carries a trace badge, a live call-status list and an
+  end-of-call debrief + transcript download, with a "Listen" button on
+  each of the agent's own scripted replies when `SPEECH_TOOLS=true` —
+  see "Training mode" above), Drafting (pick a
   matter, draft from a template/research summary/billing narrative, then
   revise/submit, plus a "Listen" button on a draft's content — nav item
   hidden unless `GET /api/me` reports role

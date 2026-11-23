@@ -68,7 +68,17 @@ export const criminalLawModule: PracticeAreaModule = {
   ],
   deriveEscalationSignals(context: Record<string, unknown>): Partial<EscalationSignals> {
     const signals: Partial<EscalationSignals> = {};
-    if (context["inCustody"] === true) signals.inCustody = true;
+    // `typeof === "boolean"` (not `=== true`) deliberately forwards an
+    // explicit `false` too, not just a `true`. `chat-agent.ts` merges this
+    // object over the turn's raw free-text signals specifically so a
+    // caller's direct answer to the gating question can override a
+    // false-positive substring match elsewhere in the same sentence (e.g.
+    // "No, I'm not currently in custody" — the generic extractor sees the
+    // literal substring "in custody" and flags it, same as it would for an
+    // affirmative answer, unless this explicit `false` overrides it).
+    // Dropping the key entirely on `false` — the previous behavior — left
+    // that false positive unopposed and escalated every ordinary "no".
+    if (typeof context["inCustody"] === "boolean") signals.inCustody = context["inCustody"];
     if (context["policeQuestioningImminent"] === true) signals.imminentPoliceQuestioning = true;
     if (typeof context["courtAppearanceWithinHours"] === "number") {
       signals.courtAppearanceWithinHours = context["courtAppearanceWithinHours"] as number;

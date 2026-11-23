@@ -26,7 +26,7 @@ export const DIRECTIVE_SCRIPTS: Record<RouteDirective, string> = {
   continue_standard_triage: "Thanks — let's continue.",
 };
 
-const CALLER_TYPE_QUESTION = "Are you a new client, an existing client, or calling on behalf of someone else?";
+export const CALLER_TYPE_QUESTION = "Are you a new client, an existing client, or calling on behalf of someone else?";
 const DEFAULT_GREETING_OPENER = "Thanks for reaching out.";
 
 export const GREETING = `${DEFAULT_GREETING_OPENER} ${CALLER_TYPE_QUESTION}`;

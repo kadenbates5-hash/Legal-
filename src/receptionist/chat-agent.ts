@@ -2,7 +2,7 @@ import { Router, newIntakeState, type IntakeState } from "../core/router.js";
 import type { EscalationSignals, RouteDirective } from "../core/escalation.js";
 import { disclosurePolicyFor } from "../core/confidentiality.js";
 import { extractSignalsFromText, extractCandidatePartyNames, parseHoursUntil } from "./signal-extraction.js";
-import { BILLING_HANDOFF_SCRIPT, DIRECTIVE_SCRIPTS, OUTRO_CLEARED_FOR_INTAKE, RECORDING_CONSENT_REFUSED_SCRIPT, WRAP_UP, greetingFor, recordingConsentScriptFor } from "./scripts.js";
+import { BILLING_HANDOFF_SCRIPT, CALLER_TYPE_QUESTION, DIRECTIVE_SCRIPTS, OUTRO_CLEARED_FOR_INTAKE, RECORDING_CONSENT_REFUSED_SCRIPT, WRAP_UP, greetingFor, recordingConsentScriptFor } from "./scripts.js";
 import { RECORDING_CONSENT_REFUSAL_RE } from "./signal-extraction.js";
 import type { IntakeQuestion, PracticeAreaModule } from "../config/practice-area.js";
 import type { Actor } from "../core/types.js";
@@ -18,10 +18,36 @@ import { isWithinBusinessHours, type FirmConfig } from "../config/firm-config.js
  * scripted reply. Voice would be the same state machine behind a
  * speech-to-text/text-to-speech shim.
  */
+/**
+ * What just happened on a turn, for a trainer/reviewer watching the
+ * conversation (the dashboard's "Live Intake Demo" panel) — purely
+ * observational, never consulted by any routing decision. `triggers`
+ * mirrors `core/escalation.ts`'s `EscalationTrigger` values as plain
+ * strings so this file doesn't need to re-export that union.
+ */
+export interface TurnTrace {
+  label: string;
+  triggers: string[];
+  state: Readonly<IntakeState>;
+}
+
 export interface ChatTurnResult {
   reply: string;
   done: boolean;
+  trace: TurnTrace;
 }
+
+const DIRECTIVE_LABELS: Record<RouteDirective, string> = {
+  connect_human_immediately: "Emergency escalation",
+  connect_crisis_resources_immediately: "Crisis escalation",
+  connect_human_gently: "Vulnerable caller — gentle handoff",
+  redirect_no_answer_then_handoff: "Redirected — no legal-advice/narrative answer",
+  route_to_human_workflow: "Routed to a human workflow",
+  route_interpreter_then_continue: "Interpreter routing",
+  hold_for_conflict_check: "Conflict-of-interest check",
+  disclose_recording_consent_then_continue: "Recording consent disclosure",
+  continue_standard_triage: "Standard triage",
+};
 
 type PendingGate = "caller_type" | RouteDirective | "intake_question" | null;
 
@@ -33,6 +59,9 @@ type PendingGate = "caller_type" | RouteDirective | "intake_question" | null;
  * register as affirmative, not be missed because "yes" isn't the first word.
  */
 const AFFIRMATIVE_RE = /(^\s*y\b)|\b(yes|yeah|yep|yup|correct|that's right|affirmative)\b/i;
+
+const NEGATION_RE = /(^\s*(no|nope|nah)\b)|\bnot\b|n't\b/i;
+const CUSTODY_WORDS_RE = /\b(arrest|jail|locked up|detain|held)/i;
 
 const CALLER_TYPE_PATTERNS = {
   statesAsFamilyMember: /\bfamily|on behalf of|calling for|my (son|daughter|husband|wife|brother|sister|father|mother)\b/i,
@@ -70,6 +99,8 @@ export class ReceptionistChatSession {
   #intakeQuestionIndex = 0;
   #answers = new Map<string, string>();
   #terminated = false;
+  /** Set when an interpreter request preempted the caller-type question before it was answered — see handleMessage. */
+  #reaskCallerType = false;
   #firmConfig: FirmConfig | undefined;
   #now: () => Date;
 
@@ -116,20 +147,47 @@ export class ReceptionistChatSession {
 
   handleMessage(text: string): ChatTurnResult {
     if (this.#terminated) {
-      return { reply: WRAP_UP, done: true };
+      return { reply: WRAP_UP, done: true, trace: { label: "conversation already ended", triggers: [], state: { ...this.#state } } };
     }
 
     let turnSignals: Partial<EscalationSignals> = extractSignalsFromText(text);
 
+    // Once a caller's free text signals they need an interpreter, that has
+    // to become sticky state, not just this turn's raw signal — §2's
+    // "language/interpreter is the first triage question" is enforced by
+    // `Router.route()` reading `state.interpreterNeeded`, which it folds in
+    // *after* `turnSignals` precisely so a one-off mention on an earlier
+    // turn isn't forgotten on the next one. Without this line that gate
+    // could never actually fire from a caller's own words — only from a
+    // value nothing in this class ever set.
+    if (turnSignals.interpreterNeeded) {
+      this.#state.interpreterNeeded = true;
+    }
+
     if (this.#pendingGate === "caller_type") {
       this.#state.callerType = this.#router.identifyCallerType(detectCallerTypeSignal(text));
+      // The interpreter gate preempts this one, so a caller who opens with
+      // "I need an interpreter" would otherwise stay "unknown" forever and
+      // be treated as a third party at the end of intake.
+      if (this.#state.callerType === "unknown" && turnSignals.interpreterNeeded) this.#reaskCallerType = true;
     } else if (this.#pendingGate === "route_interpreter_then_continue") {
       this.#state.interpreterRouted = true;
+      if (this.#reaskCallerType) {
+        this.#reaskCallerType = false;
+        this.#pendingGate = "caller_type";
+        return {
+          reply: CALLER_TYPE_QUESTION,
+          done: false,
+          trace: { label: "Caller type question (after interpreter routing)", triggers: [], state: { ...this.#state } },
+        };
+      }
     } else if (this.#pendingGate === "disclose_recording_consent_then_continue") {
       if (RECORDING_CONSENT_REFUSAL_RE.test(text)) {
-        return this.#finish(RECORDING_CONSENT_REFUSED_SCRIPT);
+        return this.#finish(RECORDING_CONSENT_REFUSED_SCRIPT, "Recording consent refused — handed to a human");
       }
-      this.#state.recordingConsentDisclosed = true;
+      // An interpreter request is not an answer to the consent question —
+      // the router re-asks consent once the language is sorted out.
+      if (!turnSignals.interpreterNeeded) this.#state.recordingConsentDisclosed = true;
     } else if (this.#pendingGate === "hold_for_conflict_check") {
       this.#state.conflictCheckRun = true;
       const lowered = text.toLowerCase();
@@ -159,6 +217,7 @@ export class ReceptionistChatSession {
       if (conflict) {
         return this.#finish(
           "There may be a conflict of interest here — I'm connecting you with an attorney to review before we go any further.",
+          "Conflict of interest detected — handed to an attorney",
         );
       }
     } else if (this.#pendingGate === "intake_question") {
@@ -172,6 +231,11 @@ export class ReceptionistChatSession {
     }
 
     const decision = this.#router.route(this.#actor, this.#state, turnSignals);
+    const trace: TurnTrace = {
+      label: DIRECTIVE_LABELS[decision.directive],
+      triggers: decision.escalation.triggers,
+      state: { ...this.#state },
+    };
 
     if (
       decision.directive === "connect_human_immediately" ||
@@ -180,7 +244,7 @@ export class ReceptionistChatSession {
       decision.directive === "redirect_no_answer_then_handoff" ||
       decision.directive === "route_to_human_workflow"
     ) {
-      return this.#finish(DIRECTIVE_SCRIPTS[decision.directive]);
+      return this.#finish(DIRECTIVE_SCRIPTS[decision.directive], trace.label, trace.triggers);
     }
 
     if (!decision.clearedForSubstantiveIntake) {
@@ -189,38 +253,41 @@ export class ReceptionistChatSession {
         decision.directive === "disclose_recording_consent_then_continue"
           ? recordingConsentScriptFor(this.#firmConfig)
           : DIRECTIVE_SCRIPTS[decision.directive];
-      return { reply, done: false };
+      return { reply, done: false, trace };
     }
 
     if (this.#state.callerType === "billing") {
-      return this.#finish(BILLING_HANDOFF_SCRIPT);
+      return this.#finish(BILLING_HANDOFF_SCRIPT, "Billing caller — handed to the billing team");
     }
 
     const disclosure = disclosurePolicyFor(this.#state.callerType);
     if (!disclosure.mayShareCaseDetails) {
-      return this.#finish(`${disclosure.scriptedResponse} What message would you like me to pass along?`);
+      return this.#finish(
+        `${disclosure.scriptedResponse} What message would you like me to pass along?`,
+        "Third-party caller — message only, no case details shared",
+      );
     }
 
-    return this.#askNextIntakeQuestion();
+    return this.#askNextIntakeQuestion(trace);
   }
 
-  #askNextIntakeQuestion(): ChatTurnResult {
+  #askNextIntakeQuestion(trace: TurnTrace): ChatTurnResult {
     const question = this.#orderedQuestions[this.#intakeQuestionIndex];
     if (!question) {
-      return this.#finish(WRAP_UP);
+      return this.#finish(WRAP_UP, "Intake complete");
     }
     this.#pendingGate = "intake_question";
     const prefix = this.#intakeQuestionIndex === 0 ? `${OUTRO_CLEARED_FOR_INTAKE} ` : "";
-    return { reply: `${prefix}${question.prompt}`, done: false };
+    return { reply: `${prefix}${question.prompt}`, done: false, trace: { ...trace, label: `Intake question: ${question.id}` } };
   }
 
-  #finish(reply: string): ChatTurnResult {
+  #finish(reply: string, label: string, triggers: string[] = []): ChatTurnResult {
     this.#terminated = true;
     this.#pendingGate = null;
     if (this.#utilization && this.#utilizationEntryId) {
       this.#utilization.finish(this.#utilizationEntryId, "completed");
     }
-    return { reply, done: true };
+    return { reply, done: true, trace: { label, triggers, state: { ...this.#state } } };
   }
 
   /**
@@ -232,13 +299,23 @@ export class ReceptionistChatSession {
    */
   #answerContext(questionId: string, answerText: string): Record<string, unknown> {
     if (questionId === "in_custody") {
-      return { inCustody: AFFIRMATIVE_RE.test(answerText) };
+      if (AFFIRMATIVE_RE.test(answerText)) return { inCustody: true };
+      // An explicit `false` is forwarded only for a plain denial, so it can
+      // override the extractor's substring match on "not in custody". A
+      // denial that also mentions an arrest/jail ("no, but they arrested me
+      // this morning") is left to the extractor, which escalates it.
+      return NEGATION_RE.test(answerText) && !CUSTODY_WORDS_RE.test(answerText) ? { inCustody: false } : {};
     }
     if (questionId === "court_date") {
       const hours = parseHoursUntil(answerText);
       return hours !== undefined ? { courtAppearanceWithinHours: hours } : {};
     }
     if (questionId === "protective_order_active") {
+      // Never forward `false` here: the extractor only flags a protective
+      // order together with violation/arrest wording, so a plain "no, there's
+      // no protective order" is not a false positive, while "no, but he
+      // violated the order and police came" is a real one that a forwarded
+      // `false` would suppress.
       return AFFIRMATIVE_RE.test(answerText) ? { activeProtectiveOrderIssue: true } : {};
     }
     return {};

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { ReceptionistChatSession } from "../receptionist/chat-agent.js";
+import { ReceptionistChatSession, type TurnTrace } from "../receptionist/chat-agent.js";
 import { Router } from "../core/router.js";
 import type { AccessControl } from "../core/access-control.js";
 import type { AuditLog } from "../core/audit.js";
@@ -12,6 +12,8 @@ import type { UtilizationTracker } from "../core/utilization.js";
 export interface IntakeDemoTurn {
   reply: string;
   done: boolean;
+  /** What just happened — see `chat-agent.ts`'s `TurnTrace`. Purely observational, for the training UI's status display. */
+  trace: TurnTrace;
 }
 
 /**
@@ -66,7 +68,8 @@ export class IntakeDemoSessions {
       ...(this.#conflictChecker ? { conflictChecker: this.#conflictChecker } : {}),
     });
     this.#sessions.set(sessionId, session);
-    return { sessionId, turn: { reply: session.greet(), done: false } };
+    const trace: TurnTrace = { label: "Greeting", triggers: [], state: { ...session.state } };
+    return { sessionId, turn: { reply: session.greet(), done: false, trace } };
   }
 
   handleMessage(sessionId: string, text: string): IntakeDemoTurn {

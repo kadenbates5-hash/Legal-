@@ -344,6 +344,7 @@ async function loadWhoami() {
     await refreshPeoplePickers();
     refreshMatterOptions();
     loadHome();
+    loadIntakeScenarios();
 
     if (window.location.search.includes("calendar")) {
       handleCalendarConnectionRedirect();
@@ -1496,59 +1497,212 @@ document.getElementById("refreshAppointments").addEventListener("click", loadApp
 /* ===== Live Intake Demo ===== */
 let intakeSessionId = null;
 
-function appendBubble(kind, text) {
+// The Live Intake Demo's training scenarios (see intake-scenarios.ts) —
+// fetched once and cached, since the list is static server content.
+let intakeScenarios = [];
+let currentIntakeScenario = null;
+let intakeScenarioLineIndex = 0;
+let intakePlayingThrough = false;
+// Bumped on every new conversation so a still-running play-through from the previous one stops instead of typing into the new session.
+let intakeRunId = 0;
+// Every turn's { speaker, text, trace } — the record the debrief and the
+// transcript download are both built from, so they can never disagree.
+let intakeTranscript = [];
+
+async function loadIntakeScenarios() {
+  try {
+    intakeScenarios = await api("/api/intake/scenarios");
+    const select = document.getElementById("intakeScenarioId");
+    for (const scenario of intakeScenarios) {
+      const opt = document.createElement("option");
+      opt.value = scenario.id;
+      opt.textContent = scenario.label;
+      select.appendChild(opt);
+    }
+  } catch {
+    // The intake demo nav item is already role-gated; a failure here just
+    // leaves the free-form-only option, same degrade-not-break pattern as
+    // every other best-effort fetch on Home.
+  }
+}
+
+document.getElementById("intakeScenarioId").addEventListener("change", () => {
+  const scenario = intakeScenarios.find((s) => s.id === document.getElementById("intakeScenarioId").value);
+  document.getElementById("intakeScenarioDescription").textContent = scenario ? scenario.description : "";
+});
+
+/** What just happened, rendered as a small badge under the agent's bubble — the whole point of a *training* panel over a plain chat window. */
+function appendBubble(kind, text, trace) {
   const log = document.getElementById("chatLog");
   const bubble = document.createElement("div");
   bubble.className = `bubble ${kind}`;
   bubble.textContent = text;
-  // Only the agent's own scripted reply is worth previewing aloud — this
-  // is this panel's answer to "what does this line actually sound like
-  // on a real call," not a transcript reader for what the demo caller
-  // typed.
   if (kind === "agent" && canUseSpeechTools()) {
     bubble.appendChild(listenButton(text));
   }
+  if (trace) {
+    const badge = document.createElement("span");
+    badge.className = "trace-badge";
+    badge.textContent = trace.label + (trace.triggers.length ? ` · ${trace.triggers.join(", ")}` : "");
+    bubble.appendChild(badge);
+  }
   log.appendChild(bubble);
   log.scrollTop = log.scrollHeight;
+  intakeTranscript.push({ speaker: kind, text, trace: trace || null });
+}
+
+const INTAKE_STATUS_FIELDS = [
+  { key: "callerType", label: "Caller type", render: (v) => (v === "unknown" ? { text: "not yet identified", cls: "no" } : { text: v.replace(/_/g, " "), cls: "yes" }) },
+  { key: "interpreterNeeded", label: "Interpreter needed", render: (v) => (v ? { text: "yes", cls: "yes" } : { text: "no", cls: "no" }) },
+  { key: "interpreterRouted", label: "Interpreter routed", render: (v, s) => (!s.interpreterNeeded ? { text: "n/a", cls: "no" } : v ? { text: "yes", cls: "yes" } : { text: "pending", cls: "no" }) },
+  { key: "recordingConsentDisclosed", label: "Consent disclosed", render: (v) => (v ? { text: "yes", cls: "yes" } : { text: "pending", cls: "no" }) },
+  { key: "conflictCheckRun", label: "Conflict check", render: (v, s) => (!v ? { text: "pending", cls: "no" } : s.conflictCheckResolved ? { text: "cleared", cls: "yes" } : { text: "conflict found", cls: "conflict" }) },
+];
+
+function renderIntakeStatus(state) {
+  const list = document.getElementById("intakeStatusList");
+  if (!state) {
+    list.innerHTML = '<li class="static empty">Start a conversation to see live status.</li>';
+    return;
+  }
+  list.innerHTML = "";
+  for (const field of INTAKE_STATUS_FIELDS) {
+    const { text, cls } = field.render(state[field.key], state);
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="status-label">${escapeHtml(field.label)}</span><span class="status-value ${cls}">${escapeHtml(text)}</span>`;
+    list.appendChild(li);
+  }
+}
+
+function showIntakeDebrief() {
+  const allTriggers = [...new Set(intakeTranscript.flatMap((t) => (t.trace ? t.trace.triggers : [])))];
+  const agentTurns = intakeTranscript.filter((t) => t.speaker === "agent").length;
+  const finalState = [...intakeTranscript].reverse().find((t) => t.trace)?.trace.state;
+  const body = document.getElementById("intakeDebriefBody");
+  body.innerHTML = `
+    <ul class="status-list">
+      <li><span class="status-label">Agent turns</span><span class="status-value">${agentTurns}</span></li>
+      <li><span class="status-label">Final caller type</span><span class="status-value">${escapeHtml(finalState?.callerType ?? "unknown")}</span></li>
+      <li><span class="status-label">Escalation triggers fired</span><span class="status-value ${allTriggers.length ? "conflict" : "no"}">${allTriggers.length ? escapeHtml(allTriggers.join(", ")) : "none"}</span></li>
+    </ul>
+  `;
+  document.getElementById("intakeDebrief").hidden = false;
+}
+
+function resetIntakeTraining() {
+  intakeTranscript = [];
+  intakeScenarioLineIndex = 0;
+  intakePlayingThrough = false;
+  intakeRunId += 1;
+  document.getElementById("intakeDebrief").hidden = true;
+  renderIntakeStatus(null);
+  updateScenarioProgress();
+}
+
+function updateScenarioProgress() {
+  const controls = document.getElementById("intakeScenarioControls");
+  const progress = document.getElementById("intakeScenarioProgress");
+  if (!currentIntakeScenario) {
+    controls.hidden = true;
+    return;
+  }
+  controls.hidden = false;
+  const remaining = currentIntakeScenario.lines.length - intakeScenarioLineIndex;
+  if (!intakeSessionId) {
+    progress.textContent = "Conversation ended — start a new one to run another scenario.";
+  } else if (remaining > 0) {
+    progress.textContent = `${remaining} scripted line(s) left`;
+  } else {
+    progress.textContent = "Scenario complete — continue free-form if you like.";
+  }
+  document.getElementById("scenarioNextLine").disabled = remaining <= 0 || !intakeSessionId;
+  document.getElementById("scenarioPlayAll").disabled = remaining <= 0 || !intakeSessionId;
 }
 
 async function startIntake() {
   showError("");
   try {
     document.getElementById("chatLog").innerHTML = "";
-    const { sessionId, reply } = await api("/api/intake/start", { method: "POST", body: "{}" });
+    resetIntakeTraining();
+    currentIntakeScenario = intakeScenarios.find((s) => s.id === document.getElementById("intakeScenarioId").value) || null;
+    const { sessionId, reply, trace } = await api("/api/intake/start", { method: "POST", body: "{}" });
     intakeSessionId = sessionId;
-    appendBubble("agent", reply);
+    appendBubble("agent", reply, trace);
+    renderIntakeStatus(trace?.state);
     document.getElementById("chatText").disabled = false;
     document.getElementById("chatSend").disabled = false;
     document.getElementById("chatText").focus();
+    updateScenarioProgress();
   } catch (err) {
     showError(err.message);
   }
 }
 
-async function sendChat() {
-  const input = document.getElementById("chatText");
-  const text = input.value.trim();
+/** Shared by manual typing and the scenario controls — one real turn, one place that ends the conversation. */
+async function sendIntakeTurn(text) {
   if (!text || !intakeSessionId) return;
   appendBubble("caller", text);
-  input.value = "";
   showError("");
   try {
-    const { reply, done } = await api(`/api/intake/${intakeSessionId}/message`, {
+    const { reply, done, trace } = await api(`/api/intake/${intakeSessionId}/message`, {
       method: "POST",
       body: JSON.stringify({ text }),
     });
-    appendBubble("agent", reply);
+    appendBubble("agent", reply, trace);
+    renderIntakeStatus(trace?.state);
     if (done) {
       appendBubble("system", "Conversation ended. Start a new one to try another scenario.");
-      input.disabled = true;
+      document.getElementById("chatText").disabled = true;
       document.getElementById("chatSend").disabled = true;
       intakeSessionId = null;
+      showIntakeDebrief();
     }
   } catch (err) {
     showError(err.message);
   }
+  updateScenarioProgress();
+}
+
+async function sendChat() {
+  const input = document.getElementById("chatText");
+  const text = input.value.trim();
+  input.value = "";
+  await sendIntakeTurn(text);
+}
+
+async function sendNextScenarioLine() {
+  if (!currentIntakeScenario || intakeScenarioLineIndex >= currentIntakeScenario.lines.length) return;
+  const line = currentIntakeScenario.lines[intakeScenarioLineIndex];
+  intakeScenarioLineIndex += 1;
+  await sendIntakeTurn(line);
+}
+
+async function playScenarioThrough() {
+  if (intakePlayingThrough) return;
+  intakePlayingThrough = true;
+  const runId = intakeRunId;
+  try {
+    while (runId === intakeRunId && currentIntakeScenario && intakeScenarioLineIndex < currentIntakeScenario.lines.length && intakeSessionId) {
+      await sendNextScenarioLine();
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    }
+  } finally {
+    if (runId === intakeRunId) intakePlayingThrough = false;
+  }
+}
+
+function downloadIntakeTranscript() {
+  const lines = intakeTranscript.map((t) => {
+    const who = t.speaker === "caller" ? "Caller" : t.speaker === "agent" ? "Agent" : "System";
+    const traceNote = t.trace ? `  [${t.trace.label}${t.trace.triggers.length ? ` · ${t.trace.triggers.join(", ")}` : ""}]` : "";
+    return `${who}: ${t.text}${traceNote}`;
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `live-intake-demo-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.txt`;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 document.getElementById("startIntake").addEventListener("click", startIntake);
@@ -1556,6 +1710,9 @@ document.getElementById("chatSend").addEventListener("click", sendChat);
 document.getElementById("chatText").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendChat();
 });
+document.getElementById("scenarioNextLine").addEventListener("click", sendNextScenarioLine);
+document.getElementById("scenarioPlayAll").addEventListener("click", playScenarioThrough);
+document.getElementById("downloadTranscript").addEventListener("click", downloadIntakeTranscript);
 
 /* ===== Drafting ===== */
 function draftingMatterId() {

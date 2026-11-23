@@ -40,6 +40,7 @@ import { PayrollError } from "../core/payroll.js";
 import { TrustAccountingError, type TrustEntryType } from "../core/trust-ledger.js";
 import { EsignatureError } from "../core/esignature.js";
 import type { ESignatureService } from "./esignature-service.js";
+import { INTAKE_SCENARIOS } from "./intake-scenarios.js";
 import type { MatterStatus, PartyRole } from "../core/matters.js";
 import { MatterClosingError } from "./matters-service.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
@@ -1689,6 +1690,11 @@ async function handleIntakeRequest(
   actor: Actor,
   url: URL,
 ): Promise<void> {
+  if (url.pathname === "/api/intake/scenarios" && req.method === "GET") {
+    sendJson(res, 200, INTAKE_SCENARIOS);
+    return;
+  }
+
   if (url.pathname === "/api/intake/start" && req.method === "POST") {
     const { sessionId, turn } = intake.start(actor);
     sendJson(res, 200, { sessionId, ...turn });

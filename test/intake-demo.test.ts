@@ -141,6 +141,41 @@ describe("intake demo HTTP API", () => {
     expect(turn.done).toBe(true);
   });
 
+  it("returns a trace on every turn so the training UI can show why the agent said what it said", async () => {
+    const cookie = await loginCookie("reception1", "correct-horse");
+    const started = await (await fetch(`${baseUrl}/api/intake/start`, withCookie(cookie, { method: "POST", body: "{}" }))).json();
+    expect(started.trace.label).toBe("Greeting");
+    expect(started.trace.state.callerType).toBe("unknown");
+
+    const turn = await (
+      await fetch(
+        `${baseUrl}/api/intake/${started.sessionId}/message`,
+        withCookie(cookie, { method: "POST", body: JSON.stringify({ text: "I'm currently in jail and need help" }) }),
+      )
+    ).json();
+    expect(turn.trace.label).toMatch(/emergency/i);
+    expect(turn.trace.triggers).toContain("in_custody");
+  });
+
+  it("lists the training scenarios, each with an id, label, description, and at least one scripted line", async () => {
+    const cookie = await loginCookie("reception1", "correct-horse");
+    const res = await fetch(`${baseUrl}/api/intake/scenarios`, withCookie(cookie));
+    expect(res.status).toBe(200);
+    const scenarios = await res.json();
+    expect(scenarios.length).toBeGreaterThan(5);
+    for (const s of scenarios) {
+      expect(s.id).toBeTruthy();
+      expect(s.label).toBeTruthy();
+      expect(s.description).toBeTruthy();
+      expect(s.lines.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("requires a session to list scenarios", async () => {
+    const res = await fetch(`${baseUrl}/api/intake/scenarios`);
+    expect(res.status).toBe(401);
+  });
+
   it("returns 404 for a message sent to an unknown or already-finished session", async () => {
     const cookie = await loginCookie("reception1", "correct-horse");
     const res = await fetch(

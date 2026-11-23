@@ -583,6 +583,37 @@
   .chat-input input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .chat-input input:disabled, .chat-input button:disabled { opacity: 0.5; }
 
+  /* A trainer watching the conversation needs to see *why* the agent said
+     what it said, not just the line itself — this is what actually makes
+     the panel a training tool rather than a chat toy. */
+  .trace-badge {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.68rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    opacity: 0.6;
+  }
+  .bubble.caller .trace-badge { color: rgba(255, 255, 255, 0.85); }
+
+  .intake-live-grid { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 1rem; align-items: start; }
+  @media (max-width: 860px) { .intake-live-grid { grid-template-columns: 1fr; } }
+  .intake-status {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    padding: 0.8rem 0.9rem;
+  }
+  .intake-status h4 { margin: 0 0 0.5rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); }
+  .status-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+  .status-list li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: 0.82rem; }
+  .status-list .status-label { color: var(--text-muted); }
+  .status-list .status-value { font-weight: 600; }
+  .status-list .status-value.yes { color: var(--ok); }
+  .status-list .status-value.no { color: var(--text-muted); }
+  .status-list .status-value.conflict { color: var(--danger); }
+
   /* ---------- Accounts ---------- */
   .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 0.4rem; background: var(--ok); }
   .status-dot.disabled { background: var(--danger); }

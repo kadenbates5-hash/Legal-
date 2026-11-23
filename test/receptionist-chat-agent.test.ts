@@ -182,6 +182,114 @@ describe("receptionist chat agent", () => {
     expect(result.done).toBe(true);
   });
 
+  // Regression: `extractSignalsFromText` correctly detects an interpreter
+  // request in free text, but nothing ever carried that into `IntakeState`
+  // — `state.interpreterNeeded` stayed permanently false, so §2's
+  // "language/interpreter is the first triage question" could never
+  // actually fire from a caller's own words. Fixed in `handleMessage` by
+  // folding `turnSignals.interpreterNeeded` into `this.#state` before the
+  // gate dispatch runs.
+  it("routes to interpreter selection the moment a caller signals they need one, on the very first turn", () => {
+    const { session } = makeSession();
+    const result = session.handleMessage("Hi, necesito un intérprete, no hablo inglés bien.");
+    expect(result.reply).toMatch(/language/i);
+    expect(result.done).toBe(false);
+  });
+
+  it("routes to interpreter selection even mid-conversation, preempting whatever gate was pending", () => {
+    const { session } = makeSession();
+    session.handleMessage("I'm a new client"); // now at consent gate
+    const result = session.handleMessage("Actually, I need an interpreter, I don't speak English well.");
+    expect(result.reply).toMatch(/language/i);
+    expect(result.done).toBe(false);
+  });
+
+  it("re-asks the caller type after the interpreter language, so an interpreter-first caller isn't left 'unknown'", () => {
+    const { session } = makeSession();
+    session.handleMessage("I need an interpreter please.");
+    const afterLanguage = session.handleMessage("Spanish");
+    expect(afterLanguage.reply).toMatch(/new client|existing client/i);
+    const afterType = session.handleMessage("I'm a new client");
+    expect(afterType.reply).toMatch(/recorded/i);
+    expect(afterType.trace.state.callerType).toBe("new_client");
+  });
+
+  it("does not count an interpreter request as an answer to the recording-consent question", () => {
+    const { session } = makeSession();
+    session.handleMessage("I'm a new client"); // consent gate
+    const result = session.handleMessage("I need an interpreter, I don't speak English well.");
+    expect(result.trace.state.recordingConsentDisclosed).toBe(false);
+    session.handleMessage("Spanish");
+    const consentAgain = session.handleMessage("ok");
+    expect(consentAgain.trace.state.recordingConsentDisclosed).toBe(true);
+  });
+
+  // Regression: the free-text extractor's IN_CUSTODY_RE/PROTECTIVE_ORDER_RE
+  // match "in custody"/"protective order" as literal substrings with no
+  // negation awareness, so a caller's own phrasing of a "no" answer (which
+  // naturally restates the question — "No, I'm not currently in custody")
+  // was mis-flagged as a positive signal. `deriveEscalationSignals` used
+  // to only forward `inCustody`/`activeProtectiveOrderIssue` when `true`,
+  // silently dropping an explicit `false`, so that false positive from the
+  // *same turn's* raw text was never overridden and escalated every
+  // ordinary negative answer. Fixed by always forwarding the explicit
+  // boolean so the caller's actual answer to the gating question wins.
+  it("does not falsely escalate when the custody answer's own wording restates the question", () => {
+    const { session } = makeSession();
+    clearGates(session); // now at in_custody question
+    const result = session.handleMessage("No, I'm not currently in custody.");
+    expect(result.reply).not.toMatch(/connecting you/i);
+    expect(result.done).toBe(false);
+    expect(result.reply).toMatch(/court date/i);
+  });
+
+  it("does not falsely escalate when the protective-order answer's own wording restates the question", () => {
+    const { session } = makeSession();
+    clearGates(session); // in_custody
+    session.handleMessage("no"); // -> court_date
+    session.handleMessage("no upcoming date"); // -> protective_order_active
+    const result = session.handleMessage("No, there's no protective order against me.");
+    expect(result.reply).not.toMatch(/connecting you/i);
+    expect(result.done).toBe(false);
+  });
+
+  it("still escalates a denial that mentions an arrest — only a plain denial overrides the extractor", () => {
+    const { session } = makeSession();
+    clearGates(session);
+    const result = session.handleMessage("No, but they arrested me this morning and let me out.");
+    expect(result.reply).toMatch(/connecting you/i);
+    expect(result.done).toBe(true);
+  });
+
+  it("still escalates a protective-order answer that describes a violation without saying yes", () => {
+    const { session } = makeSession();
+    clearGates(session);
+    session.handleMessage("no");
+    session.handleMessage("no upcoming date");
+    const result = session.handleMessage("He keeps violating the protective order and the police came last night.");
+    expect(result.reply).toMatch(/connecting you/i);
+    expect(result.done).toBe(true);
+  });
+
+  it("still escalates a genuinely affirmative custody answer phrased the same way", () => {
+    const { session } = makeSession();
+    clearGates(session);
+    const result = session.handleMessage("Yes, I'm currently in custody.");
+    expect(result.reply).toMatch(/connecting you/i);
+    expect(result.done).toBe(true);
+  });
+
+  it("surfaces a trace on every turn describing what just happened", () => {
+    const { session } = makeSession();
+    const greetTurn = session.handleMessage("I'm a new client");
+    expect(greetTurn.trace.label).toMatch(/recording consent/i);
+    expect(greetTurn.trace.state.callerType).toBe("new_client");
+
+    const emergency = session.handleMessage("I'm currently in custody");
+    expect(emergency.trace.label).toMatch(/emergency/i);
+    expect(emergency.trace.triggers).toContain("in_custody");
+  });
+
   it("records a completed utilization entry once the session finishes", () => {
     const { session, utilization } = makeSession();
     session.handleMessage("I'm in custody right now");
