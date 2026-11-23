@@ -3424,6 +3424,44 @@ SaaS template.
   options pushing the Deadlines card past a phone screen), fixed by
   capping fields at their container's width.
 
+### Accessibility
+
+Audited with axe-core (WCAG 2.1 A/AA) on the sign-in, password and
+booking pages and fourteen panels in both themes, plus a contrast
+measurement of every visible text node against its real background
+(axe can't judge text over the paper textures, which are gradients),
+plus keyboard-only Playwright runs. What that found and what changed:
+
+- **Keyboard focus was invisible on every button and tab.** `.btn`,
+  the binder tabs and the sign-in buttons reset with `all: unset`, which
+  also removed the focus outline — the `:focus-visible` rule existed but
+  lost on source order. Focus rings are now restated last, specifically
+  enough to win, in both stylesheets.
+- **Clickable rows couldn't be reached by keyboard.** A Review Queue
+  item, a matter in Cases and Home's stat cards open on click but are
+  `<li>`/`<div>`, so a keyboard-only user could read the queue and never
+  open anything in it. One shared hook in `app.js` (a `MutationObserver`,
+  so no row-building code had to change) makes every clickable row and
+  tile focusable and opens it on Enter/Space. A list whose rows are all
+  clickable becomes a group of buttons (`role="none"` on the list,
+  `role="button"` on rows); a mixed list keeps list semantics with
+  focusable rows, since a button can't sit directly inside a list
+  (axe's `list` rule caught the first attempt).
+- **Contrast.** The rail's small labels were 2.8:1 in light mode, the
+  red section numbers on the desk 3.7:1, and the sign-in fine print was
+  dimmed with `opacity`. `--text-muted`/`--rail-muted` were darkened
+  (lightened in dark mode) to clear 4.5:1, a separate `--stamp-text`
+  carries red as *text* a shade darker than the red used for fills, and
+  the opacity dimming is gone. The only remaining sub-4.5 text is a
+  disabled button, which WCAG exempts.
+- **Structure.** A "Skip to the page" link comes first in the tab order;
+  the nav is labelled and the tab you're on carries
+  `aria-current="page"`; the error banner on every page is
+  `role="alert"`; the chat transcripts (Live Intake, Assistant,
+  Messages) are `role="log"` live regions so new replies are announced;
+  the Import panel's row count is a status region. The command palette
+  already closed on Escape and returned focus to where it was opened.
+
 `/api/appointments*` (see `scheduling.ts` above) is wired into the same
 server, gated by `SchedulingService`'s own optional `AccessControl`
 integration rather than `ReviewGateService` — scheduling is a

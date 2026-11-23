@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="/app.css" />
 </head>
 <body>
+<a class="skip-link" href="#mainContent">Skip to the page</a>
 
 <!-- One hand-drawn icon set for the sidebar, defined once and referenced by
      <use> — no icon font/CDN (the CSP allows no external font-src), and a
@@ -49,7 +50,7 @@
 
 <aside class="sidebar">
   <div class="brand"><span class="mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path class="m-tab" d="M4 13V8.2A3.2 3.2 0 0 1 7.2 5h5.6c.9 0 1.7.4 2.3 1.1L17.4 9V13H4z"/><path class="m-body" d="M4 9h20.8A3.2 3.2 0 0 1 28 12.2v12.6a3.2 3.2 0 0 1-3.2 3.2H7.2A3.2 3.2 0 0 1 4 24.8z"/><path class="m-glyph" fill-rule="evenodd" d="M10.5 13.2h5a5.3 5.3 0 0 1 0 10.6h-5zm3.1 2.8h1.8a2.5 2.5 0 0 1 0 5h-1.8z"/></svg></span><span class="name">Docket<small>Case binder</small></span></div>
-  <nav class="nav">
+  <nav class="nav" aria-label="Binder tabs">
     <button data-panel="home" class="active"><svg class="nav-icon"><use href="#i-home"/></svg>Home</button>
     <button data-panel="my-matters" id="navMyMatters" hidden><svg class="nav-icon"><use href="#i-briefcase"/></svg>My Matters</button>
 
@@ -130,12 +131,12 @@
     </div>
   </div>
 
-  <div class="content">
+  <div class="content" id="mainContent" tabindex="-1">
     <div id="mfaSetupBanner" class="mfa-setup-banner" hidden>
       Firm policy requires two-factor authentication for your role.
       <button class="btn primary mt-xs" id="mfaSetupBannerBtn">Set it up now</button>
     </div>
-    <div id="error" class="error"></div>
+    <div id="error" class="error" role="alert"></div>
 
     <!-- ===== Home ===== -->
     <section class="panel active" id="panel-home">
@@ -326,7 +327,7 @@
       <div class="card">
         <div class="intake-live-grid">
           <div class="chat-window">
-            <div class="chat-log" id="chatLog"></div>
+            <div class="chat-log" id="chatLog" role="log" aria-live="polite" aria-label="Intake conversation"></div>
             <div class="chat-input">
               <input id="chatText" type="text" placeholder="Type a caller's message…" disabled />
               <button class="btn primary" id="chatSend" disabled>Send</button>
@@ -656,7 +657,7 @@
           <button class="btn primary" id="startAssistant">Start new conversation</button>
         </div>
         <div class="chat-window">
-          <div class="chat-log" id="assistantLog"></div>
+          <div class="chat-log" id="assistantLog" role="log" aria-live="polite" aria-label="Assistant conversation"></div>
           <div class="chat-input">
             <input id="assistantText" type="text" placeholder="Ask the assistant to search, draft, schedule…" disabled />
             <button class="btn primary" id="assistantSend" disabled>Send</button>
@@ -772,7 +773,7 @@
       <div class="card">
         <h3>Announcements</h3>
         <div class="chat-window">
-          <div class="chat-log" id="announcementsLog"></div>
+          <div class="chat-log" id="announcementsLog" role="log" aria-live="polite" aria-label="Announcements"></div>
           <div class="chat-input">
             <input id="announcementText" type="text" placeholder="Post an announcement to everyone…" />
             <button class="btn primary" id="announcementSend">Post</button>
@@ -798,7 +799,7 @@
         </div>
         <ul id="conversationList" class="list"></ul>
         <div class="chat-window" id="conversationWindow" class="hidden">
-          <div class="chat-log" id="conversationLog"></div>
+          <div class="chat-log" id="conversationLog" role="log" aria-live="polite" aria-label="Conversation"></div>
           <div class="chat-input">
             <input id="conversationText" type="text" placeholder="Message…" />
             <button class="btn primary" id="conversationSend">Send</button>
@@ -1112,7 +1113,7 @@
               <option value="skip">Skipped</option>
             </select>
           </label>
-          <span class="meta-tight" id="importRowCount"></span>
+          <span class="meta-tight" id="importRowCount" role="status"></span>
         </div>
         <ul id="importRows" class="list import-rows"></ul>
       </div>

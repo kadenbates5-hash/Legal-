@@ -77,6 +77,63 @@ const PANEL_TITLES = {
   audit: "Audit Log",
 };
 
+/* ===== Keyboard reach for clickable rows and tiles =====
+   List rows (a Review Queue item, a matter in Cases) and Home's clickable
+   stat cards open on click, but they're <li>/<div>, which a keyboard
+   can't reach — so a keyboard-only user could see the queue and never
+   open anything in it. Rather than touch every place a row is built,
+   anything rendered as a clickable row or tile is made focusable as it
+   appears, and Enter/Space act like a click. Rows marked .static (no
+   click handler) are left alone. */
+const CLICKABLE_SELECTOR = "ul.list > li:not(.static):not(.empty-hero-row):not(.skeleton-row), .stat.clickable";
+/**
+ * A list whose rows are *all* clickable is, to a screen reader, a set of
+ * buttons — so it drops its list role and its rows become buttons. A
+ * list mixing clickable and plain rows keeps its list semantics (a
+ * button can't sit directly in a list), with the clickable rows still
+ * focusable and still opened by Enter.
+ */
+function syncListRoles(ul) {
+  const rows = [...ul.children].filter((c) => c.tagName === "LI");
+  const allClickable = rows.length > 0 && rows.every((li) => li.matches(CLICKABLE_SELECTOR));
+  if (allClickable) ul.setAttribute("role", "none");
+  else ul.removeAttribute("role");
+  for (const li of rows) {
+    if (!li.matches(CLICKABLE_SELECTOR)) continue;
+    li.tabIndex = 0;
+    if (allClickable) li.setAttribute("role", "button");
+    else li.removeAttribute("role");
+  }
+}
+function makeKeyboardReachable(root) {
+  if (root.matches?.(".stat.clickable") && !root.hasAttribute("tabindex")) {
+    root.tabIndex = 0;
+    root.setAttribute("role", "button");
+  }
+  for (const tile of root.querySelectorAll?.(".stat.clickable:not([tabindex])") ?? []) {
+    tile.tabIndex = 0;
+    tile.setAttribute("role", "button");
+  }
+  const lists = new Set();
+  if (root.matches?.("ul.list")) lists.add(root);
+  if (root.parentElement?.matches("ul.list")) lists.add(root.parentElement);
+  for (const ul of root.querySelectorAll?.("ul.list") ?? []) lists.add(ul);
+  for (const ul of lists) syncListRoles(ul);
+}
+new MutationObserver((records) => {
+  for (const record of records) {
+    if (record.target instanceof Element && record.target.matches("ul.list")) syncListRoles(record.target);
+    for (const node of record.addedNodes) if (node.nodeType === 1) makeKeyboardReachable(node);
+  }
+}).observe(document.body, { childList: true, subtree: true });
+makeKeyboardReachable(document.body);
+document.addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target instanceof Element && e.target.matches(CLICKABLE_SELECTOR) && e.target.tabIndex === 0) {
+    e.preventDefault();
+    e.target.click();
+  }
+});
+
 /**
  * The page heading, plus the small docket line above it: the tab's number
  * in the binder ("No. 07") and the section it's filed under, so the top
@@ -98,6 +155,11 @@ function setPanelHeading(panel) {
   const number = document.createElement("b");
   number.textContent = btn ? `No. ${String(visible.indexOf(btn) + 1).padStart(2, "0")}` : "Index";
   document.getElementById("panelEyebrow").replaceChildren(number, ` · ${btn ? group : "Everything you can see"}`);
+  // Screen readers announce the tab you're on as the current page.
+  for (const b of document.querySelectorAll("nav.nav button")) {
+    if (b.dataset.panel === panel) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  }
 }
 
 for (const btn of document.querySelectorAll("nav.nav button")) {

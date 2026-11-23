@@ -38,9 +38,12 @@
   --border: #e3dac9;
   --border-strong: #cdbfa6;
   --text: #221d16;
-  --text-muted: #6d6252;
+  --text-muted: #5f5545;
   --rail-text: #5d5240;
-  --rail-muted: #8f8169;
+  --rail-muted: #675b47;
+  /* Stamp red as *text* is a shade darker than the fills, so small red
+     numerals still clear 4.5:1 on the desk. */
+  --stamp-text: #a3331d;
 
   /* Ink: the colour of anything primary you press. */
   --ink: #1e2533;
@@ -94,7 +97,7 @@
     --desk: #12110e; --desk-line: rgba(255, 236, 200, 0.025);
     --bg: #1b1915; --surface: #23201b; --surface-2: #2b2721;
     --border: #3a342b; --border-strong: #4f473b;
-    --text: #efe8da; --text-muted: #a99f8d; --rail-text: #b4a994; --rail-muted: #7d7262;
+    --text: #efe8da; --text-muted: #a99f8d; --rail-text: #b4a994; --rail-muted: #978b76; --stamp-text: #ef8a72;
     --ink: #efe6d4; --ink-edge: #b9ad96; --on-ink: #1b1915;
     --accent: #79bfb2; --accent-hover: #9dd3c8; --accent-soft: rgba(121, 191, 178, 0.14); --accent-glow: rgba(121, 191, 178, 0.22);
     --accent-2: #e2694e; --manila: #8c7a55;
@@ -112,7 +115,7 @@
   --desk: #12110e; --desk-line: rgba(255, 236, 200, 0.025);
   --bg: #1b1915; --surface: #23201b; --surface-2: #2b2721;
   --border: #3a342b; --border-strong: #4f473b;
-  --text: #efe8da; --text-muted: #a99f8d; --rail-text: #b4a994; --rail-muted: #7d7262;
+  --text: #efe8da; --text-muted: #a99f8d; --rail-text: #b4a994; --rail-muted: #978b76; --stamp-text: #ef8a72;
   --ink: #efe6d4; --ink-edge: #b9ad96; --on-ink: #1b1915;
   --accent: #79bfb2; --accent-hover: #9dd3c8; --accent-soft: rgba(121, 191, 178, 0.14); --accent-glow: rgba(121, 191, 178, 0.22);
   --accent-2: #e2694e; --manila: #8c7a55;
@@ -216,7 +219,7 @@ nav.nav { display: flex; flex-direction: column; gap: 1px; counter-reset: sectio
   text-transform: uppercase;
   color: var(--rail-muted);
 }
-.nav-group::before { content: counter(section, decimal-leading-zero) " · "; color: var(--accent-2); opacity: 0.85; }
+.nav-group::before { content: counter(section, decimal-leading-zero) " · "; color: var(--stamp-text); }
 nav.nav button {
   all: unset;
   position: relative;
@@ -298,7 +301,7 @@ nav.nav button[hidden], .nav-group[hidden] { display: none; }
 .sidebar-user-name { font-size: 0.83rem; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-user-role { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--rail-muted); }
 .sidebar-footer { margin: 0.6rem 1rem 0 0.35rem; font-size: 0.72rem; line-height: 1.5; color: var(--rail-muted); }
-.sidebar-credit { margin: 0.35rem 1rem 0 0.35rem; font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--rail-muted); opacity: 0.75; }
+.sidebar-credit { margin: 0.35rem 1rem 0 0.35rem; font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--rail-muted); }
 .sidebar-credit strong { font-weight: 500; color: var(--rail-text); }
 
 /* ---------- The page ---------- */
@@ -355,7 +358,7 @@ nav.nav button[hidden], .nav-group[hidden] { display: none; }
   color: var(--text-muted);
   white-space: nowrap;
 }
-.eyebrow b { color: var(--accent-2); font-weight: 500; }
+.eyebrow b { color: var(--stamp-text); font-weight: 500; }
 .topbar h1 { margin: 0; font-family: var(--font-serif); font-size: 1.85rem; font-weight: 650; letter-spacing: -0.02em; line-height: 1.05; }
 .topbar .who { display: flex; align-items: center; gap: 0.55rem; font-size: 0.82rem; color: var(--text-muted); }
 #whoami { white-space: nowrap; }
@@ -1077,3 +1080,36 @@ kbd {
   .palette-trigger kbd { display: none; }
   .palette-overlay { padding-top: 8vh; }
 }
+
+/* ==========================================================================
+   Keyboard focus. Buttons and tabs reset everything with `all: unset`,
+   which also wiped the focus outline — a keyboard user tabbing through
+   the binder couldn't see where they were. Restated last, and specific
+   enough to win.
+   ========================================================================== */
+.btn:focus-visible,
+nav.nav button:focus-visible,
+.toast .close:focus-visible,
+ul.list li:focus-visible,
+.stat.clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+nav.nav button:focus-visible { outline-offset: -3px; }
+
+/* Past twenty-odd tabs in one keypress. Off-screen until focused. */
+.skip-link {
+  position: absolute;
+  left: 0.75rem;
+  top: -3rem;
+  z-index: 100;
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--on-ink);
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.15s var(--ease);
+}
+.skip-link:focus { top: 0.75rem; }
+.content:focus { outline: none; }
