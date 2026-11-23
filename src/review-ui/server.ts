@@ -2732,6 +2732,14 @@ async function handleMattersRequest(
     return;
   }
 
+  // The firm's whole book screened against itself. POST rather than GET
+  // because running it is recorded in the audit log, like a check.
+  if (url.pathname === "/api/conflicts/audit" && req.method === "POST") {
+    sendJson(res, 200, matters.auditConflicts(actor));
+    onMutated?.();
+    return;
+  }
+
   // Also firm-wide rather than per-matter: the question is "which closed
   // files are now past their retention period", across everything.
   if (url.pathname === "/api/matters/retention-due" && req.method === "GET") {

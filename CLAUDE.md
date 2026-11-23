@@ -1687,6 +1687,57 @@ any client or adversary actually was.
   (Basics, Court & docket, Opposing counsel, Key dates, Parties, Notes)
   rather than one flat block, now that it covers this many fields.
 
+### Firm-wide conflicts audit
+
+`ConflictChecker.audit()` / `MattersService.auditConflicts()` — the
+Conflicts panel's attorney-only **"Firm-wide audit"** card. A *check*
+screens new names on the way in; the audit screens the whole book against
+itself, because a firm ends up on both sides of someone in perfectly
+ordinary ways the check never sees: a party added to a matter after it
+was screened, two matters opened by different attorneys the same week, a
+file reopened, an import.
+
+- **Graded by what the rules care about**, worst first:
+  `current_adversity` (client on one live matter, adverse on another —
+  Rule 1.7; a prospective matter counts as live, same as a check),
+  `former_client_adversity` (a closed matter's client is adverse on a live
+  one — Rule 1.9), `past_adversity` (the firm acted against someone on a
+  now-closed matter and represents them elsewhere — rarely a conflict by
+  itself), and `review` (one client written two ways, e.g. "Maria Ruiz" /
+  "Maria Elena Ruiz"). One matter listing the same name on both sides is
+  called out separately as almost certainly a data-entry mistake.
+- **Over-matches only where it pays.** Adversity findings keep every
+  `possible` match (same surname and first initial), like a check. The
+  spelling list only takes `strong` ones: the first run against a
+  3,000-matter book flagged 9,800 pairs of different clients who shared
+  a surname and initial — "Jane Smith" and "John Smith" are usually
+  relatives — and a list that size is one nobody reads.
+- **One finding per pair of names**, listing every matter on each side,
+  so an adversary the firm faces on 400 matters is one quiet non-finding
+  rather than 80,000 rows — and a returning client recorded the same way
+  each time isn't a finding at all.
+- **Fast without cutting corners.** Each name is normalized once and only
+  names sharing a token are compared — every match `compareNames()` can
+  return needs one (the shorter name's rarest token for a strong match,
+  the surname for a possible one). A seeded test checks this against
+  brute-force comparison of every name with every other, so the shortcut
+  can't silently miss a pair; 3,000 matters run in well under a second.
+- **Read-only, attorney-only, audited.** It changes no record and clears
+  nothing. Attorney-only, unlike a check, because it lays out every
+  matter's parties by another route. Each run writes
+  `conflicts_audit_run` with its counts — "when did the firm last look,
+  and what did it find" is what a later inquiry asks. `POST
+  /api/conflicts/audit` (POST because it writes that entry).
+- Each matter id in a finding opens that record in the editor below,
+  since fixing a finding usually means correcting a party list. A
+  "Download CSV" button exports one row per appearance for a file memo.
+  The list is capped at 500 findings, most serious first, and says so
+  when cut.
+- **What it doesn't cover is shown with every report**: `related`
+  parties (witnesses, co-defendants) aren't compared, nor the free-text
+  opposing-counsel field, and nothing not written on a matter record can
+  be found.
+
 ### Importing from another system (CSV)
 
 `core/csv.ts` / `core/data-import.ts` / `review-ui/import-service.ts` —

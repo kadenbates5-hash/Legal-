@@ -413,6 +413,7 @@ async function loadWhoami() {
       document.getElementById("navAudit").hidden = false;
       document.getElementById("navAnalytics").hidden = false;
       document.getElementById("navImport").hidden = false;
+      document.getElementById("conflictAuditCard").hidden = false;
     }
     if (me.role === "attorney" || me.role === "paralegal") {
       document.getElementById("globalSearch").hidden = false;
@@ -4544,6 +4545,108 @@ async function runConflictCheck() {
   }
 }
 
+/* ===== Firm-wide conflicts audit =====
+   The whole book screened against itself. Each finding names the people
+   and lists the matters on each side; a matter id opens that record in
+   the editor below, since fixing a finding usually means correcting a
+   party list. Attorney-only server-side; the card is only shown to
+   attorneys so nobody else gets a button that can only 403. */
+const AUDIT_SEVERITY_LABEL = {
+  current_adversity: "current client adverse",
+  former_client_adversity: "former client adverse",
+  past_adversity: "past adversity",
+  review: "check spelling",
+};
+const AUDIT_SEVERITY_BADGE = {
+  current_adversity: "rejected",
+  former_client_adversity: "pending_review",
+  past_adversity: "",
+  review: "",
+};
+let lastConflictAudit = null;
+
+function auditSide(appearances, role, label) {
+  const mine = appearances.filter((a) => a.role === role);
+  if (!mine.length) return "";
+  const items = mine
+    .map(
+      (a) =>
+        `<div class="audit-appearance"><button class="matter-link" data-matter="${escapeHtml(a.matterId)}" title="Open this matter record">${escapeHtml(a.matterId)}</button>
+          ${escapeHtml(a.matterTitle)} <span class="badge">${escapeHtml(a.matterStatus)}</span>
+          <span class="audit-as">as “${escapeHtml(a.name)}”${a.note ? ` · ${escapeHtml(a.note)}` : ""}</span></div>`,
+    )
+    .join("");
+  // Divs, not a nested list: a <li> inside ul.list picks up the outer
+  // list's card styling and keyboard handling.
+  return `<div class="audit-side"><span class="audit-side-label">${label}</span><div class="audit-appearances">${items}</div></div>`;
+}
+
+async function runConflictAudit() {
+  showError("");
+  const summary = document.getElementById("conflictAuditSummary");
+  const list = document.getElementById("conflictAuditList");
+  const caveats = document.getElementById("conflictAuditNotCovered");
+  const button = document.getElementById("runConflictAudit");
+  button.disabled = true;
+  try {
+    const report = await api("/api/conflicts/audit", { method: "POST" });
+    lastConflictAudit = report;
+    const c = report.countsBySeverity;
+    const adversity = c.current_adversity + c.former_client_adversity + c.past_adversity;
+    const scanned = `Screened ${report.partiesCompared} client and adverse ${report.partiesCompared === 1 ? "party" : "parties"} across ${report.mattersScanned} ${report.mattersScanned === 1 ? "matter" : "matters"}`;
+    summary.innerHTML =
+      report.totalFindings === 0
+        ? `<p class="subtitle-inline">${scanned}. Nobody recorded here is on both sides of the firm's matters. That covers only what's written on a matter record — see the notes below.</p>`
+        : `<div class="audit-summary${c.current_adversity || c.former_client_adversity ? " is-serious" : ""}"><strong>${scanned}.</strong>
+            ${c.current_adversity} current client${c.current_adversity === 1 ? "" : "s"} adverse elsewhere,
+            ${c.former_client_adversity} former client${c.former_client_adversity === 1 ? "" : "s"} adverse,
+            ${c.past_adversity} past adversity, ${c.review} spelling ${c.review === 1 ? "variant" : "variants"} to check.
+            ${report.truncated ? `Showing the ${report.findings.length} most serious of ${report.totalFindings}.` : ""}
+            ${adversity ? "Each needs an attorney's reading — nothing here clears itself." : ""}</div>`;
+
+    list.innerHTML = "";
+    for (const f of report.findings) {
+      const names = [...new Set(f.appearances.map((a) => a.name))];
+      const li = listRow(`<span class="badge ${AUDIT_SEVERITY_BADGE[f.severity] || ""}">${escapeHtml(AUDIT_SEVERITY_LABEL[f.severity] || f.severity)}</span>
+        <span class="badge">${escapeHtml(f.matchStrength)} match</span>
+        ${f.sameMatter ? '<span class="badge rejected">both sides of one matter</span>' : ""}
+        <strong>${names.map(escapeHtml).join(" ↔ ")}</strong>
+        <div class="audit-sides">${auditSide(f.appearances, "client", "Client on")}${auditSide(f.appearances, "adverse", "Adverse on")}</div>
+        <div class="meta-tight">${escapeHtml(f.explanation)}</div>`);
+      li.classList.add("audit-finding", `audit-${f.severity}`);
+      list.appendChild(li);
+    }
+
+    caveats.innerHTML = report.notCovered.map((n) => `<li>${escapeHtml(n)}</li>`).join("");
+    document.getElementById("downloadConflictAudit").hidden = report.findings.length === 0;
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function downloadConflictAuditCsv() {
+  if (!lastConflictAudit || !lastConflictAudit.findings.length) return;
+  const header = ["Finding", "Severity", "Match", "Both sides of one matter", "Role", "Matter ID", "Matter title", "Matter status", "Name as recorded", "Note"];
+  const rows = [];
+  lastConflictAudit.findings.forEach((f, i) => {
+    for (const a of f.appearances) {
+      rows.push([i + 1, AUDIT_SEVERITY_LABEL[f.severity] || f.severity, f.matchStrength, f.sameMatter ? "yes" : "no", a.role, a.matterId, a.matterTitle, a.matterStatus, a.name, a.note || ""]);
+    }
+  });
+  const stamp = lastConflictAudit.generatedAt.slice(0, 10);
+  downloadCsv(`conflicts-audit-${stamp}.csv`, header, rows);
+}
+
+document.getElementById("conflictAuditList").addEventListener("click", (e) => {
+  const link = e.target.closest(".matter-link");
+  if (!link) return;
+  document.getElementById("matterRecordId").value = link.dataset.matter;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  loadMatterRecord().then(() => document.getElementById("matterTitle").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" }));
+});
+
 /**
  * A party is written as `Name`, `Name <email@example.com>`,
  * `Name [+15551234567]`, or `Name <email@example.com> [+15551234567]`
@@ -4809,6 +4912,8 @@ async function loadMatterList() {
 }
 
 document.getElementById("runConflictCheck").addEventListener("click", runConflictCheck);
+document.getElementById("runConflictAudit").addEventListener("click", runConflictAudit);
+document.getElementById("downloadConflictAudit").addEventListener("click", downloadConflictAuditCsv);
 document.getElementById("loadMatterRecord").addEventListener("click", loadMatterRecord);
 document.getElementById("loadRetentionDue").addEventListener("click", loadRetentionDue);
 document.getElementById("saveMatterRecord").addEventListener("click", saveMatterRecord);

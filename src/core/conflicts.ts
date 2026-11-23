@@ -120,8 +120,13 @@ export function normalizeName(raw: string): { normalized: string; tokens: string
  *                dismiss, expensive to have missed.
  */
 export function compareNames(a: string, b: string): MatchStrength | undefined {
-  const left = normalizeName(a);
-  const right = normalizeName(b);
+  return compareNormalized(normalizeName(a), normalizeName(b));
+}
+
+type NormalizedName = ReturnType<typeof normalizeName>;
+
+/** `compareNames` over names already normalized, so a firm-wide audit normalizes each party once rather than once per comparison. */
+function compareNormalized(left: NormalizedName, right: NormalizedName): MatchStrength | undefined {
   if (!left.normalized || !right.normalized) return undefined;
   if (left.normalized === right.normalized) return "exact";
 
@@ -203,6 +208,159 @@ const SEVERITY_ORDER: Record<ConflictSeverity, number> = {
 };
 const STRENGTH_ORDER: Record<MatchStrength, number> = { exact: 0, strong: 1, possible: 2 };
 
+/* ===== Firm-wide audit =====
+   A conflicts *check* asks "does this new name collide with anything we
+   already have?" at the moment a matter is opened. An *audit* asks the
+   question the check can't: does the firm's book, as it stands today,
+   already have someone on both sides? That happens in perfectly ordinary
+   ways — a party added to a matter months after it was screened, two
+   matters opened by different attorneys the same week, a closed file
+   reopened, an import from another system — and nothing else in the
+   system would ever notice. */
+
+/**
+ * How seriously to read an audit finding, worst first:
+ *
+ * - `current_adversity` — client on one live matter, adverse on another
+ *   live matter (or on the same one). The Rule 1.7 case.
+ * - `former_client_adversity` — a former client (closed matter) is
+ *   adverse on a live matter. Rule 1.9; whether the matters are
+ *   substantially related is an attorney's call.
+ * - `past_adversity` — the firm acted against this person on a matter
+ *   that is now closed, and represents them elsewhere. Rarely a conflict
+ *   on its own, but the firm still owes the client it had on that
+ *   earlier matter (Rule 1.9).
+ * - `review` — not adversity at all: one client recorded under two
+ *   spellings, or two different people whose names will keep matching.
+ */
+export type ConflictAuditSeverity = "current_adversity" | "former_client_adversity" | "past_adversity" | "review";
+
+export interface ConflictAuditAppearance {
+  matterId: string;
+  matterTitle: string;
+  matterStatus: Matter["status"];
+  /** The name exactly as that matter records it. */
+  name: string;
+  role: "client" | "adverse";
+  note: string | undefined;
+}
+
+export interface ConflictAuditFinding {
+  kind: "opposite_sides" | "spelling_variant";
+  severity: ConflictAuditSeverity;
+  /** How closely the recorded names match; `exact` means identical once normalized. */
+  matchStrength: MatchStrength;
+  /** True when one matter lists the same name on both sides. */
+  sameMatter: boolean;
+  appearances: ConflictAuditAppearance[];
+  /** Plain-language reason, written to be read by an attorney working down a list. */
+  explanation: string;
+}
+
+export interface ConflictAuditReport {
+  findings: ConflictAuditFinding[];
+  /** Every finding, including any beyond `findings` when the list was cut short. */
+  totalFindings: number;
+  truncated: boolean;
+  countsBySeverity: Record<ConflictAuditSeverity, number>;
+  mattersScanned: number;
+  partiesCompared: number;
+  /** What this audit does not look at — shown with the report, never buried. */
+  notCovered: string[];
+  generatedAt: string;
+}
+
+export const CONFLICT_AUDIT_NOT_COVERED: readonly string[] = [
+  "Parties marked 'related' (witnesses, co-defendants, family members) are not compared.",
+  "The opposing-counsel field is free text and is not compared.",
+  "A client recorded on several matters under the same spelling is a returning client, not a finding, and is not listed.",
+  "Only what is written on a matter record here can be found — people never named on one, and matters never entered, are invisible to this audit.",
+];
+
+const AUDIT_SEVERITY_ORDER: Record<ConflictAuditSeverity, number> = {
+  current_adversity: 0,
+  former_client_adversity: 1,
+  past_adversity: 2,
+  review: 3,
+};
+
+interface AuditEntry {
+  matter: Matter;
+  party: MatterParty & { role: "client" | "adverse" };
+}
+
+interface AuditGroup {
+  norm: NormalizedName;
+  entries: AuditEntry[];
+}
+
+function appearanceOf(entry: AuditEntry): ConflictAuditAppearance {
+  return {
+    matterId: entry.matter.matterId,
+    matterTitle: entry.matter.title,
+    matterStatus: entry.matter.status,
+    name: entry.party.name,
+    role: entry.party.role,
+    note: entry.party.note,
+  };
+}
+
+function pairSeverity(client: AuditEntry, adverse: AuditEntry): ConflictAuditSeverity {
+  const clientLive = client.matter.status !== "closed";
+  const adverseLive = adverse.matter.status !== "closed";
+  if (clientLive && adverseLive) return "current_adversity";
+  if (!clientLive && adverseLive) return "former_client_adversity";
+  return "past_adversity";
+}
+
+function quoted(names: Iterable<string>): string {
+  return [...new Set(names)].map((n) => `"${n}"`).join(" / ");
+}
+
+function matterList(appearances: ConflictAuditAppearance[], role: "client" | "adverse"): string {
+  const ids = [...new Set(appearances.filter((a) => a.role === role).map((a) => `'${a.matterId}'`))];
+  return ids.join(", ");
+}
+
+function explainOpposite(
+  severity: ConflictAuditSeverity,
+  strength: MatchStrength,
+  sameMatterIds: ReadonlySet<string>,
+  appearances: ConflictAuditAppearance[],
+): string {
+  const who = quoted(appearances.map((a) => a.name));
+  const clientOn = matterList(appearances, "client");
+  const adverseOn = matterList(appearances, "adverse");
+  const matterCount = new Set(appearances.map((a) => a.matterId)).size;
+  let text: string;
+  if (sameMatterIds.size > 0) {
+    const ids = [...sameMatterIds].map((id) => `'${id}'`).join(", ");
+    text =
+      `${who} is recorded as both a client and an adverse party on ${ids}. That is almost always a data-entry ` +
+      "mistake — correct the matter record; if it isn't one, the representation can't stand as recorded.";
+    // Anything beyond the one matter still needs reading on its own terms.
+    if (matterCount > sameMatterIds.size) {
+      text += ` The name also appears on other matters: client on ${clientOn}, adverse on ${adverseOn}.`;
+    }
+  } else if (severity === "current_adversity") {
+    text =
+      `${who} is a client on ${clientOn} and adverse on ${adverseOn}, and both are open. Rule 1.7: the firm is acting ` +
+      "against a current client. Confirm informed consent is on file, or that these are different people.";
+  } else if (severity === "former_client_adversity") {
+    text =
+      `${who} was a client on closed matter ${clientOn} and is adverse on open matter ${adverseOn}. Rule 1.9 turns on ` +
+      "whether the matters are substantially related — an attorney needs to make that call.";
+  } else {
+    text =
+      `The firm acted against ${who} on closed matter ${adverseOn} and represents them on ${clientOn}. Usually not a ` +
+      "conflict by itself; check that representing them isn't adverse to the client the firm had on that earlier matter (Rule 1.9).";
+  }
+  if (strength !== "exact") {
+    text += ` The names are a ${strength} match, not identical — confirm it's the same person before acting on this.`;
+  }
+  return text;
+}
+
 export class ConflictChecker {
   #matters: MatterStore;
 
@@ -257,6 +415,173 @@ export class ConflictChecker {
       // themselves stop an intake; adversity does.
       requiresAttorneyReview: hits.some((h) => h.severity === "direct" || h.severity === "former_client"),
       checkedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Screens the firm's whole book against itself: every client and
+   * adverse party on every matter, compared with every other. Read-only —
+   * it changes no record and clears nothing; callers decide who may run
+   * it and record that they did.
+   *
+   * One finding per pair of recorded names (identical names count as one
+   * name), listing every matter each side appears on, so "the State is
+   * adverse on 400 matters" stays one quiet non-finding rather than
+   * 80,000 rows. Names are normalized once each, and only names sharing a
+   * token are compared — every match `compareNames` can return needs a
+   * shared token — so this stays fast on a firm with thousands of matters.
+   */
+  audit(options: { maxFindings?: number; now?: Date } = {}): ConflictAuditReport {
+    const maxFindings = options.maxFindings ?? 500;
+    const matters = this.#matters.listAll();
+
+    const groupsByName = new Map<string, AuditGroup>();
+    let partiesCompared = 0;
+    for (const matter of matters) {
+      for (const party of matter.parties) {
+        if (party.role !== "client" && party.role !== "adverse") continue;
+        const norm = normalizeName(party.name);
+        if (!norm.normalized) continue;
+        partiesCompared++;
+        let group = groupsByName.get(norm.normalized);
+        if (!group) {
+          group = { norm, entries: [] };
+          groupsByName.set(norm.normalized, group);
+        }
+        group.entries.push({ matter, party: party as AuditEntry["party"] });
+      }
+    }
+    const groups = [...groupsByName.values()];
+
+    // Blocking. A strong match needs every token of the shorter name in
+    // the longer one, so the shorter name's rarest token is always shared;
+    // a possible match needs the same last token. Indexing both finds
+    // every candidate pair without comparing every name with every other.
+    const byToken = new Map<string, number[]>();
+    const byLastToken = new Map<string, number[]>();
+    groups.forEach((g, i) => {
+      for (const token of new Set(g.norm.tokens)) {
+        const list = byToken.get(token) ?? [];
+        list.push(i);
+        byToken.set(token, list);
+      }
+      const last = g.norm.tokens[g.norm.tokens.length - 1]!;
+      const list = byLastToken.get(last) ?? [];
+      list.push(i);
+      byLastToken.set(last, list);
+    });
+
+    const pairs: Array<[number, number, MatchStrength]> = groups.map((_, i) => [i, i, "exact"]);
+    const seen = new Set<string>();
+    groups.forEach((g, i) => {
+      const rarest = g.norm.tokens.reduce((best, t) =>
+        (byToken.get(t)?.length ?? 0) < (byToken.get(best)?.length ?? 0) ? t : best,
+      );
+      const candidates = new Set([
+        ...(byToken.get(rarest) ?? []),
+        ...(byLastToken.get(g.norm.tokens[g.norm.tokens.length - 1]!) ?? []),
+      ]);
+      for (const j of candidates) {
+        if (j === i) continue;
+        const key = i < j ? `${i}|${j}` : `${j}|${i}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const strength = compareNormalized(g.norm, groups[j]!.norm);
+        if (strength) pairs.push([Math.min(i, j), Math.max(i, j), strength]);
+      }
+    });
+
+    const findings: ConflictAuditFinding[] = [];
+    for (const [i, j, strength] of pairs) {
+      const left = groups[i]!.entries;
+      const right = groups[j]!.entries;
+      const opposite = new Set<AuditEntry>();
+      let worst: ConflictAuditSeverity | undefined;
+      const sameMatterIds = new Set<string>();
+      let clientVariant = false;
+
+      const consider = (a: AuditEntry, b: AuditEntry) => {
+        if (a.party.role !== b.party.role) {
+          const [client, adverse] = a.party.role === "client" ? [a, b] : [b, a];
+          const severity = pairSeverity(client, adverse);
+          if (!worst || AUDIT_SEVERITY_ORDER[severity] < AUDIT_SEVERITY_ORDER[worst]) worst = severity;
+          if (a.matter.matterId === b.matter.matterId) sameMatterIds.add(a.matter.matterId);
+          opposite.add(a);
+          opposite.add(b);
+        } else if (a.party.role === "client" && i !== j && strength === "strong") {
+          // Strong only. Adversity keeps every possible match — that's
+          // where over-matching earns its keep — but "Jane Smith" and
+          // "John Smith" as clients are usually two family members, and a
+          // spelling list that flags every shared surname is one nobody
+          // reads.
+          clientVariant = true;
+        }
+      };
+
+      if (i === j) {
+        for (let x = 0; x < left.length; x++) for (let y = x + 1; y < left.length; y++) consider(left[x]!, left[y]!);
+      } else {
+        for (const a of left) for (const b of right) consider(a, b);
+      }
+
+      if (worst) {
+        const appearances = [...opposite].map(appearanceOf).sort(
+          (a, b) => a.role.localeCompare(b.role) || a.matterId.localeCompare(b.matterId),
+        );
+        findings.push({
+          kind: "opposite_sides",
+          severity: worst,
+          matchStrength: strength,
+          sameMatter: sameMatterIds.size > 0,
+          appearances,
+          explanation: explainOpposite(worst, strength, sameMatterIds, appearances),
+        });
+      } else if (clientVariant) {
+        // Only when the pair isn't already an adversity finding, which
+        // lists both spellings anyway.
+        const appearances = [...left, ...right]
+          .filter((e) => e.party.role === "client")
+          .map(appearanceOf)
+          .sort((a, b) => a.matterId.localeCompare(b.matterId));
+        findings.push({
+          kind: "spelling_variant",
+          severity: "review",
+          matchStrength: strength,
+          sameMatter: false,
+          appearances,
+          explanation:
+            `${quoted(appearances.map((a) => a.name))} are recorded as clients under different spellings. Either it's one ` +
+            "client written two ways — use one spelling so the file reads consistently — or two different people, and a " +
+            "note on each saying so saves the next person re-checking.",
+        });
+      }
+    }
+
+    findings.sort(
+      (a, b) =>
+        AUDIT_SEVERITY_ORDER[a.severity] - AUDIT_SEVERITY_ORDER[b.severity] ||
+        Number(b.sameMatter) - Number(a.sameMatter) ||
+        STRENGTH_ORDER[a.matchStrength] - STRENGTH_ORDER[b.matchStrength] ||
+        a.appearances[0]!.name.localeCompare(b.appearances[0]!.name),
+    );
+
+    const countsBySeverity: Record<ConflictAuditSeverity, number> = {
+      current_adversity: 0,
+      former_client_adversity: 0,
+      past_adversity: 0,
+      review: 0,
+    };
+    for (const f of findings) countsBySeverity[f.severity]++;
+
+    return {
+      findings: findings.slice(0, Math.max(0, maxFindings)),
+      totalFindings: findings.length,
+      truncated: findings.length > maxFindings,
+      countsBySeverity,
+      mattersScanned: matters.length,
+      partiesCompared,
+      notCovered: [...CONFLICT_AUDIT_NOT_COVERED],
+      generatedAt: (options.now ?? new Date()).toISOString(),
     };
   }
 }

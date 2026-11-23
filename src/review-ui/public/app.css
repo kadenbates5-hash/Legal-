@@ -694,6 +694,23 @@ ul.list li.skeleton-row:hover { box-shadow: none; transform: none; border-color:
   .import-rows .import-reason, .import-rows .import-warnings, .import-rows .import-conflicts { grid-column: 1; }
 }
 
+/* Firm-wide conflicts audit: each finding is the two sides of a file,
+   side by side, with the matter ids as tabs you can pull. */
+.audit-summary { font-size: 0.85rem; line-height: 1.5; padding: 0.6rem 0.8rem; border-radius: 6px; background: var(--surface-2); border-left: 3px solid var(--accent); margin-top: 0.5rem; }
+.audit-summary.is-serious { border-left-color: var(--danger); background: var(--danger-soft); }
+#conflictAuditList > li.audit-finding { border-left: 3px solid var(--border-strong); overflow-wrap: anywhere; }
+#conflictAuditList > li.audit-current_adversity { border-left-color: var(--danger); }
+#conflictAuditList > li.audit-former_client_adversity { border-left-color: var(--warn); }
+.audit-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.5rem 1rem; margin: 0.5rem 0 0.35rem; }
+.audit-side-label { display: block; font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.2rem; }
+.audit-appearances { display: grid; gap: 0.3rem; font-size: 0.84rem; }
+.audit-appearance { min-width: 0; line-height: 1.5; }
+.audit-as { color: var(--text-muted); font-size: 0.78rem; }
+.matter-link { all: unset; cursor: pointer; font-family: var(--font-mono); font-size: 0.76rem; color: var(--accent); border-bottom: 1px dashed currentColor; margin-right: 0.2rem; }
+.matter-link:hover { border-bottom-style: solid; }
+.audit-caveats { margin: 0.75rem 0 0; padding-left: 1.1rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
+.audit-caveats:empty { display: none; }
+
 /* ==========================================================================
    Home: a masthead, then the day's numbers on index cards
    ========================================================================== */
@@ -1094,7 +1111,8 @@ kbd {
 nav.nav button:focus-visible,
 .toast .close:focus-visible,
 ul.list li:focus-visible,
-.stat.clickable:focus-visible {
+.stat.clickable:focus-visible,
+.matter-link:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

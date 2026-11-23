@@ -206,3 +206,24 @@ describe("conflicts HTTP API", () => {
     expect(entry!.detail).toContain("Carlos Ruiz");
   });
 });
+
+describe("firm-wide conflicts audit HTTP API", () => {
+  it("lets an attorney screen the whole book and records that it ran", async () => {
+    // Acme Corp is adverse on m-owned; make it a client elsewhere.
+    store.upsert("m-acme", { title: "Acme v. Supplier", status: "open", parties: [{ name: "ACME Corporation", role: "client", note: undefined, email: undefined, phone: undefined }] });
+    const res = await fetch(`${baseUrl}/api/conflicts/audit`, withCookie(attorneyCookie, { method: "POST" }));
+    expect(res.status).toBe(200);
+    const report = await res.json();
+    expect(report.findings).toHaveLength(1);
+    expect(report.findings[0].severity).toBe("current_adversity");
+    expect(report.notCovered.length).toBeGreaterThan(0);
+    expect(auditLog.read("attorney").some((e) => e.action === "conflicts_audit_run" && e.actor.id === "a1")).toBe(true);
+  });
+
+  it("refuses a paralegal and a receptionist", async () => {
+    for (const cookie of [paralegalCookie, receptionCookie]) {
+      const res = await fetch(`${baseUrl}/api/conflicts/audit`, withCookie(cookie, { method: "POST" }));
+      expect(res.status).toBe(403);
+    }
+  });
+});

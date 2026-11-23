@@ -554,6 +554,18 @@
         <ul id="conflictHits" class="list"></ul>
       </div>
 
+      <div class="card" id="conflictAuditCard" hidden>
+        <div class="field-row">
+          <h3 class="row-title">Firm-wide audit</h3>
+          <button class="btn" id="runConflictAudit">Run the audit</button>
+          <button class="btn" id="downloadConflictAudit" hidden>Download CSV</button>
+        </div>
+        <p class="subtitle-inline">A check screens new names on the way in. This screens the whole book against itself — anyone who is a client on one matter and adverse on another, however it happened: a party added after the matter was screened, two matters opened the same week, a file reopened, an import. Attorney-only and read-only; each run is recorded in the audit log, and nothing it finds clears itself.</p>
+        <div id="conflictAuditSummary" role="status"></div>
+        <ul id="conflictAuditList" class="list"></ul>
+        <ul id="conflictAuditNotCovered" class="audit-caveats"></ul>
+      </div>
+
       <div class="card">
         <h3>Matter record</h3>
         <p class="subtitle-inline">Who the client and opposing parties are, and the case details worth having on hand without opening a file. Parties are what every future conflicts check searches, so keeping them accurate is what makes screening work. Editing is attorney-only.</p>

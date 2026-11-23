@@ -5,7 +5,7 @@ import { addYears, billingEmailFor, clientPhoneFor as clientPhoneForMatter, type
 import type { TrustLedger } from "../core/trust-ledger.js";
 import type { InvoiceStore } from "../core/invoicing.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
-import type { ConflictCheckResult, ConflictChecker } from "../core/conflicts.js";
+import type { ConflictAuditReport, ConflictCheckResult, ConflictChecker } from "../core/conflicts.js";
 import type { PartyRole } from "../core/matters.js";
 
 /**
@@ -362,6 +362,34 @@ export class MattersService {
         `requiresAttorneyReview=${result.requiresAttorneyReview}`,
     });
     return result;
+  }
+
+  /**
+   * Screens the firm's whole book against itself — who is on both sides
+   * of the firm's matters right now. Read-only: it changes no record and
+   * clears nothing.
+   *
+   * Attorney-only, unlike `checkConflicts`. A check answers a question
+   * about the names someone typed in; this lays out every cross-matter
+   * relationship the firm has, which is the full party list of every
+   * matter by another route — the same reason file retention and the
+   * audit log are attorney-only. Every run is audited with its counts,
+   * because "when did the firm last look, and what did it find" is
+   * exactly what a later inquiry asks.
+   */
+  auditConflicts(actor: Actor): ConflictAuditReport {
+    requireAttorney(actor, "the firm-wide conflicts audit");
+    const report = this.#checker.audit();
+    const c = report.countsBySeverity;
+    this.#auditLog.append({
+      actor,
+      matterId: undefined,
+      action: "conflicts_audit_run",
+      detail:
+        `matters=${report.mattersScanned} parties=${report.partiesCompared} findings=${report.totalFindings} ` +
+        `current=${c.current_adversity} formerClient=${c.former_client_adversity} past=${c.past_adversity} review=${c.review}`,
+    });
+    return report;
   }
 
   #canSee(actor: Actor, matterId: string): boolean {
