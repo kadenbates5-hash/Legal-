@@ -254,6 +254,14 @@
     <!-- ===== Scheduling ===== -->
     <section class="panel" id="panel-scheduling">
       <p class="subtitle">Book, reschedule, or cancel consultations. Bookings outside business hours are rejected unless explicitly overridden.</p>
+      <div class="card" id="bookingRequestsCard" hidden>
+        <div class="field-row">
+          <h3 class="row-title">Online booking requests</h3>
+          <button class="btn" id="copyBookingLink" type="button">Copy the public booking link</button>
+        </div>
+        <p class="subtitle-inline">From the public booking page. Nothing is booked until someone here accepts a request and picks the time. If the conflicts check flagged a request, only an attorney can accept it.</p>
+        <ul id="bookingRequestList" class="list"></ul>
+      </div>
       <div class="card">
         <h3>Book a consultation</h3>
         <div class="field-row">

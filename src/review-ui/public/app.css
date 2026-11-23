@@ -635,6 +635,7 @@
 .hidden { display: none; }
 .row-title { margin: 0; flex: 1 0 100%; }
 .meta { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.3rem; }
+.meta-list { margin: 0.35rem 0 0; padding-left: 1.1rem; color: var(--danger); font-size: 0.8rem; line-height: 1.45; }
 .meta-tight { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem; }
 .meta-xs { color: var(--text-muted); font-size: 0.75rem; }
 .subtitle-inline { color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.6rem; }

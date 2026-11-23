@@ -92,6 +92,7 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
     if (panel === "scheduling") {
       loadAppointments();
       loadDueReminders();
+      loadBookingRequests();
     }
     if (panel === "signatures" && signaturesMatterId().trim()) {
       loadSignatureSources();
@@ -1545,6 +1546,133 @@ async function bookAppointment() {
     showError(err.message);
   }
 }
+
+/*
+ * Online booking requests (see core/booking-requests.ts). The card stays
+ * hidden unless the server has the public booking page turned on and the
+ * signed-in role can handle requests.
+ */
+let bookingMatterTypeLabels = null;
+
+function bookingDefaultStart(request) {
+  const hour = request.preferredTime === "afternoon" ? "14:00" : "10:00";
+  return `${request.preferredDate}T${hour}`;
+}
+
+async function loadBookingRequests() {
+  const card = document.getElementById("bookingRequestsCard");
+  const list = document.getElementById("bookingRequestList");
+  const requests = await tryApi("/api/booking-requests");
+  if (!requests) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  if (!bookingMatterTypeLabels) {
+    const config = await tryApi("/api/public/booking/config");
+    bookingMatterTypeLabels = Object.fromEntries((config?.matterTypes ?? []).map((t) => [t.id, t.label]));
+  }
+  const pending = requests.filter((r) => r.status === "pending");
+  const decided = requests.filter((r) => r.status !== "pending").slice(0, 10);
+  if (requests.length === 0) {
+    list.innerHTML = '<li class="static empty">No requests yet. Share the public booking link to start receiving them.</li>';
+    return;
+  }
+  list.innerHTML = "";
+  for (const request of [...pending, ...decided]) {
+    const li = document.createElement("li");
+    li.classList.add("static");
+    const contact = [request.email, request.phone].filter(Boolean).map(escapeHtml).join(" · ");
+    const prefers = `${new Date(`${request.preferredDate}T12:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}, ${request.preferredTime === "any" ? "any time" : request.preferredTime}`;
+    const conflictBadge = request.conflict.requiresAttorneyReview
+      ? '<span class="badge conflict">conflicts: attorney review</span>'
+      : '<span class="badge approved">conflicts: clear</span>';
+    const statusBadge = request.status === "pending" ? "" : `<span class="badge ${request.status === "accepted" ? "scheduled" : "rejected"}">${request.status}</span>`;
+    li.innerHTML = `<strong>${escapeHtml(request.name)}</strong> · ${escapeHtml(bookingMatterTypeLabels[request.matterType] ?? request.matterType)} ${conflictBadge} ${statusBadge}
+      <div class="meta">${contact} · prefers ${escapeHtml(prefers)}${request.otherPartyName ? ` · other party: ${escapeHtml(request.otherPartyName)}` : ""}</div>`;
+    if (request.conflict.hits.length) {
+      const hits = document.createElement("ul");
+      hits.className = "meta-list";
+      for (const hit of request.conflict.hits) {
+        const item = document.createElement("li");
+        item.textContent = `${hit.matterTitle} (${hit.matterId}): ${hit.explanation}`;
+        hits.appendChild(item);
+      }
+      li.appendChild(hits);
+    }
+    if (request.status === "pending") {
+      const row = document.createElement("div");
+      row.className = "field-row mt-xs";
+      const when = document.createElement("input");
+      when.type = "datetime-local";
+      when.value = bookingDefaultStart(request);
+      const whenField = document.createElement("label");
+      whenField.className = "field";
+      whenField.append("Start (local)", when);
+      row.appendChild(whenField);
+      // Explicit, so accepting works even without a firm config to auto-assign from.
+      const who = document.createElement("select");
+      const attorneys = knownStaff.filter((m) => m.role === "attorney" && !m.disabled);
+      for (const a of attorneys) {
+        const option = document.createElement("option");
+        option.value = a.actorId;
+        option.textContent = a.displayName;
+        if (a.actorId === currentActorId) option.selected = true;
+        who.appendChild(option);
+      }
+      if (attorneys.length) {
+        const whoField = document.createElement("label");
+        whoField.className = "field";
+        whoField.append("Attorney", who);
+        row.appendChild(whoField);
+      }
+      row.appendChild(
+        mkButton("Accept and book", async () => {
+          showError("");
+          try {
+            await api(`/api/booking-requests/${encodeURIComponent(request.id)}/accept`, {
+              method: "POST",
+              body: JSON.stringify({ startTime: new Date(when.value).toISOString(), ...(who.value ? { attorneyId: who.value } : {}) }),
+            });
+            showToast(`Booked ${request.name}.`, "success");
+            await loadBookingRequests();
+          } catch (err) {
+            showError(err.message);
+          }
+        }),
+      );
+      row.appendChild(
+        mkButton("Decline", async () => {
+          const reason = prompt("Reason for declining (kept on the record, not sent to them)?") || undefined;
+          try {
+            await api(`/api/booking-requests/${encodeURIComponent(request.id)}/decline`, { method: "POST", body: JSON.stringify({ reason }) });
+            showToast("Request declined.", "success");
+            await loadBookingRequests();
+          } catch (err) {
+            showError(err.message);
+          }
+        }),
+      );
+      li.appendChild(row);
+    } else if (request.appointmentId) {
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = `Booked as ${request.appointmentId} (matter prospective-${request.id}) by ${request.decidedBy}`;
+      li.appendChild(meta);
+    }
+    list.appendChild(li);
+  }
+}
+
+document.getElementById("copyBookingLink").addEventListener("click", async () => {
+  const link = `${location.origin}/book.html`;
+  try {
+    await navigator.clipboard.writeText(link);
+    showToast("Booking link copied.", "success");
+  } catch {
+    showToast(link, "success");
+  }
+});
 
 async function loadAppointments() {
   showError("");

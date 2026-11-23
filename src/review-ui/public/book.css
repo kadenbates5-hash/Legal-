@@ -1,0 +1,64 @@
+/* The public booking page: login.css supplies the brand, desk scene, card
+   and inputs; this adds what a longer form needs. */
+body.book-page {
+  overflow-y: auto;
+  align-items: flex-start;
+  padding: 3rem 1rem;
+}
+@media (min-height: 860px) {
+  body.book-page { align-items: center; }
+}
+.book-card { max-width: 480px; }
+.book-card .brand { margin-bottom: 0.9rem; }
+.book-title {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.book-card p.tagline { margin: 0 0 0.5rem; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+@media (max-width: 460px) { .row { grid-template-columns: 1fr; } }
+.book-card input[type="email"],
+.book-card input[type="tel"],
+.book-card input[type="date"],
+.book-card select {
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  margin-top: 0.35rem;
+  box-sizing: border-box;
+  border: 1px solid var(--border, #d9dce3);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.92rem;
+  color: var(--text);
+  background: var(--surface);
+}
+.book-card input:focus,
+.book-card select:focus { outline: 2px solid var(--accent-2, #b08d57); outline-offset: 1px; }
+.hint { color: var(--text-muted); font-size: 0.78rem; line-height: 1.45; margin: 0.35rem 0 0; }
+label.check {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  margin-top: 1rem;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.4;
+}
+label.check input { margin-top: 0.2rem; flex-shrink: 0; }
+.notice {
+  margin-top: 0.9rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  background: var(--accent-soft, #eaeef6);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.notice.urgent { background: var(--danger-soft, #fbe9eb); color: var(--danger, #c02b3a); }
+.notice.urgent strong { display: block; margin-bottom: 0.15rem; }
+/* Off-screen rather than display:none, which simple bots check for. */
+.hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.done h2 { font-family: var(--font-serif); margin: 1rem 0 0.4rem; font-size: 1.25rem; }
+.done p { color: var(--text-muted); line-height: 1.55; margin: 0; }

@@ -54,6 +54,7 @@ import { PdfLibInvoicePdfRenderer } from "../integrations/invoice-pdf.js";
 import { MultiAnchorTarget, type AuditAnchorTarget } from "../core/audit-anchor.js";
 import { EmailAnchorTarget, FileAnchorTarget } from "../integrations/audit-anchor-targets.js";
 import { ESignatureService } from "./esignature-service.js";
+import { BookingService } from "./booking-service.js";
 import type { ReviewServerOptions } from "./server.js";
 
 /**
@@ -819,6 +820,26 @@ const esignatureOptions: Pick<ReviewServerOptions, "esignature"> = PUBLIC_BASE_U
   : {};
 
 /**
+ * The public self-service booking page (`/book.html`). Opt-in on its own
+ * flag: it's the first form in this app that anyone on the internet can
+ * submit, so a firm turns it on deliberately rather than getting it as a
+ * side effect of some other setting. Requests land in the Scheduling
+ * panel for staff to accept or decline; nothing books itself.
+ */
+const bookingOptions: Pick<ReviewServerOptions, "booking"> =
+  process.env["PUBLIC_BOOKING"] === "true"
+    ? {
+        booking: new BookingService({
+          store: state.bookingRequests,
+          scheduling: state.scheduling,
+          auditLog: state.auditLog,
+          conflictChecker,
+          ...(firmConfig ? { firmConfig } : {}),
+        }),
+      }
+    : {};
+
+/**
  * Self-service "connect your own Google Calendar" (see "Google
  * Calendar integration" in CLAUDE.md) — the per-attorney alternative
  * to the one firm-wide shared service-account calendar. Needs a real
@@ -909,6 +930,7 @@ const server = createReviewServer(service, state.auth, {
   ...speechOptions,
   ...passwordResetOptions,
   ...esignatureOptions,
+  ...bookingOptions,
   ...calendarConnectionOptions,
   ...stripeWebhookOptions,
 });
@@ -924,4 +946,5 @@ server.listen(port, () => {
   }
   if (assistant) console.log("Assistant panel active (ANTHROPIC_API_KEY set).");
   console.log(`Time clock day boundary: ${FIRM_TIME_ZONE} (set FIRM_TIME_ZONE to change).`);
+  if (bookingOptions.booking) console.log(`Public booking page live at /book.html (PUBLIC_BOOKING=true).`);
 });

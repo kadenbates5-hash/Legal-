@@ -337,6 +337,60 @@ the rest of core:
   every other stateful core object — wired into `system-state.ts` and the
   dashboard's "Scheduling" panel.
 
+### Self-service public booking (`/book.html`)
+
+`core/booking-requests.ts` / `review-ui/booking-service.ts` /
+`public/book.html` — a page a prospective client can use to ask for a
+consultation without phoning. Opt-in on its own flag,
+`PUBLIC_BOOKING=true`, because it's the first form in this app anyone on
+the internet can submit; absent, `/api/public/booking/*` and
+`/api/booking-requests*` both 404 and the page says online booking isn't
+available.
+
+- **A request, never an appointment.** Nothing a member of the public
+  submits reaches a calendar by itself. Staff accept a request from the
+  Scheduling panel's "Online booking requests" card, choosing the exact
+  time and attorney, and only then is an `Appointment` booked through
+  `SchedulingService` — business hours and double-booking enforced
+  exactly as for any other booking, and *before* the request is marked
+  accepted, so a refused booking leaves it pending rather than claiming a
+  time nobody holds. The appointment's matter id is
+  `prospective-<requestId>`.
+- **No "what happened" box.** It asks who they are, how to reach them
+  (email or phone), a matter *type* from a fixed list, a preferred day
+  and part of day, and the other party's name — the last only for the
+  conflicts screen. Inviting a stranger to narrate facts pre-retention is
+  exactly what the receptionist's `pre_retention_factual_narrative`
+  trigger stops, and a web form shouldn't undo that. Names are validated
+  to look like names, so the other-party field can't carry a narrative,
+  a link or markup either.
+- **Conflicts are screened on arrival, and never disclosed.** The
+  requester is screened as the would-be client and the other party as
+  adverse, against every matter (Rule 1.10, same `ConflictChecker` as
+  everywhere else). The requester always gets the same "received"
+  answer — saying "we can't take you" would itself reveal that the firm
+  represents someone. Staff see the hits with their explanations, and a
+  flagged request **can only be accepted by an attorney**.
+- **Urgent situations aren't submitted at all.** A "someone is in custody
+  / police want to question / court within two days" box replaces the
+  form with "call us now" and the firm's letterhead phone (and 911 for
+  danger), so an emergency never waits in a queue.
+- **Abuse controls**: per-IP `SubmissionLimiter` (5 an hour by default,
+  a sliding window rather than `LoginThrottle`'s failure-and-lockout
+  model), a cap of `BOOKING_MAX_PENDING` (200) undecided requests after
+  which the form says to call, and an off-screen honeypot field whose
+  submissions get the identical "received" answer and are stored nowhere.
+- Audited: `booking_request_received` (as the `anonymous` actor
+  `public-booking-form`), `booking_request_accepted`,
+  `booking_request_declined`. Staff routes are receptionist/paralegal/
+  attorney; `client` and `system` are refused. Persisted as
+  `bookingRequests` in `system-state.ts`.
+
+What this doesn't do: show live free/busy slots (deliberately — a public
+page shouldn't expose attorneys' calendars; staff pick the time), email
+the requester a confirmation (staff contact them; the appointment's own
+reminders take over once booked), or take payment or a retainer.
+
 ### Appointment reminder emails and SMS (closing the "send it" gap)
 
 `src/integrations/appointment-reminders.ts` — `AppointmentReminderSender`,
@@ -3344,6 +3398,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # SMTP_HOST=... SMTP_FROM=... DOCKET_BASE_URL=http://localhost:3000 DOCKET_SYSTEM_API_KEY=... npm run send:deadline-alerts  # one-shot: email each matter's responsible attorney their own at-risk deadlines (run on a schedule, e.g. daily cron); add DEADLINE_ALERT_RECIPIENT=partners@firm.example as a catch-all for matters with no responsible attorney/email on file
 # TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable the telephony integration; also point a Twilio number's voice webhook at $PUBLIC_BASE_URL/api/voice/twilio/incoming in the Twilio console
 # SMTP_HOST=smtp.example.com SMTP_FROM=... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable self-service "forgot password" email links (reuses PUBLIC_BASE_URL and whichever SMTP_* vars are already set for invoices — see "Self-service password reset")
+# PUBLIC_BOOKING=true npm run start:review-ui                            # turn on the public /book.html consultation-request page (requests land in the Scheduling panel; staff accept and pick the time — see "Self-service public booking")
 # PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui     # enable the Signatures panel's e-signature requests (see "E-signature") — needs no new vendor; emails each signer's link whenever SMTP_* is also set, otherwise the panel shows the raw link for staff to share
 # STRIPE_SECRET_KEY=sk_... STRIPE_WEBHOOK_SECRET=whsec_... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable a "Pay now" button on outstanding invoices in the client portal (see "Online invoice payment (Stripe Checkout)"); also point a Stripe webhook endpoint at $PUBLIC_BASE_URL/api/stripe/webhook listening for checkout.session.completed in the Stripe dashboard
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice

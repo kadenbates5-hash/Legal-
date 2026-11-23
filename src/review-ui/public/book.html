@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Request a consultation</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png" />
+<link rel="apple-touch-icon" href="/icons/icon-180.png" />
+<meta name="theme-color" content="#2c4270" />
+<link rel="stylesheet" href="/login.css" />
+<link rel="stylesheet" href="/book.css" />
+</head>
+<body class="book-page">
+<div class="scene" data-parallax aria-hidden="true">
+  <div class="horizon"></div>
+  <div class="desk"><div class="pad"></div></div>
+</div>
+<main class="card book-card" data-tilt="2">
+  <span class="sheen" aria-hidden="true"></span>
+  <div class="brand"><span class="mark"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.4 14.8 7.8 10 17 5.2 7.8Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="6.6" r="0.85" fill="currentColor"/><path d="M10 8.6v6.7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span><span class="name" id="firmName"></span></div>
+  <h1 class="book-title">Request a consultation</h1>
+  <p class="tagline">Tell us how to reach you and when suits you. We'll get in touch to confirm a time. Nothing is booked until we do.</p>
+
+  <div id="unavailable" class="notice" hidden>Online booking isn't available right now. Please call the office.</div>
+
+  <form id="bookForm" novalidate>
+    <label>Your name <input id="name" type="text" autocomplete="name" maxlength="100" required /></label>
+    <div class="row">
+      <label>Email <input id="email" type="email" autocomplete="email" maxlength="254" /></label>
+      <label>Phone <input id="phone" type="tel" autocomplete="tel" maxlength="20" /></label>
+    </div>
+    <p class="hint">Either one is fine. We only use it to confirm your appointment.</p>
+
+    <label>What is this about? <select id="matterType" required></select></label>
+
+    <label class="check urgent-check">
+      <input type="checkbox" id="isUrgent" />
+      <span>Someone is in custody right now, police want to question someone soon, or there's a court date in the next two days</span>
+    </label>
+    <div id="urgentNotice" class="notice urgent" hidden>
+      <strong>Please don't wait for a booking. Call us now<span id="urgentPhone"></span>.</strong>
+      If anyone is in danger, call 911.
+    </div>
+
+    <div id="restOfForm">
+      <label>Name of the other party, if any <input id="otherPartyName" type="text" maxlength="120" placeholder="e.g. the other driver, or a company" /></label>
+      <p class="hint">Just a name. We check it so we never take on a case against someone we already represent. Please don't describe what happened here; an attorney will go over that with you privately.</p>
+      <div class="row">
+        <label>Preferred day <input id="preferredDate" type="date" required /></label>
+        <label>Time of day
+          <select id="preferredTime">
+            <option value="any">Any time</option>
+            <option value="morning">Morning</option>
+            <option value="afternoon">Afternoon</option>
+          </select>
+        </label>
+      </div>
+      <div class="hp" aria-hidden="true"><label>Website <input id="website" type="text" tabindex="-1" autocomplete="off" /></label></div>
+      <button type="submit" class="submit" id="submitBtn">Request a time</button>
+    </div>
+    <div id="error" class="error" role="alert"></div>
+  </form>
+
+  <div id="done" class="done" hidden>
+    <h2>Request received</h2>
+    <p>Thank you. Someone from our team will contact you to confirm a time. This isn't a booked appointment yet.</p>
+  </div>
+
+  <p class="footer-credit">Sending this form doesn't make you a client or create an attorney-client relationship.</p>
+</main>
+<script src="/depth.js"></script>
+<script src="/book.js"></script>
+</body>
+</html>

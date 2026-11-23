@@ -8,6 +8,8 @@ import { LoginThrottle } from "../core/login-throttle.js";
 import type { AuditLog } from "../core/audit.js";
 import type { DeadlineType } from "../core/deadline.js";
 import { SchedulingError, type AppointmentType, type SchedulingService } from "../core/scheduling.js";
+import { BookingRequestError } from "../core/booking-requests.js";
+import type { BookingService } from "./booking-service.js";
 import { ReviewGateService } from "./review-service.js";
 import type { IntakeDemoSessions } from "./intake-demo.js";
 import type { AccountsService } from "./accounts-service.js";
@@ -333,6 +335,9 @@ function errorStatus(err: unknown): number {
   if (err instanceof SchedulingError) {
     return err.message.startsWith("no appointment") ? 404 : 409;
   }
+  if (err instanceof BookingRequestError) {
+    return { invalid: 400, not_found: 404, conflict: 409, busy: 429 }[err.kind];
+  }
   if (err instanceof EsignatureError) {
     if (
       err.message.startsWith("no signature envelope") ||
@@ -493,6 +498,8 @@ export interface ReviewServerOptions {
   analytics?: AnalyticsService;
   /** Enables `/api/esignature/*` (staff) and the public `/api/sign/:token*` routes (the signer, no Docket session). Absent means both 404, same "absent config means the surface doesn't exist" pattern as everything else optional here. */
   esignature?: ESignatureService;
+  /** Enables the public booking page's `/api/public/booking/*` routes (no session) and staff `/api/booking-requests*`. Absent means both 404. */
+  booking?: BookingService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
   /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
@@ -602,6 +609,7 @@ async function handleRequest(
     timeClock,
     analytics,
     esignature,
+    booking,
     voiceCalls,
     audioClips,
     twilio,
@@ -840,6 +848,49 @@ async function handleRequest(
       res.writeHead(302, { Location: `/?calendarError=${encodeURIComponent(err instanceof Error ? err.message : "unknown error")}`, ...SECURITY_HEADERS });
     }
     res.end();
+    return;
+  }
+
+  /**
+   * The public booking page — no session, the same bucket as the signer
+   * routes below. `BookingService.submitPublic` does the validation, rate
+   * limiting and conflicts screen; its answer never reveals what the
+   * screen found.
+   */
+  if (url.pathname.startsWith("/api/public/booking/")) {
+    if (!booking) {
+      sendJson(res, 404, { error: "online booking is not available" });
+      return;
+    }
+    try {
+      if (url.pathname === "/api/public/booking/config" && req.method === "GET") {
+        sendJson(res, 200, booking.publicConfig());
+        return;
+      }
+      if (url.pathname === "/api/public/booking/requests" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const str = (key: string) => (typeof body[key] === "string" ? (body[key] as string) : "");
+        const result = booking.submitPublic(
+          {
+            name: str("name"),
+            email: str("email"),
+            phone: str("phone"),
+            matterType: str("matterType"),
+            otherPartyName: str("otherPartyName"),
+            preferredDate: str("preferredDate"),
+            preferredTime: str("preferredTime"),
+          },
+          { ip: clientIpFor(req, trustProxy), honeypot: str("website") },
+        );
+        sendJson(res, 200, result);
+        onMutated?.();
+        return;
+      }
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+      return;
+    }
+    sendJson(res, 404, { error: "not found" });
     return;
   }
 
@@ -1175,6 +1226,48 @@ async function handleRequest(
       } catch (err) {
         sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
       }
+      return;
+    }
+
+    if (url.pathname === "/api/booking-requests" || url.pathname.startsWith("/api/booking-requests/")) {
+      if (!booking) {
+        sendJson(res, 404, { error: "online booking is not configured on this server" });
+        return;
+      }
+      try {
+        if (url.pathname === "/api/booking-requests" && req.method === "GET") {
+          sendJson(res, 200, booking.list(actor));
+          return;
+        }
+        const segments = url.pathname.replace(/^\/api\/booking-requests\/?/, "").split("/").filter(Boolean);
+        if (segments.length === 2 && req.method === "POST") {
+          const id = decodeURIComponent(segments[0]!);
+          const body = await readJsonBody(req);
+          if (segments[1] === "accept") {
+            const duration = Number(body["durationMinutes"]);
+            sendJson(
+              res,
+              200,
+              booking.accept(actor, id, {
+                startTime: new Date(String(body["startTime"] ?? "")),
+                ...(Number.isFinite(duration) && duration > 0 ? { durationMinutes: duration } : {}),
+                ...(typeof body["attorneyId"] === "string" && body["attorneyId"] ? { attorneyId: body["attorneyId"] as string } : {}),
+              }),
+            );
+            onMutated?.();
+            return;
+          }
+          if (segments[1] === "decline") {
+            sendJson(res, 200, booking.decline(actor, id, typeof body["reason"] === "string" ? (body["reason"] as string) : undefined));
+            onMutated?.();
+            return;
+          }
+        }
+      } catch (err) {
+        sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+        return;
+      }
+      sendJson(res, 404, { error: "not found" });
       return;
     }
 

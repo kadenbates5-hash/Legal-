@@ -20,6 +20,7 @@ import { TimeClock, type TimeClockSnapshot } from "../core/time-clock.js";
 import { ClientMessageStore, type ClientMessage } from "../core/client-messages.js";
 import { CalendarConnectionStore, type CalendarConnection } from "../core/calendar-connections.js";
 import { ESignatureStore, type SignatureEnvelope } from "../core/esignature.js";
+import { BookingRequestStore, type BookingRequest } from "../core/booking-requests.js";
 import type { FirmConfig } from "../config/firm-config.js";
 import { fileStateStore, type StateStore } from "./state-store.js";
 
@@ -82,6 +83,8 @@ export interface SystemStateSnapshot {
   calendarConnections?: CalendarConnection[];
   /** E-signature envelopes (see core/esignature.ts), backing the Signatures panel and the public signer-facing /api/sign/:token routes. */
   esignatures?: SignatureEnvelope[];
+  /** Self-service booking requests from the public booking page (see core/booking-requests.ts). */
+  bookingRequests?: BookingRequest[];
 }
 
 export interface SystemState {
@@ -108,6 +111,7 @@ export interface SystemState {
   clientMessages: ClientMessageStore;
   calendarConnections: CalendarConnectionStore;
   esignatures: ESignatureStore;
+  bookingRequests: BookingRequestStore;
 }
 
 export interface LoadSystemStateOptions {
@@ -142,6 +146,7 @@ function emptySnapshot(): SystemStateSnapshot {
     clientMessages: [],
     calendarConnections: [],
     esignatures: [],
+    bookingRequests: [],
   };
 }
 
@@ -177,6 +182,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
   const clientMessages = ClientMessageStore.fromSnapshot(snapshot.clientMessages ?? []);
   const calendarConnections = CalendarConnectionStore.fromSnapshot(snapshot.calendarConnections ?? []);
   const esignatures = ESignatureStore.fromSnapshot(snapshot.esignatures ?? []);
+  const bookingRequests = BookingRequestStore.fromSnapshot(snapshot.bookingRequests ?? []);
   return {
     auditLog,
     auditAnchors: (snapshot.auditAnchors ?? []).map((a) => ({ ...a })),
@@ -200,6 +206,7 @@ export async function loadSystemState(source: string | StateStore, options?: Loa
     clientMessages,
     calendarConnections,
     esignatures,
+    bookingRequests,
   };
 }
 
@@ -229,6 +236,7 @@ export async function saveSystemState(source: string | StateStore, state: System
     clientMessages: state.clientMessages.toSnapshot(),
     calendarConnections: state.calendarConnections.toSnapshot(),
     esignatures: state.esignatures.toSnapshot(),
+    bookingRequests: state.bookingRequests.toSnapshot(),
   };
   await resolveStore(source).write(snapshot);
 }
