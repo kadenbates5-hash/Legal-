@@ -134,7 +134,19 @@
 
     <!-- ===== Home ===== -->
     <section class="panel active" id="panel-home">
-      <p class="subtitle" id="homeGreeting">Everything that needs you, in one place.</p>
+      <div class="home-hero" data-parallax>
+        <div class="hero-copy">
+          <h2 class="hero-title" id="homeHello">Welcome back.</h2>
+          <p class="hero-sub" id="homeGreeting">Everything that needs you, in one place.</p>
+        </div>
+        <div class="hero-scene" aria-hidden="true">
+          <div class="hero-stack">
+            <div class="hero-file hf3"></div>
+            <div class="hero-file hf2"><span class="rule"></span><span class="rule"></span><span class="rule short"></span></div>
+            <div class="hero-file hf1"><span class="tab"></span><span class="rule"></span><span class="rule"></span><span class="rule"></span><span class="rule short"></span><span class="seal"></span></div>
+          </div>
+        </div>
+      </div>
       <div class="card" id="gettingStartedCard" hidden>
         <div class="field-row">
           <h3 class="row-title">Getting started</h3>
@@ -1113,6 +1125,7 @@
 </div>
 
 <datalist id="matterOptions"></datalist>
+<script src="/depth.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

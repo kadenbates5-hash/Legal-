@@ -3564,7 +3564,9 @@ function goToPanel(panel) {
 function statTile(n, label, { tone = "", panel = null } = {}) {
   const el = document.createElement("div");
   el.className = `stat ${tone}${panel ? " clickable" : ""}`.trim();
-  el.innerHTML = `<div class="n">${escapeHtml(String(n))}</div><div class="k">${escapeHtml(label)}</div>`;
+  // Tilts toward the pointer, with the figure lifted off the card (depth.js).
+  el.dataset.tilt = "7";
+  el.innerHTML = `<span class="sheen" aria-hidden="true"></span><div class="n">${escapeHtml(String(n))}</div><div class="k">${escapeHtml(label)}</div>`;
   if (panel) el.addEventListener("click", () => goToPanel(panel));
   return el;
 }
@@ -3678,9 +3680,13 @@ async function loadHome() {
   if (!stats) return;
 
   const me = knownStaff.find((m) => m.actorId === currentActorId);
-  document.getElementById("homeGreeting").textContent = me
-    ? `Signed in as ${me.displayName}. Here's what needs you.`
-    : "Everything that needs you, in one place.";
+  const hour = new Date().getHours();
+  const partOfDay = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const firstWord = me?.displayName?.trim().split(/\s+/)[0];
+  // A display name defaults to the username, which is often lower case.
+  const firstName = firstWord ? firstWord.charAt(0).toUpperCase() + firstWord.slice(1) : "";
+  document.getElementById("homeHello").textContent = firstName ? `${partOfDay}, ${firstName}.` : `${partOfDay}.`;
+  document.getElementById("homeGreeting").textContent = "Everything that needs you, in one place.";
 
   // Shaped like what's about to arrive rather than a blank panel or the
   // word "Loading…" — sets the expectation that something is coming,

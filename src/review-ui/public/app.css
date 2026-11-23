@@ -686,6 +686,114 @@
   transform: perspective(700px) translateY(-4px) scale(1.015);
 }
 
+/* ---------- Depth (see depth.js) ----------
+   The dashboard's 3D layer: a greeting banner with a floating stack of
+   case files that drifts with the pointer, stat tiles that turn toward
+   it with their figure lifted off the surface, and the brand mark taking
+   a turn on hover. Transforms only apply under html.depth-on, which
+   depth.js sets only for a fine pointer with motion not reduced — so on
+   a phone, or with reduced motion, everything here is flat and still. */
+.home-hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 150px;
+  margin-bottom: 1.25rem;
+  padding: 1.6rem 1.8rem;
+  border-radius: calc(var(--radius) + 4px);
+  overflow: hidden;
+  color: #f4f6fb;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0, transparent 27px, rgba(255, 255, 255, 0.05) 27px, rgba(255, 255, 255, 0.05) 28px),
+    radial-gradient(ellipse 50% 90% at 82% 50%, rgba(176, 141, 87, 0.32), transparent 70%),
+    linear-gradient(130deg, #172238, #24365e 55%, #2f4677);
+  box-shadow: 0 18px 40px -18px rgba(20, 30, 55, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.hero-copy { position: relative; z-index: 1; max-width: 60%; }
+.hero-title { margin: 0; font-family: var(--font-serif); font-size: 1.7rem; font-weight: 650; letter-spacing: -0.01em; }
+.hero-sub { margin: 0.35rem 0 0; color: rgba(244, 246, 251, 0.72); font-size: 0.92rem; }
+.hero-scene { position: relative; width: 220px; height: 120px; flex-shrink: 0; perspective: 700px; }
+.hero-stack {
+  position: absolute;
+  right: 26px;
+  top: 4px;
+  width: 112px;
+  height: 140px;
+  transform-style: preserve-3d;
+  transform:
+    rotateX(calc(28deg + var(--py, 0) * -6deg))
+    rotateY(calc(-26deg + var(--px, 0) * 14deg))
+    rotateZ(-10deg);
+  transition: transform 0.6s var(--ease);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hero-stack { animation: hero-bob 6s ease-in-out infinite alternate; }
+}
+@keyframes hero-bob { from { translate: 0 -4px; } to { translate: 0 6px; } }
+.hero-file {
+  position: absolute;
+  inset: 0;
+  padding-top: 26px;
+  border-radius: 8px;
+  background: linear-gradient(160deg, #f8f3e6, #e6d9bb);
+  box-shadow: 0 22px 34px -16px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+.hero-file.hf1 { transform: translateZ(44px); }
+.hero-file.hf2 { transform: translateZ(22px) translateX(10px) rotateZ(5deg); background: linear-gradient(160deg, #e4eaf6, #c3cfe6); }
+.hero-file.hf3 { transform: translateX(20px) rotateZ(10deg); background: linear-gradient(160deg, #b08d57, #7a5e33); }
+.hero-file .tab { position: absolute; top: -9px; left: 12px; width: 42px; height: 12px; border-radius: 5px 5px 0 0; background: inherit; }
+.hero-file .rule { display: block; height: 5px; margin: 0 13px 8px; border-radius: 3px; background: rgba(44, 66, 112, 0.2); }
+.hero-file .rule.short { width: 40%; }
+.hero-file .seal {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, #e2c48a, #b08d57 55%, #7a5e33);
+  box-shadow: inset 0 -2px 4px rgba(0, 0, 0, 0.28), 0 3px 8px rgba(0, 0, 0, 0.3);
+}
+@media (max-width: 700px) {
+  .hero-scene { display: none; }
+  .hero-copy { max-width: none; }
+}
+
+/* Stat tiles: preserve-3d so the figure can sit in front of the card,
+   which is also why the top accent bar rounds its own corners instead of
+   relying on overflow: hidden (that would flatten the 3D context). */
+.stat:not(.skeleton) { overflow: visible; }
+.stat::before { border-radius: var(--radius) var(--radius) 0 0; }
+.stat .sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(circle at var(--mx, 50%) var(--my, 0%), rgba(255, 255, 255, 0.55), transparent 55%);
+  mix-blend-mode: soft-light;
+  opacity: 0;
+  transition: opacity 0.3s var(--ease);
+}
+html.depth-on .stat:not(.skeleton) {
+  transform-style: preserve-3d;
+  transform: perspective(700px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform 0.5s var(--ease), box-shadow 0.3s var(--ease), border-color 0.2s var(--ease);
+}
+html.depth-on .stat.is-tilting {
+  transform: perspective(700px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(10px);
+  transition: transform 0.1s linear, box-shadow 0.3s var(--ease), border-color 0.2s var(--ease);
+  box-shadow: 0 22px 40px -16px rgba(20, 23, 31, 0.32), 0 6px 14px rgba(20, 23, 31, 0.1);
+}
+html.depth-on .stat.is-tilting .sheen { opacity: 1; }
+html.depth-on .stat .n { transform: translateZ(26px); transition: transform 0.4s var(--ease); }
+html.depth-on .stat .k { transform: translateZ(12px); }
+
+/* The brand mark takes one full turn on hover, like a coin. */
+html.depth-on .brand .mark { transition: transform 0.9s var(--ease); transform-style: preserve-3d; }
+html.depth-on .brand:hover .mark { transform: perspective(300px) rotateY(360deg); }
+
 /* ---------- Time Clock ---------- */
 /* The punch buttons are the whole point of the panel, so they're sized
    to be found and hit without hunting for them. */

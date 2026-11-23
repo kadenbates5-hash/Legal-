@@ -3086,6 +3086,21 @@ nav item is hidden except **My Matters** and **Security** — see below.
   `/favicon.ico`.
 - `public/login.html` — Docket-branded sign-in: username/password + a
   "remember me" checkbox, posting to `/api/login`.
+- `public/depth.js` — the 3D layer, shared by the sign-in, password and
+  dashboard pages. Markup opts in by attribute: `[data-tilt]` turns an
+  element toward the pointer with a light sheen following it (the
+  sign-in card, Home's stat tiles), `[data-parallax]` lets layers inside
+  drift with the pointer. It only writes CSS custom properties through
+  the CSSOM — never a style attribute — so the strict CSP stands; the
+  stylesheets do the transforms. The sign-in page's legal pad is now a
+  desk receding in perspective with a floating stack of case files above
+  it; Home opens on a greeting banner with its own file stack; the brand
+  mark takes a turn on hover. Everything is gated on `html.depth-on`,
+  which depth.js sets only for a fine pointer with motion not reduced —
+  with `prefers-reduced-motion` or on a touch screen the pages are flat
+  and still (verified: computed transform `none`, scene hidden on a
+  phone, no sideways scroll). `sw.js`'s shell cache gained the file and
+  moved to `docket-shell-v2`.
 - `public/index.html` / `public/app.js` / `public/app.css` — the Docket
   app shell: a dark sidebar (brand + panel nav), a top bar showing who's
   signed in, and one panel each for **Home** (the landing panel: a

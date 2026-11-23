@@ -45,24 +45,124 @@
     position: relative;
   }
 
-  /* A legal pad, not a SaaS gradient blob. Faint ruled horizontal lines
-     plus the pad's traditional left margin rule, rendered entirely in
-     CSS (repeating-linear-gradient + two solid gradient "lines") — no
-     images, no webfonts, nothing for the CSP to carve an exception for.
-     This is the one piece of decoration on the page, so it earns its
-     keep by actually meaning something instead of being an abstract
-     color field. A faint vignette behind it adds depth without motion. */
-  .aurora {
+  /* A legal pad, not a SaaS gradient blob — and now one you could set a
+     file down on. The same ruled lines and left margin rule, laid flat as
+     a desk surface receding to a lit horizon (rotateX on a wide plane),
+     with a small stack of case files floating above it. All of it is CSS
+     and the shared depth.js; nothing for the CSP to carve an exception
+     for. With motion reduced, the scene is still there, just still. */
+  .scene {
     position: fixed;
     inset: 0;
     z-index: 0;
     pointer-events: none;
+    overflow: hidden;
+    perspective: 900px;
+    perspective-origin: 50% 32%;
+  }
+  .horizon {
+    position: absolute;
+    inset: 0;
     background:
-      /* the margin rule, ~70px from the left edge */
-      linear-gradient(90deg, transparent calc(70px - 1px), rgba(176, 141, 87, 0.3) calc(70px - 1px), rgba(176, 141, 87, 0.3) 70px, transparent 70px),
-      /* ruled horizontal lines, one every 2.2rem */
-      repeating-linear-gradient(to bottom, transparent, transparent 2.1rem, rgba(255, 255, 255, 0.045) 2.1rem, rgba(255, 255, 255, 0.045) calc(2.1rem + 1px)),
-      radial-gradient(ellipse 80% 60% at 50% 15%, rgba(44, 66, 112, 0.35), transparent 70%);
+      radial-gradient(ellipse 60% 38% at 50% 40%, rgba(44, 66, 112, 0.5), transparent 70%),
+      radial-gradient(ellipse 45% 12% at 50% 47%, rgba(176, 141, 87, 0.22), transparent 70%);
+  }
+  .desk {
+    position: absolute;
+    left: -60%;
+    right: -60%;
+    top: 46%;
+    height: 150%;
+    transform-origin: 50% 0;
+    transform: rotateX(70deg) translate3d(calc(var(--px, 0) * -18px), 0, 0);
+    transition: transform 0.6s var(--ease, ease);
+  }
+  .pad {
+    position: absolute;
+    inset: 0;
+    background:
+      /* the margin rule */
+      linear-gradient(90deg, transparent calc(44% - 1px), rgba(176, 141, 87, 0.55) calc(44% - 1px), rgba(176, 141, 87, 0.55) calc(44% + 1px), transparent calc(44% + 1px)),
+      /* ruled lines */
+      repeating-linear-gradient(to bottom, transparent 0, transparent 38px, rgba(160, 185, 235, 0.16) 38px, rgba(160, 185, 235, 0.16) 40px),
+      linear-gradient(to bottom, rgba(20, 28, 48, 0.2), rgba(14, 18, 30, 0.9));
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22%);
+    mask-image: linear-gradient(to bottom, transparent, #000 22%);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .pad { animation: pad-drift 14s linear infinite; }
+  }
+  @keyframes pad-drift { to { background-position: 0 0, 0 40px, 0 0; } }
+
+  /* The case files. Three sheets at different depths in one preserve-3d
+     group, turned to show their edges; the group follows the pointer a
+     little (parallax) and bobs slowly. Too wide for a phone, so hidden
+     there rather than squeezed. */
+  .files {
+    position: absolute;
+    left: calc(50% - 500px);
+    top: 50%;
+    width: 210px;
+    height: 262px;
+    margin-top: -131px;
+    transform-style: preserve-3d;
+    transform:
+      rotateX(calc(16deg + var(--py, 0) * -7deg))
+      rotateY(calc(-28deg + var(--px, 0) * 12deg))
+      rotateZ(-7deg);
+    transition: transform 0.6s var(--ease, ease);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .files { animation: files-bob 7s ease-in-out infinite alternate; }
+  }
+  @keyframes files-bob { from { translate: 0 -6px; } to { translate: 0 10px; } }
+  @media (max-width: 1000px) { .files { display: none; } }
+  .file {
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    padding-top: 46px;
+    background: linear-gradient(160deg, #f8f3e6, #e8dcc0);
+    box-shadow: 0 36px 70px -24px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  }
+  .file .tab {
+    position: absolute;
+    top: -15px;
+    left: 20px;
+    width: 76px;
+    height: 20px;
+    border-radius: 7px 7px 0 0;
+    background: inherit;
+  }
+  .file.f1 { transform: translateZ(70px); }
+  .file.f2 { transform: translateZ(35px) translateX(16px) rotateZ(4deg); background: linear-gradient(160deg, #e4eaf6, #c6d1e8); }
+  .file.f3 { transform: translateZ(0) translateX(32px) rotateZ(9deg); background: linear-gradient(160deg, #3d5690, #24365e); }
+  .file .label {
+    display: block;
+    margin: -22px 22px 16px;
+    font-family: var(--font-serif);
+    font-size: 0.95rem;
+    font-weight: 650;
+    color: #2c4270;
+  }
+  .file .rule { display: block; height: 7px; margin: 0 22px 13px; border-radius: 4px; background: rgba(44, 66, 112, 0.17); }
+  .file .rule.short { width: 42%; }
+  .file .seal {
+    position: absolute;
+    right: 22px;
+    bottom: 22px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 34% 28%, #e2c48a, #b08d57 55%, #7a5e33);
+    box-shadow: inset 0 -3px 6px rgba(0, 0, 0, 0.28), 0 5px 12px rgba(0, 0, 0, 0.3);
+  }
+  .file .seal::after {
+    content: "";
+    position: absolute;
+    inset: 7px;
+    border-radius: 50%;
+    border: 1.5px dashed rgba(255, 255, 255, 0.55);
   }
 
   .card {
@@ -76,7 +176,26 @@
     padding: 2.1rem 2.1rem 1.85rem;
     animation: card-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
   }
-  @keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+  /* translate/scale rather than transform, so the entrance never fights the tilt below. */
+  @keyframes card-in { from { opacity: 0; translate: 0 10px; scale: 0.98; } to { opacity: 1; translate: 0 0; scale: 1; } }
+
+  /* The card leans toward the pointer (depth.js), and a soft light
+     follows it across the surface — only when depth is on. */
+  html.depth-on .card {
+    transform: perspective(1100px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+    transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  html.depth-on .card.is-tilting { transition: transform 0.12s linear; }
+  .card .sheen {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(circle at var(--mx, 50%) var(--my, 0%), rgba(176, 141, 87, 0.16), rgba(44, 66, 112, 0.05) 35%, transparent 60%);
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+  html.depth-on .card.is-tilting .sheen { opacity: 1; }
 
   .brand { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 1.5rem; }
   /* Same embossed-medallion treatment as the dashboard sidebar's mark —

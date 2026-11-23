@@ -11,8 +11,17 @@
 <link rel="stylesheet" href="/login.css" />
 </head>
 <body>
-<div class="aurora" aria-hidden="true"></div>
-<div class="card">
+<div class="scene" data-parallax aria-hidden="true">
+  <div class="horizon"></div>
+  <div class="desk"><div class="pad"></div></div>
+  <div class="files">
+    <div class="file f3"><span class="tab"></span></div>
+    <div class="file f2"><span class="tab"></span><span class="rule"></span><span class="rule"></span><span class="rule short"></span></div>
+    <div class="file f1"><span class="tab"></span><span class="label">State v. Doe</span><span class="rule"></span><span class="rule"></span><span class="rule"></span><span class="rule short"></span><span class="seal"></span></div>
+  </div>
+</div>
+<div class="card" data-tilt="3">
+  <span class="sheen" aria-hidden="true"></span>
   <div class="brand"><span class="mark"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.4 14.8 7.8 10 17 5.2 7.8Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="6.6" r="0.85" fill="currentColor"/><path d="M10 8.6v6.7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span><span class="name">Docket</span></div>
   <p class="tagline">AI receptionist &amp; paralegal, always chaperoned by a human attorney. Sign in to continue.</p>
 
@@ -35,6 +44,7 @@
   <p class="footer-credit">Made by <strong>KJB Systems</strong></p>
 </div>
 
+<script src="/depth.js"></script>
 <script src="/login.js"></script>
 </body>
 </html>
