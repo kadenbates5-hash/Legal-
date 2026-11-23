@@ -8,12 +8,54 @@ import type { EscalationSignals } from "../core/escalation.js";
  * extraction on top via deriveEscalationSignals; this only covers the core,
  * practice-area-agnostic patterns from §2.
  */
-const IN_CUSTODY_RE = /\b(in custody|i(?:'m| am) (?:currently )?(?:in jail|locked up|under arrest|being held)|they arrested me)\b/i;
+/*
+ * Custody. A family member calling about someone else is the most common
+ * custody call, so none of these require "I"; and people describe it a
+ * dozen ways ("he's still in jail", "calling from the county detention
+ * center", "they took him in", "my daughter was arrested this morning").
+ * Each pattern is checked with `matchesUnnegated`, so "I'm not in jail" or
+ * "I've never been arrested" doesn't count — but a nearby "no" alone
+ * doesn't cancel a match, because "No, my husband is in jail" is exactly
+ * the call this exists for.
+ */
+const CUSTODY_PLACE = String.raw`(?:jail|prison|lockup|lock-up|detention(?: center| facility)?|juvie|juvenile hall|holding(?: cell)?|precinct|police station)`;
+const CUSTODY_RES: RegExp[] = [
+  /\bin (?:\w+ )?cust[oa]?dy\b/i, // "in custody", "in police custody", "in custdy"
+  new RegExp(String.raw`(?<!released )\b(?:in|at|inside|from)\s+(?:the\s+|a\s+)?(?:\w+\s+)?${CUSTODY_PLACE}\b`, "i"),
+  new RegExp(String.raw`\b(?:took|taken|hauled|carted|brought|sent)\s+(?:\w+\s+){0,2}(?:to|into)\s+(?:the\s+)?(?:\w+\s+)?(?:${CUSTODY_PLACE}|custody|the station)\b`, "i"),
+  /(?:\b(?:was|were|got|gotten|been|is|are|am|im|being|just|still)|'s|'re|'m)\s+(?:\w+\s+)?(?:arrested|detained|booked\s+in(?:to)?|picked up|taken into custody|locked up|handcuffed|in handcuffs)\b/i,
+  /\b(?:they|police|cops|officers?|deput(?:y|ies)|ice|feds|agents)\s+(?:just\s+)?(?:arrested|detained|picked up|took|locked up|booked)\s+(?:him|her|them|me|my|our|us)\b/i,
+  /\b(?:under arrest|collect call|being held|been held|(?:holding|detaining|keeping) (?:me|him|her|them|my \w+)(?! back))\b/i,
+  /\b(?:post|posting|make|making|pay|paying)\s+(?:his |her |their |my )?(?:bail|bond)\b/i,
+  // "not out of jail yet" means still in it — the one place a negation adds custody rather than removing it.
+  /\b(?:not|n't|never)\s+(?:\w+\s+)?(?:out of|released from|let out of|bailed out)\b/i,
+];
+const CUSTODY_NEGATABLE = new Set([0, 1, 3, 5]);
+/** Index of the "was/got/been arrested" pattern, which also skips a caller's own *past* arrest — see below. */
+const ARREST_EVENT_INDEX = 3;
+/**
+ * "I was arrested" / "I got picked up" from the caller themselves: they're
+ * on the phone, so almost always released, and this is the opening of a
+ * narrative (redirected as one) rather than a custody emergency. Someone
+ * else's arrest ("my son was arrested") and the caller's *present* state
+ * ("I'm being held", "I'm calling from jail") still count.
+ */
+const OWN_PAST_ARREST_RE = /\b(?:i|i've|ive|i have|i had)\s+(?:just\s+|already\s+|recently\s+)?$/i;
+
+/* Imminent police contact: someone from law enforcement *and* a sign they want to talk now or soon. */
+const LAW_ENFORCEMENT_RE = /\b(?:police|cops?|detectives?|officers?|investigators?|agents?|fbi|dea|atf|sheriff'?s?|deput(?:y|ies)|troopers?|feds|law enforcement)\b/i;
+const POLICE_CONTACT_RE = /\b(?:want(?:s|ed)? to (?:talk|speak|question|interview|meet|see|ask)(?: (?:to|with))? (?:me|him|her|them|us|my \w+)|want(?:s|ed)? (?:me|him|her|them|us|my \w+) to (?:come|talk|meet|answer|go)|(?:at|outside|on) (?:my|the|our) (?:door|house|home|porch|work|job|apartment|place)|outside|knocking|asking (?:me )?questions|question(?:ing)? me|interview me|(?:give|make|take|get|want|wants|need|needs) (?:a |my )?statement|come (?:in|down) (?:to the (?:station|precinct)|for (?:questioning|an interview))|left (?:me )?a (?:card|message|voicemail|note)|called me|showed up|came (?:to|by)|(?:is|are) here|on (?:their|the|his|her) way)\b/i;
 const IMMINENT_POLICE_RE = /\b(police (?:want|are going|is going) to (?:question|interview|talk to) me|(?:talking|about to talk) to (?:the )?police (?:now|tonight|today)|detective(?:s)? (?:want|need) to (?:speak|talk) (?:with|to) me)\b/i;
-const COURT_MENTION_RE = /\bcourt\b/i;
-const PROTECTIVE_ORDER_RE = /\b(protective order|restraining order)\b/i;
-const PROTECTIVE_ORDER_ISSUE_RE = /\b(violat|arrest|police (?:showed up|came)|they said i broke)/i;
+
+/* A court appearance is named many ways; the timing is parsed separately (parseHoursUntil). */
+const COURT_MENTION_RE = /\b(?:court|hearing|arraignment|arraigned|trial|judge|sentencing|docket|magistrate|appearance|appear)\b/i;
+
+const PROTECTIVE_ORDER_RE = /\b(?:(?:protective|restraining|no[- ]contact|stay[- ]away|protection) order|order of protection|pfa|tro)\b/i;
+const PROTECTIVE_ORDER_ISSUE_RE = /\b(?:violat|broke|break|arrest|warrant|police|cops|served|showed up|came (?:to|by|over)|they said i|says? i)/i;
+
 const LEGAL_ADVICE_RE = /\b(am i going to (?:jail|prison)|do i have a case|should i (?:talk|speak) to (?:the )?police|what should i (?:do|say)|is (?:this|that) legal|can they (?:do that|arrest me)|will i (?:go to jail|get convicted))\b/i;
+// The questions callers actually ask, beyond the first-person patterns above.
+const LEGAL_QUESTION_RE = /\b(?:should i (?:plead|take (?:the|a) (?:deal|plea)|fight|accept|sign|say|tell|answer|turn myself in|run|leave)|plead (?:guilty|not guilty|no contest)|what are (?:my|the) (?:chances|odds|options)|(?:can|could) (?:i|you|they) (?:get|have) (?:my |the |these |this |it )?(?:charges?|case|ticket|dui|record|it)\s+(?:dropped|reduced|dismissed|expunged|sealed|thrown out)|how much (?:time|jail time|prison time|of a sentence)|what(?:'s| is) the (?:penalty|sentence|punishment|maximum|max)|is it worth (?:fighting|it|going to trial)|will i (?:lose|go to (?:jail|prison)|get (?:time|probation|jail|prison|convicted|deported)|have a record|be (?:deported|charged|convicted))|will (?:this|it) (?:go on|show up on|stay on) my record|(?:do|would) i need a lawyer|can i (?:beat|fight|win) (?:this|it|my case)|how long (?:will|would|could) i (?:get|be|go|serve)|what (?:will|would|could) happen (?:to me|if)|am i in trouble|(?:will|could|would) i be deported|is (?:this|that|it) (?:a felony|a misdemeanor|illegal|a crime))\b/i;
 // Catches indirect/hypothetical phrasing that evades LEGAL_ADVICE_RE's
 // first-person present-tense patterns — "hypothetically, would they go to
 // jail for X" is still a request for legal advice, just phrased around it.
@@ -27,9 +69,10 @@ const VULNERABLE_RE = /\b(i(?:'ve| have) been drinking|i(?:'m| am) (?:scared|ter
 // another person right now. Treated as its own emergency-tier trigger (see
 // escalation.ts's crisis_risk), not folded into the generic "vulnerable
 // caller" gentler-handoff path — a crisis needs resource information (988),
-// not just a faster human handoff.
-const CRISIS_SELF_HARM_RE = /\b(kill myself|end my life|want to die|don'?t want to (?:live|be here anymore)|hurt myself|suicidal|thinking about suicide|self[- ]harm)\b/i;
-const CRISIS_DANGER_RE = /\b(he'?s going to (?:kill|hurt) me|she'?s going to (?:kill|hurt) me|(?:someone|he|she|they) (?:is|are) (?:trying to (?:kill|hurt|attack) me|attacking me)|i(?:'m| am) not safe right now|i need help right now|he has a (?:gun|knife)|she has a (?:gun|knife))\b/i;
+// not just a faster human handoff. Never negation-guarded: "I'm not
+// suicidal" reaching a human costs nothing.
+const CRISIS_SELF_HARM_RE = /\b(kill myself|end my life|want to die|don'?t want to (?:live|be here anymore)|hurt myself|suicidal|suicide|self[- ]harm|end it all|end things|want to end it|(?:no|don'?t see (?:the|any)|there'?s no) (?:point|reason) (?:in |to |of )?(?:living|going on|life|being alive)|better off dead|wish i (?:was|were) dead|take my (?:own )?life|not worth living|can'?t go on|cut(?:ting)? myself|overdos(?:e|ed|ing)|(?:took|swallowed|taking|take) (?:a bunch of|too many|all (?:my|the|of my)|a lot of|a handful of) (?:pills|meds|medication|tablets))\b/i;
+const CRISIS_DANGER_RE = /\b(he'?s going to (?:kill|hurt) me|she'?s going to (?:kill|hurt) me|(?:someone|he|she|they) (?:is|are) (?:trying to (?:kill|hurt|attack) me|attacking me)|i(?:'m| am|m)? not safe|i need help right now|(?:he|she|they) (?:has|have|got|pulled|is pointing|are pointing) a (?:gun|knife|weapon)|(?:is|are|keeps?|he'?s|she'?s|they'?re|been) (?:hitting|beating|choking|strangling|hurting|attacking|punching|kicking) me|threaten(?:ing|ed|s)? to (?:kill|hurt|shoot|stab) (?:me|us|my)|i(?:'m| am|m)? in danger)\b/i;
 const OPT_OUT_RE = /\b(don'?t want (?:an? )?ai|no ai|human only|talk to a human please|opt out of ai)\b/i;
 const INTERPRETER_RE = /\b(i (?:don'?t|do not) speak english well|necesito un int[eé]rprete|interpreter|translator)\b/i;
 // §7 red-teaming: explicit refusal of recording consent, distinct from
@@ -37,38 +80,129 @@ const INTERPRETER_RE = /\b(i (?:don'?t|do not) speak english well|necesito un in
 // consent were given (see chat-agent.ts's disclose_recording_consent gate).
 export const RECORDING_CONSENT_REFUSAL_RE = /\b(no,? (?:i (?:don'?t|do not)|don'?t) (?:want|consent)|(?:don'?t|do not) record me|not okay with (?:that|being recorded)|i refuse|no recording)\b/i;
 
-const HOURS_RE = /\bin (\d{1,3}) hours?\b/i;
-const DAYS_RE = /\bin (\d{1,2}) days?\b/i;
-const TODAY_TOMORROW_RE = /\b(today|tomorrow)\b/i;
-
 /**
- * Parses a relative-time phrase ("today", "in 6 hours", "in 2 days") into
- * hours-from-now. Shared by the free-text extractor below (which requires
- * the word "court" nearby) and by the receptionist chat agent's intake
- * answer handling (where the topic — "do you have a court date?" — is
- * already established by the question, so the timing phrase alone is
- * enough). Returns undefined if no recognizable timing phrase is present.
+ * What every matcher here sees: runs of whitespace collapsed to one space
+ * (so "in  custody" matches "in custody") and curly quotes made straight —
+ * phones type "I’m in jail" with a curly apostrophe, which every pattern
+ * written with a straight one would otherwise miss.
  */
-export function parseHoursUntil(text: string): number | undefined {
-  const hoursMatch = text.match(HOURS_RE);
-  if (hoursMatch?.[1]) return Number(hoursMatch[1]);
-
-  const daysMatch = text.match(DAYS_RE);
-  if (daysMatch?.[1]) return Number(daysMatch[1]) * 24;
-
-  if (TODAY_TOMORROW_RE.test(text)) return 24;
-
-  return undefined;
+export function normalizeCallerText(text: string): string {
+  return text.replace(/[\u2018\u2019\u02bc\u0060\u00b4]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, " ").trim();
 }
 
-export function extractSignalsFromText(text: string): Partial<EscalationSignals> {
+const NEGATION_WORD_RE = /^(?:not|never|\w+n't|\w+n’t|cannot)$/i;
+
+/**
+ * True if `re` matches somewhere in `text` that isn't directly negated —
+ * "not", "never" or an "-n't" word among the three words just before the
+ * match. A bare "no" earlier in the sentence doesn't count, so "No, he's in
+ * jail" still matches while "I'm not in jail" doesn't.
+ */
+function matchesUnnegated(re: RegExp, text: string, skip?: (before: string, match: string) => boolean): boolean {
+  const global = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+  for (const match of text.matchAll(global)) {
+    const preceding = text.slice(0, match.index);
+    const before = preceding.split(/[^\w'’]+/).filter(Boolean).slice(-3);
+    if (before.some((word) => NEGATION_WORD_RE.test(word))) continue;
+    if (skip?.(preceding, match[0])) continue;
+    return true;
+  }
+  return false;
+}
+
+/** The arrest-event pattern, minus the caller's own past arrest: a past-tense auxiliary with "I" as its subject. */
+function isOwnPastArrest(preceding: string, match: string): boolean {
+  const aux = match.trim().split(/\s+/)[0]!.toLowerCase();
+  // Being booked means processed into a jail, a far stronger custody sign
+  // than "arrested", so the caller's own booking still counts.
+  if (/\bbooked\b/i.test(match)) return false;
+  return ["was", "got", "gotten", "been", "just"].includes(aux) && OWN_PAST_ARREST_RE.test(preceding);
+}
+
+const NUMBER_WORDS: Record<string, number> = {
+  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  "a few": 3, "a couple": 2, "a couple of": 2, couple: 2, few: 3,
+};
+const RELATIVE_RE = /\bin\s+(?:about\s+|around\s+|like\s+|roughly\s+|maybe\s+|approximately\s+|just\s+)?(\d{1,3}|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a few|a couple(?: of)?)\s+(hours?|hrs?|days?|weeks?)\b/gi;
+const SAME_DAY_RE = /\b(?:today|tonight|this (?:morning|afternoon|evening)|right now|in an hour)\b/i;
+const TOMORROW_RE = /\b(?:tomorrow|tmrw|tmr)\b/i;
+const THIS_WEEK_RE = /\b(?:this week|in a day or two|in the next (?:day|two days|couple (?:of )?days))\b/i;
+const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const WEEKDAY_RE = /\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i;
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MONTH_DAY_RE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i;
+const NUMERIC_DATE_RE = /\b(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\b/;
+
+function hoursUntilDate(month: number, day: number, now: Date): number | undefined {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let target = new Date(now.getFullYear(), month, day);
+  if (target.getMonth() !== month) return undefined; // e.g. Feb 31
+  // A date more than a month in the past is next year's; a recent past date is just in the past.
+  if (target.getTime() < today.getTime() - 31 * 86_400_000) target = new Date(now.getFullYear() + 1, month, day);
+  const days = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  return days < 0 ? undefined : Math.max(days * 24, 12);
+}
+
+/**
+ * Parses when something happens ("today", "in 6 hours", "in two days",
+ * "Monday", "11/24") into hours-from-now, returning the soonest if several
+ * are mentioned. Shared by the free-text extractor below (which requires a
+ * court word nearby) and by the receptionist chat agent's intake answer
+ * handling (where the question already establishes the topic). Weekdays
+ * and dates need `now`; without it only relative phrases are understood.
+ * Errs early: a weekday is read as its *next* occurrence, never the one
+ * after, and anything today counts as 24 hours or less. Returns undefined
+ * if no recognizable timing phrase is present.
+ */
+export function parseHoursUntil(rawText: string, now?: Date): number | undefined {
+  const text = normalizeCallerText(rawText);
+  const found: number[] = [];
+  for (const match of text.matchAll(RELATIVE_RE)) {
+    const raw = match[1]!.toLowerCase();
+    const count = /^\d+$/.test(raw) ? Number(raw) : (NUMBER_WORDS[raw] ?? NUMBER_WORDS[raw.replace(/ of$/, "")] ?? 1);
+    const unit = match[2]!.toLowerCase();
+    found.push(unit.startsWith("h") ? count : unit.startsWith("d") ? count * 24 : count * 168);
+  }
+  if (SAME_DAY_RE.test(text)) found.push(12);
+  if (TOMORROW_RE.test(text)) found.push(24);
+  if (THIS_WEEK_RE.test(text)) found.push(48);
+  if (now) {
+    const weekday = text.match(WEEKDAY_RE);
+    if (weekday) {
+      const days = (WEEKDAYS.indexOf(weekday[1]!.toLowerCase()) - now.getDay() + 7) % 7;
+      found.push(days === 0 ? 12 : days * 24);
+    }
+    const monthDay = text.match(MONTH_DAY_RE);
+    if (monthDay) {
+      const hours = hoursUntilDate(MONTHS.indexOf(monthDay[1]!.toLowerCase().slice(0, 3)), Number(monthDay[2]), now);
+      if (hours !== undefined) found.push(hours);
+    }
+    const numeric = text.match(NUMERIC_DATE_RE);
+    if (numeric) {
+      const hours = hoursUntilDate(Number(numeric[1]) - 1, Number(numeric[2]), now);
+      if (hours !== undefined) found.push(hours);
+    }
+  }
+  return found.length ? Math.min(...found) : undefined;
+}
+
+export function extractSignalsFromText(rawText: string, now?: Date): Partial<EscalationSignals> {
+  const text = normalizeCallerText(rawText);
   const signals: Partial<EscalationSignals> = {};
 
-  if (IN_CUSTODY_RE.test(text)) signals.inCustody = true;
-  if (IMMINENT_POLICE_RE.test(text)) signals.imminentPoliceQuestioning = true;
+  if (
+    CUSTODY_RES.some((re, i) =>
+      i === ARREST_EVENT_INDEX ? matchesUnnegated(re, text, isOwnPastArrest) : CUSTODY_NEGATABLE.has(i) ? matchesUnnegated(re, text) : re.test(text),
+    )
+  ) {
+    signals.inCustody = true;
+  }
+  if (IMMINENT_POLICE_RE.test(text) || (LAW_ENFORCEMENT_RE.test(text) && POLICE_CONTACT_RE.test(text))) {
+    signals.imminentPoliceQuestioning = true;
+  }
 
   if (COURT_MENTION_RE.test(text)) {
-    const hours = parseHoursUntil(text);
+    const hours = parseHoursUntil(text, now);
     if (hours !== undefined) signals.courtAppearanceWithinHours = hours;
   }
 
@@ -76,7 +210,7 @@ export function extractSignalsFromText(text: string): Partial<EscalationSignals>
     signals.activeProtectiveOrderIssue = true;
   }
 
-  if (LEGAL_ADVICE_RE.test(text) || HYPOTHETICAL_ADVICE_RE.test(text) || WOULD_ADVICE_RE.test(text)) {
+  if (LEGAL_ADVICE_RE.test(text) || LEGAL_QUESTION_RE.test(text) || HYPOTHETICAL_ADVICE_RE.test(text) || WOULD_ADVICE_RE.test(text)) {
     signals.callerAskedForLegalAdvice = true;
   }
   if (NARRATIVE_RE.test(text)) signals.callerNarratingFacts = true;

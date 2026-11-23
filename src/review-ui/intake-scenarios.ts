@@ -140,6 +140,8 @@ export const INTAKE_SCENARIOS: readonly IntakeScenario[] = [
     label: "Family member calling on someone's behalf",
     description:
       "Tests the confidentiality default — a third party should get the \"can't share case details, can pass a message\" response, never full intake.",
-    lines: ["Hi, I'm calling on behalf of my son, he's been arrested.", "Okay, that's fine.", "No conflicts that I know of."],
+    // Deliberately not an arrest: "my son, he's been arrested" is a custody
+    // emergency and escalates before the confidentiality default is reached.
+    lines: ["Hi, I'm calling on behalf of my son about his case.", "Okay, that's fine.", "No conflicts that I know of."],
   },
 ];

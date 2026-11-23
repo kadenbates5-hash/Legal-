@@ -120,6 +120,80 @@ escalation/access-control logic itself, only:
     on a real channel (`voice-agent.ts`, a chat widget) means real
     caller words leave the building, so §5's vendor due-diligence
     applies first.
+- `side-questions.ts` — what callers say *between* answers:
+  `classifySideQuestion()` (a question back: "are you a robot?", "how
+  much do you charge?", "sorry, what?") and `classifyConsentAnswer()`
+  (yes / no / unclear to the recording disclosure). Only a message with
+  no escalation signal at all reaches either — emergencies, legal
+  questions and opt-outs always take the normal path first. A side
+  question gets a brief answer from `sideAnswerFor()` (what the
+  assistant is, honestly; that fees are for the attorney; the firm's
+  configured hours/address; why we ask) and the *same* question again,
+  with nothing advanced; two in a row are answered, a third hands off to
+  a person, so a call can't circle.
+
+### Stress-testing intake (and what it found)
+
+`test/intake-stress.test.ts` runs the real `ReceptionistChatSession`
+over a corpus of how callers actually talk — every emergency phrasing in
+seven variants (as written, ALL CAPS, lower case, a filler, a plea,
+doubled spaces, a phone's curly apostrophe) at every point in a call,
+legal questions at every point, a benign set that must *not* end the
+call, and 1,500 seeded-random conversations of gibberish, emoji, other
+languages, 3,000-character messages, questions back and repeats. Those
+must never throw, never reply with nothing, always finish within a
+computed bound, and stay finished. Its first run found the receptionist
+was far less safe than its tests said:
+
+- **Most emergencies didn't escalate.** The extractor only knew a few
+  first-person phrasings. "My husband is in jail right now", "IM IN
+  JAIL", "I'm calling from jail", "the police are at my door right now",
+  "my arraignment is in 2 hours", "I took a bunch of pills", "my
+  boyfriend is hitting me right now" — all missed, opening the call or
+  mid-intake; "IM IN JAIL" in reply to "Are you currently in custody?"
+  carried on with intake. A relative calling about someone in custody,
+  the most common emergency call, never escalated at all.
+  `signal-extraction.ts` now covers third parties, places, booking,
+  bail, police at the door, every court word (hearing, arraignment,
+  trial, judge…) with timing parsed from words ("in two hours"),
+  tonight/tomorrow, weekdays and dates against the session clock, more
+  protective-order types, and much more crisis language. Over-escalating
+  stays the intended failure mode, with three narrow guards so ordinary
+  answers don't: a match negated in the three words just before it ("I'm
+  not in jail", "I've never been arrested") doesn't count — a bare "no"
+  earlier doesn't negate, so "No, my husband is in jail" still escalates;
+  the caller's *own past* arrest ("I was arrested last year") is a
+  narrative, not custody, while someone else's arrest, being booked, or
+  being held still is; and "booked" only counts as "booked in/into".
+  Crisis wording is never negation-guarded.
+- **"No." counted as consent to recording**, as did "nope", "I'd rather
+  not" and "what do you mean recorded?" — only a few explicit refusal
+  phrases stopped it. Consent now takes a yes; a no (bar "no problem"
+  and friends) is a refusal; anything else is asked once more, then
+  handed to a person *without* recording. One-party-consent firms keep
+  notice-only behaviour. The decision is made after routing, so an
+  emergency in the same message always wins over a refusal — previously
+  a refusal returned before emergencies were even checked.
+- **A question back could skip the custody question.** "are you a
+  robot?" in reply to "Are you currently in custody?" was stored as the
+  answer and intake moved on. Side questions (above) now never advance.
+- **Most new clients got the third-party brush-off.** Only the literal
+  words "new client" identified one, so "I got a DUI last night and need
+  a lawyer" ended in "I can't share case details, but I can pass along a
+  message". First-person needs now identify a new client (third party is
+  still checked first, so a relative is never mistaken for the client),
+  an unidentified caller is asked once who the call is about, and one
+  still unidentified gets a message-only ending without the "can't share"
+  line.
+- **Doubled spaces and curly apostrophes defeated every pattern.**
+  `normalizeCallerText()` collapses whitespace and straightens quotes
+  once, before any matching.
+
+The "Family member calling on someone's behalf" training scenario's
+script changed as a result: its old opening ("my son, he's been
+arrested") is now, correctly, a custody emergency, so it no longer
+reached the confidentiality default it exists to show.
+
 - `voice-agent.ts` — `VoiceReceptionistSession`, the voice channel (§8
   build order step 6). Wraps the exact same `ReceptionistChatSession`
   behind vendor-agnostic `SpeechToText`/`TextToSpeech` interfaces — no

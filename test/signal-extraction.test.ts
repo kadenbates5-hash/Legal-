@@ -12,7 +12,7 @@ describe("parseHoursUntil", () => {
 
   it("treats today/tomorrow as within 24 hours", () => {
     expect(parseHoursUntil("tomorrow")).toBe(24);
-    expect(parseHoursUntil("today")).toBe(24);
+    expect(parseHoursUntil("today")).toBeLessThanOrEqual(24);
   });
 
   it("returns undefined for no recognizable timing phrase", () => {

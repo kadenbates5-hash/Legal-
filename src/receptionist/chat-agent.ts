@@ -1,9 +1,25 @@
 import { Router, newIntakeState, type IntakeState } from "../core/router.js";
 import type { EscalationSignals, RouteDirective } from "../core/escalation.js";
 import { disclosurePolicyFor } from "../core/confidentiality.js";
-import { extractSignalsFromText, extractCandidatePartyNames, parseHoursUntil } from "./signal-extraction.js";
-import { BILLING_HANDOFF_SCRIPT, CALLER_TYPE_QUESTION, DIRECTIVE_SCRIPTS, OUTRO_CLEARED_FOR_INTAKE, RECORDING_CONSENT_REFUSED_SCRIPT, WRAP_UP, greetingFor, recordingConsentScriptFor } from "./scripts.js";
-import { RECORDING_CONSENT_REFUSAL_RE } from "./signal-extraction.js";
+import { extractSignalsFromText, extractCandidatePartyNames, normalizeCallerText, parseHoursUntil } from "./signal-extraction.js";
+import {
+  BILLING_HANDOFF_SCRIPT,
+  CALLER_TYPE_CLARIFY_QUESTION,
+  CALLER_TYPE_QUESTION,
+  CONFLICT_REASK_QUESTION,
+  CONSENT_CLARIFY_QUESTION,
+  CONSENT_REASK_QUESTION,
+  DIRECTIVE_SCRIPTS,
+  OUTRO_CLEARED_FOR_INTAKE,
+  RECORDING_CONSENT_REFUSED_SCRIPT,
+  RECORDING_CONSENT_UNCLEAR_SCRIPT,
+  SIDE_QUESTION_HANDOFF_SCRIPT,
+  UNIDENTIFIED_CALLER_MESSAGE_SCRIPT,
+  WRAP_UP,
+  greetingFor,
+  recordingConsentScriptFor,
+} from "./scripts.js";
+import { classifyConsentAnswer, classifySideQuestion, sideAnswerFor, type ConsentAnswer, type QuestionGate } from "./side-questions.js";
 import type { IntakeQuestion, PracticeAreaModule } from "../config/practice-area.js";
 import type { Actor } from "../core/types.js";
 import type { UtilizationTracker } from "../core/utilization.js";
@@ -72,12 +88,30 @@ const AFFIRMATIVE_RE = /(^\s*y\b)|\b(yes|yeah|yep|yup|correct|that's right|affir
 const NEGATION_RE = /(^\s*(no|nope|nah)\b)|\bnot\b|n't\b/i;
 const CUSTODY_WORDS_RE = /\b(arrest|jail|locked up|detain|held)/i;
 
+/**
+ * Who the call is about. Third party is checked first by the router (see
+ * `identifyCallerType`), so a caller who mentions a relative is never
+ * mistaken for the client. The new-client patterns cover how people
+ * actually open a call ("I got a DUI and need a lawyer", "it's for me"):
+ * only literally saying "new client" used to count, and everyone else was
+ * treated as an unidentified caller and offered a message-only brush-off.
+ */
 const CALLER_TYPE_PATTERNS = {
-  statesAsFamilyMember: /\bfamily|on behalf of|calling for|my (son|daughter|husband|wife|brother|sister|father|mother)\b/i,
-  statesAsExistingClient: /\bexisting client|already (a )?client|current client\b/i,
-  statesAsBilling: /\bbilling|invoice|payment\b/i,
-  isNewCaller: /\bnew client|first time|never (worked with|talked to) you\b/i,
+  statesAsFamilyMember:
+    /\b(?:family|on behalf of|calling for|someone else|somebody else|for (?:him|her|them)|a friend|my (?:son|daughter|husband|wife|brother|sister|father|mother|dad|mom|friend|boyfriend|girlfriend|partner|fianc[eé]e?|cousin|uncle|aunt|grandmother|grandfather|grandma|grandpa|nephew|niece|kid|child|client|employee))\b/i,
+  statesAsExistingClient: /\b(?:existing client|already (?:a )?client|current client|you(?:'re| are) (?:already )?(?:representing|helping) me|my (?:lawyer|attorney) (?:is|there)|about my (?:case|matter|file))\b/i,
+  statesAsBilling: /\b(?:billing|invoice|payment|my bill)\b/i,
+  isNewCaller:
+    /\b(?:new client|first time|never (?:worked with|talked to) you|i need (?:a |an )?(?:lawyer|attorney|help|representation)|looking for (?:a |an )?(?:lawyer|attorney)|i (?:got|was|have been|'ve been|just got) (?:a |an )?(?:charged|arrested|cited|ticket|dui|dwi|summons|indicted|citation)|i (?:got|have|received) (?:a |an )?(?:dui|dwi|ticket|citation|summons|warrant)|for (?:me|myself)|it'?s (?:for )?me|my own|about me|myself|^\s*me\s*[.!]?\s*$|^\s*mine\s*[.!]?\s*$)/i,
 };
+
+/** Consecutive side questions answered before handing the caller to a person, so a call can never circle forever. */
+const MAX_SIDE_QUESTIONS = 2;
+
+/** True if any escalation-relevant signal fired — those always take the normal path, never the side-question one. */
+function hasEscalationSignal(signals: Partial<EscalationSignals>): boolean {
+  return Object.values(signals).some((v) => v === true || typeof v === "number");
+}
 
 function detectCallerTypeSignal(text: string) {
   return {
@@ -112,6 +146,11 @@ export class ReceptionistChatSession {
   #reaskCallerType = false;
   #firmConfig: FirmConfig | undefined;
   #now: () => Date;
+  /** The question the caller was last asked, repeated verbatim after a side answer. */
+  #lastQuestion = CALLER_TYPE_QUESTION;
+  #sideQuestionsInARow = 0;
+  #callerTypeAsks = 0;
+  #consentAsks = 0;
 
   constructor(params: {
     matterId: string;
@@ -154,12 +193,15 @@ export class ReceptionistChatSession {
     return greetingFor(this.#firmConfig, isAfterHours);
   }
 
-  handleMessage(text: string): ChatTurnResult {
+  handleMessage(rawText: string): ChatTurnResult {
+    // One normalization for every check below — the caller-type, consent,
+    // custody-answer and conflict matchers all see the same text.
+    const text = normalizeCallerText(rawText);
     if (this.#terminated) {
       return { reply: WRAP_UP, done: true, trace: { label: "conversation already ended", triggers: [], state: { ...this.#state } } };
     }
 
-    let turnSignals: Partial<EscalationSignals> = extractSignalsFromText(text);
+    let turnSignals: Partial<EscalationSignals> = extractSignalsFromText(text, this.#now());
 
     // Once a caller's free text signals they need an interpreter, that has
     // to become sticky state, not just this turn's raw signal — §2's
@@ -173,6 +215,30 @@ export class ReceptionistChatSession {
       this.#state.interpreterNeeded = true;
     }
 
+    // A question back ("are you a robot?", "sorry, what?") gets a brief
+    // answer and the same question again, and nothing advances — otherwise
+    // it was taken as the answer and a gating question could be skipped.
+    // Only a message with no escalation signal at all can take this path.
+    const gate = this.#questionGate();
+    if (gate && !hasEscalationSignal(turnSignals)) {
+      const kind = classifySideQuestion(text, gate);
+      if (kind) {
+        this.#sideQuestionsInARow += 1;
+        if (this.#sideQuestionsInARow > MAX_SIDE_QUESTIONS) {
+          return this.#finish(SIDE_QUESTION_HANDOFF_SCRIPT, "Several questions in a row — handed to a person");
+        }
+        return {
+          reply: `${sideAnswerFor(kind, this.#firmConfig)} ${this.#lastQuestion}`,
+          done: false,
+          trace: { label: `Side question answered (${kind}) — same question asked again`, triggers: [], state: { ...this.#state } },
+        };
+      }
+    }
+    this.#sideQuestionsInARow = 0;
+
+    const answeredGate = this.#pendingGate;
+    let consentAnswer: ConsentAnswer | undefined;
+
     if (this.#pendingGate === "caller_type") {
       this.#state.callerType = this.#router.identifyCallerType(detectCallerTypeSignal(text));
       // The interpreter gate preempts this one, so a caller who opens with
@@ -184,6 +250,7 @@ export class ReceptionistChatSession {
       if (this.#reaskCallerType) {
         this.#reaskCallerType = false;
         this.#pendingGate = "caller_type";
+        this.#lastQuestion = CALLER_TYPE_QUESTION;
         return {
           reply: CALLER_TYPE_QUESTION,
           done: false,
@@ -191,12 +258,16 @@ export class ReceptionistChatSession {
         };
       }
     } else if (this.#pendingGate === "disclose_recording_consent_then_continue") {
-      if (RECORDING_CONSENT_REFUSAL_RE.test(text)) {
-        return this.#finish(RECORDING_CONSENT_REFUSED_SCRIPT, "Recording consent refused — handed to a human");
-      }
       // An interpreter request is not an answer to the consent question —
       // the router re-asks consent once the language is sorted out.
-      if (!turnSignals.interpreterNeeded) this.#state.recordingConsentDisclosed = true;
+      if (!turnSignals.interpreterNeeded) {
+        const answer = classifyConsentAnswer(text);
+        // One-party consent is notice, not a request: only an explicit
+        // refusal stops it. Everywhere else consent takes a yes, so "No."
+        // or "what?" is never taken as agreement.
+        consentAnswer = this.#firmConfig?.jurisdictionRecordingConsent === "one-party-consent" && answer === "unclear" ? "agree" : answer;
+        if (consentAnswer === "agree") this.#state.recordingConsentDisclosed = true;
+      }
     } else if (this.#pendingGate === "hold_for_conflict_check") {
       this.#state.conflictCheckRun = true;
       const lowered = text.toLowerCase();
@@ -256,12 +327,48 @@ export class ReceptionistChatSession {
       return this.#finish(DIRECTIVE_SCRIPTS[decision.directive], trace.label, trace.triggers);
     }
 
+    // Decided after routing, so an emergency in the same message always
+    // wins over a refusal or an unclear answer.
+    if (consentAnswer === "refuse") {
+      return this.#finish(RECORDING_CONSENT_REFUSED_SCRIPT, "Recording consent refused — handed to a human");
+    }
+    if (consentAnswer === "unclear" && decision.directive === "disclose_recording_consent_then_continue") {
+      this.#consentAsks += 1;
+      if (this.#consentAsks >= 2) {
+        return this.#finish(RECORDING_CONSENT_UNCLEAR_SCRIPT, "Recording consent unclear twice — handed to a person, not recorded");
+      }
+      this.#lastQuestion = CONSENT_CLARIFY_QUESTION;
+      return { reply: CONSENT_CLARIFY_QUESTION, done: false, trace: { ...trace, label: "Recording consent unclear — asked for a yes or no" } };
+    }
+
+    // One clarifying re-ask before an unidentified caller is treated as a
+    // message-only call. Skipped when an interpreter is needed: the caller
+    // type question is re-asked after the language is sorted out instead.
+    if (
+      answeredGate === "caller_type" &&
+      this.#state.callerType === "unknown" &&
+      !this.#state.interpreterNeeded &&
+      this.#callerTypeAsks === 0
+    ) {
+      this.#callerTypeAsks += 1;
+      this.#lastQuestion = CALLER_TYPE_CLARIFY_QUESTION;
+      return { reply: CALLER_TYPE_CLARIFY_QUESTION, done: false, trace: { ...trace, label: "Caller type unclear — asked once more" } };
+    }
+
     if (!decision.clearedForSubstantiveIntake) {
       this.#pendingGate = decision.directive;
       const reply =
         decision.directive === "disclose_recording_consent_then_continue"
           ? recordingConsentScriptFor(this.#firmConfig)
           : DIRECTIVE_SCRIPTS[decision.directive];
+      // What to repeat after a side answer: just the question, not the
+      // whole disclosure or preamble again.
+      this.#lastQuestion =
+        decision.directive === "disclose_recording_consent_then_continue"
+          ? CONSENT_REASK_QUESTION
+          : decision.directive === "hold_for_conflict_check"
+            ? CONFLICT_REASK_QUESTION
+            : reply;
       return { reply, done: false, trace };
     }
 
@@ -270,6 +377,11 @@ export class ReceptionistChatSession {
     }
 
     const disclosure = disclosurePolicyFor(this.#state.callerType);
+    if (!disclosure.mayShareCaseDetails && this.#state.callerType === "unknown") {
+      // Same non-disclosure as a third party, without telling someone who
+      // may well be the client that we "can't share case details".
+      return this.#finish(UNIDENTIFIED_CALLER_MESSAGE_SCRIPT, "Caller not identified — message only, no case details shared");
+    }
     if (!disclosure.mayShareCaseDetails) {
       return this.#finish(
         `${disclosure.scriptedResponse} What message would you like me to pass along?`,
@@ -286,6 +398,7 @@ export class ReceptionistChatSession {
       return this.#finish(WRAP_UP, "Intake complete");
     }
     this.#pendingGate = "intake_question";
+    this.#lastQuestion = question.prompt;
     const first = this.#intakeQuestionIndex === 0;
     const prefix = first ? `${OUTRO_CLEARED_FOR_INTAKE} ` : "";
     return {
@@ -295,6 +408,22 @@ export class ReceptionistChatSession {
       // The first question already opens with the scripted outro.
       ...(first ? {} : { acknowledgeable: true as const }),
     };
+  }
+
+  /** Which kind of question is waiting for an answer, for side-question handling; none while choosing a language. */
+  #questionGate(): QuestionGate | undefined {
+    switch (this.#pendingGate) {
+      case "caller_type":
+        return "caller_type";
+      case "disclose_recording_consent_then_continue":
+        return "consent";
+      case "hold_for_conflict_check":
+        return "conflict";
+      case "intake_question":
+        return "intake";
+      default:
+        return undefined;
+    }
   }
 
   #finish(reply: string, label: string, triggers: string[] = []): ChatTurnResult {
@@ -323,7 +452,7 @@ export class ReceptionistChatSession {
       return NEGATION_RE.test(answerText) && !CUSTODY_WORDS_RE.test(answerText) ? { inCustody: false } : {};
     }
     if (questionId === "court_date") {
-      const hours = parseHoursUntil(answerText);
+      const hours = parseHoursUntil(answerText, this.#now());
       return hours !== undefined ? { courtAppearanceWithinHours: hours } : {};
     }
     if (questionId === "protective_order_active") {

@@ -27,6 +27,23 @@ export const DIRECTIVE_SCRIPTS: Record<RouteDirective, string> = {
 };
 
 export const CALLER_TYPE_QUESTION = "Are you a new client, an existing client, or calling on behalf of someone else?";
+/** Asked once when the first answer didn't say who the call is about. */
+export const CALLER_TYPE_CLARIFY_QUESTION = "Sorry, I want to make sure I get this right. Is this about your own legal matter, or are you calling for someone else?";
+/** For a caller still unidentified after the re-ask: no case details, but without the third-party "I can't share" line. */
+export const UNIDENTIFIED_CALLER_MESSAGE_SCRIPT =
+  "I want to make sure you get the right help, so I'll have someone from our team follow up. What message would you like me to pass along?";
+/** The recording question alone, repeated after a side answer (the disclosure itself was already given). */
+export const CONSENT_REASK_QUESTION = "Is it okay with you if this call is recorded?";
+/** The conflict question alone, repeated after a side answer. */
+export const CONFLICT_REASK_QUESTION = "Could you tell me the name of the other party involved, if any?";
+/** Asked once when a reply to the recording disclosure was neither a yes nor a no. */
+export const CONSENT_CLARIFY_QUESTION = "Sorry, I just need a yes or a no. Is it okay if this call is recorded?";
+/** Still unclear after the re-ask: treated like a refusal, never as agreement. */
+export const RECORDING_CONSENT_UNCLEAR_SCRIPT =
+  "No problem. I'll connect you with someone directly so this conversation isn't recorded.";
+/** After several questions back in a row. */
+export const SIDE_QUESTION_HANDOFF_SCRIPT =
+  "Let me get someone from our team to help you directly, so they can answer your questions.";
 const DEFAULT_GREETING_OPENER = "Thanks for reaching out.";
 
 export const GREETING = `${DEFAULT_GREETING_OPENER} ${CALLER_TYPE_QUESTION}`;
