@@ -62,3 +62,6 @@ label.check input { margin-top: 0.2rem; flex-shrink: 0; }
 .hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
 .done h2 { font-family: var(--font-serif); margin: 1rem 0 0.4rem; font-size: 1.25rem; }
 .done p { color: var(--text-muted); line-height: 1.55; margin: 0; }
+
+/* The disclaimer is a legal notice, so it's set to be read, not as a credit line. */
+.book-card .footer-credit { font-family: var(--font-sans); font-size: 0.76rem; letter-spacing: 0; text-transform: none; line-height: 1.5; opacity: 0.85; }

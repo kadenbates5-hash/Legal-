@@ -15,7 +15,7 @@
   min-height: 320px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #f4f5f7;
+  background: var(--surface-2);
 }
 .consent {
   display: flex;

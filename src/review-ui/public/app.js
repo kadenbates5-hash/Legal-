@@ -77,12 +77,35 @@ const PANEL_TITLES = {
   audit: "Audit Log",
 };
 
+/**
+ * The page heading, plus the small docket line above it: the tab's number
+ * in the binder ("No. 07") and the section it's filed under, so the top
+ * of every panel says where in the binder you are, not only its name.
+ */
+function setPanelHeading(panel) {
+  document.getElementById("panelTitle").textContent = PANEL_TITLES[panel] || "";
+  const visible = [...document.querySelectorAll("nav.nav button")].filter((b) => !b.hidden);
+  const btn = visible.find((b) => b.dataset.panel === panel);
+  let group = "Docket";
+  if (btn) {
+    for (let el = btn.previousElementSibling; el; el = el.previousElementSibling) {
+      if (el.classList.contains("nav-group")) {
+        group = el.textContent.trim();
+        break;
+      }
+    }
+  }
+  const number = document.createElement("b");
+  number.textContent = btn ? `No. ${String(visible.indexOf(btn) + 1).padStart(2, "0")}` : "Index";
+  document.getElementById("panelEyebrow").replaceChildren(number, ` · ${btn ? group : "Everything you can see"}`);
+}
+
 for (const btn of document.querySelectorAll("nav.nav button")) {
   btn.addEventListener("click", () => {
     const panel = btn.dataset.panel;
     for (const b of document.querySelectorAll("nav.nav button")) b.classList.toggle("active", b === btn);
     for (const s of document.querySelectorAll("section.panel")) s.classList.toggle("active", s.id === `panel-${panel}`);
-    document.getElementById("panelTitle").textContent = PANEL_TITLES[panel] || "";
+    setPanelHeading(panel);
     if (["messages", "staff-schedule", "drafting", "billing", "research", "cases", "signatures", "scheduling", "conflicts", "trust", "invoices", "payroll"].includes(panel)) {
       refreshPickers();
     }
@@ -3997,7 +4020,7 @@ function goToPanel(panel) {
   // making the whole Search panel unreachable from the UI.
   for (const b of document.querySelectorAll("nav.nav button")) b.classList.remove("active");
   for (const s of document.querySelectorAll("section.panel")) s.classList.toggle("active", s.id === `panel-${panel}`);
-  document.getElementById("panelTitle").textContent = PANEL_TITLES[panel] || "";
+  setPanelHeading(panel);
 }
 
 function statTile(n, label, { tone = "", panel = null } = {}) {
@@ -4130,6 +4153,12 @@ async function loadHome() {
   const firstName = firstWord ? firstWord.charAt(0).toUpperCase() + firstWord.slice(1) : "";
   document.getElementById("homeHello").textContent = firstName ? `${partOfDay}, ${firstName}.` : `${partOfDay}.`;
   document.getElementById("homeGreeting").textContent = "Everything that needs you, in one place.";
+  document.getElementById("homeDateline").textContent = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 
   // Shaped like what's about to arrive rather than a blank panel or the
   // word "Loading…" — sets the expectation that something is coming,

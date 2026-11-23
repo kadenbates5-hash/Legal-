@@ -3224,8 +3224,13 @@ nav item is hidden except **My Matters** and **Security** — see below.
   it incidentally closed a long-standing gap — there was never a
   `<link rel="icon">` anywhere, so browsers were always guessing at
   `/favicon.ico`.
-- `public/login.html` — Docket-branded sign-in: username/password + a
-  "remember me" checkbox, posting to `/api/login`.
+- `public/login.html` — Docket-branded sign-in: a cover page (wordmark,
+  "Every matter, on the record.", the three promises the app keeps, and
+  the 3D file stack) beside the form — username/password + a "remember
+  me" checkbox, posting to `/api/login`. Below 960px the cover drops away
+  and the form stands alone. `public/theme.js` applies the light/dark
+  choice made inside the app to the sign-in and password pages, so
+  signing out doesn't flash the other theme.
 - `public/depth.js` — the 3D layer, shared by the sign-in, password and
   dashboard pages. Markup opts in by attribute: `[data-tilt]` turns an
   element toward the pointer with a light sheen following it (the
@@ -3246,8 +3251,9 @@ nav item is hidden except **My Matters** and **Security** — see below.
   containing block for the toasts/palette, which live outside panels
   anyway); every `.card` sits on a short stack of paper — two sheets
   drawn as extra box-shadows, so layout is untouched — that fans out on
-  hover; the active nav item is a raised, bevelled tab; and chat bubbles
-  arrive from a little way back. The flat entrance animations that
+  hover; the tab you're on joins the page; and chat bubbles arrive from
+  a little way back. (Since the case-binder redesign below, panels turn
+  in from the binder's spine rather than swinging up.) The flat entrance animations that
   predate depth.js now also stop under `prefers-reduced-motion`, which
   they previously ignored.
   A phone-width sweep of every panel (390px) found the whole dashboard
@@ -3255,8 +3261,9 @@ nav item is hidden except **My Matters** and **Security** — see below.
   theme, name, "Change password", "Log out") never wrapped. It now wraps
   under the panel title, and no panel scrolls sideways at that width.
 - `public/index.html` / `public/app.js` / `public/app.css` — the Docket
-  app shell: a dark sidebar (brand + panel nav), a top bar showing who's
-  signed in, and one panel each for **Home** (the landing panel: a
+  app shell: a binder of index tabs (brand + panel nav), a page with a
+  top bar showing the panel's docket line and who's signed in, and one
+  panel each for **Home** (the landing panel: a
   role-aware set of stat tiles, a "Needs your attention" list that
   deep-links into the Review Queue, and a "Today" list showing your own
   schedule entry and the latest announcements — it only requests data
@@ -3375,6 +3382,47 @@ nav item is hidden except **My Matters** and **Security** — see below.
   sample data") — a fresh instance with zero accounts and `DEMO_SEED`
   unset behaves exactly as it always has, an empty system waiting for
   its first real matter.
+
+### Visual design: the case binder
+
+The whole interface was redesigned around one idea: the thing a
+litigator actually works from is a binder on a desk. It replaced a
+navy-and-brass dashboard with a dark sidebar, which read as a generic
+SaaS template.
+
+- **Layout.** The navigation is a column of index tabs on the desk; the
+  panel you're on is the page those tabs open to, and its tab is cut
+  from the same paper and *joins* the page (concave corners drawn with
+  radial gradients, so it reads as one sheet rather than a highlighted
+  row). The page has two more sheets peeking out beneath it. Section
+  headings in the rail are numbered like a docket's divisions
+  ("01 · CASEWORK"), and every panel's heading carries a docket line
+  above it — the tab's number in the binder and its section ("No. 07 ·
+  CASEWORK"), worked out by `setPanelHeading()` from the visible tabs,
+  so it stays right whichever tabs a role can see. On phones the tabs
+  move to the page's top edge, like a folder's, and scroll sideways.
+- **Colour.** Paper and ink, with jobs kept apart: verdigris (`--accent`)
+  for anything you can act on (links, focus, the "you can click this"
+  hover), **ink** for primary buttons, and **stamp red** (`--accent-2`)
+  only for the brand and the tab you're on — so red never means "click
+  me" and never doubles as a status colour. Danger/warn/ok stay their
+  own hues. Dark mode is the same binder under a lamp (warm near-blacks,
+  paper-coloured primary buttons), not a blue-black theme.
+- **Type.** Fraunces for headings, IBM Plex Sans for reading, IBM Plex
+  Mono for docket details (matter numbers, stamps, keyboard hints) — all
+  self-hosted from `public/fonts/` with their OFL licences, so the CSP's
+  `font-src 'self'` needs no exception. Badges are rubber stamps (mono,
+  uppercase, inked border); each panel's explanation is a margin note
+  with a red rule; stats are index cards with a coloured tab.
+- **The mark.** A folder with a red tab and a paper "D" cut out of it,
+  drawn once as inline SVG whose parts take their colours from CSS
+  (`.m-body`/`.m-tab`/`.m-glyph`), so it inverts in dark mode.
+  `public/icons/` are the same mark rendered on paper at 32/180/192/512.
+- **Checked, not eyeballed.** Every panel was swept in light, dark,
+  phone (390px) and tablet widths with no console errors and no
+  sideways scroll; the sweep found one regression (a select with long
+  options pushing the Deadlines card past a phone screen), fixed by
+  capping fields at their container's width.
 
 `/api/appointments*` (see `scheduling.ts` above) is wired into the same
 server, gated by `SchedulingService`'s own optional `AccessControl`

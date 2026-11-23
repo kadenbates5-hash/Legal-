@@ -7,23 +7,36 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png" />
 <link rel="apple-touch-icon" href="/icons/icon-180.png" />
 <link rel="manifest" href="/manifest.webmanifest" />
-<meta name="theme-color" content="#2c4270" />
+<meta name="theme-color" content="#efe8da" />
 <link rel="stylesheet" href="/login.css" />
 </head>
 <body>
 <div class="scene" data-parallax aria-hidden="true">
   <div class="horizon"></div>
   <div class="desk"><div class="pad"></div></div>
-  <div class="files">
-    <div class="file f3"><span class="tab"></span></div>
-    <div class="file f2"><span class="tab"></span><span class="rule"></span><span class="rule"></span><span class="rule short"></span></div>
-    <div class="file f1"><span class="tab"></span><span class="label">State v. Doe</span><span class="rule"></span><span class="rule"></span><span class="rule"></span><span class="rule short"></span><span class="seal"></span></div>
-  </div>
 </div>
-<div class="card" data-tilt="3">
-  <span class="sheen" aria-hidden="true"></span>
-  <div class="brand"><span class="mark"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.4 14.8 7.8 10 17 5.2 7.8Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="6.6" r="0.85" fill="currentColor"/><path d="M10 8.6v6.7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span><span class="name">Docket</span></div>
-  <p class="tagline">AI receptionist &amp; paralegal, always chaperoned by a human attorney. Sign in to continue.</p>
+<main class="auth-layout" data-parallax>
+  <section class="cover">
+    <div class="brand"><span class="mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path class="m-tab" d="M4 13V8.2A3.2 3.2 0 0 1 7.2 5h5.6c.9 0 1.7.4 2.3 1.1L17.4 9V13H4z"/><path class="m-body" d="M4 9h20.8A3.2 3.2 0 0 1 28 12.2v12.6a3.2 3.2 0 0 1-3.2 3.2H7.2A3.2 3.2 0 0 1 4 24.8z"/><path class="m-glyph" fill-rule="evenodd" d="M10.5 13.2h5a5.3 5.3 0 0 1 0 10.6h-5zm3.1 2.8h1.8a2.5 2.5 0 0 1 0 5h-1.8z"/></svg></span><span class="name">Docket</span></div>
+    <p class="cover-kicker">AI receptionist &amp; paralegal</p>
+    <h1 class="cover-title">Every matter,<br /><span class="ink-red">on the record.</span></h1>
+    <ol class="cover-notes">
+      <li><span>01</span>Nothing reaches a client, a filing or an invoice without an attorney's sign-off.</li>
+      <li><span>02</span>Every new name is screened for conflicts across the whole firm.</li>
+      <li><span>03</span>Every action goes into a log that can prove it was never edited.</li>
+    </ol>
+    <div class="files" aria-hidden="true">
+      <div class="file f3"><span class="tab"></span></div>
+      <div class="file f2"><span class="tab"></span><span class="rule"></span><span class="rule"></span><span class="rule short"></span></div>
+      <div class="file f1"><span class="tab"></span><span class="label">State v. Doe</span><span class="rule"></span><span class="rule"></span><span class="rule"></span><span class="rule short"></span><span class="seal"></span></div>
+    </div>
+  </section>
+
+  <div class="card" data-tilt="3">
+    <span class="sheen" aria-hidden="true"></span>
+    <div class="brand"><span class="mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path class="m-tab" d="M4 13V8.2A3.2 3.2 0 0 1 7.2 5h5.6c.9 0 1.7.4 2.3 1.1L17.4 9V13H4z"/><path class="m-body" d="M4 9h20.8A3.2 3.2 0 0 1 28 12.2v12.6a3.2 3.2 0 0 1-3.2 3.2H7.2A3.2 3.2 0 0 1 4 24.8z"/><path class="m-glyph" fill-rule="evenodd" d="M10.5 13.2h5a5.3 5.3 0 0 1 0 10.6h-5zm3.1 2.8h1.8a2.5 2.5 0 0 1 0 5h-1.8z"/></svg></span><span class="name">Docket</span></div>
+    <h2 class="card-title">Sign in</h2>
+    <p class="tagline">Your firm's matters, drafts and deadlines. An attorney signs off on everything that leaves.</p>
 
   <form id="loginForm">
     <label>Username <input id="username" type="text" autocomplete="username" required /></label>
@@ -42,8 +55,10 @@
   </form>
   <p class="footer-link"><a href="/forgot-password.html">Forgot your password?</a></p>
   <p class="footer-credit">Made by <strong>KJB Systems</strong></p>
-</div>
+  </div>
+</main>
 
+<script src="/theme.js"></script>
 <script src="/depth.js"></script>
 <script src="/login.js"></script>
 </body>

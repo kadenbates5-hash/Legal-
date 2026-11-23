@@ -14,12 +14,18 @@
 //   often, and a returning visitor should see today's app.js, not a
 //   version cached last week. The cache is purely a fallback for when
 //   the network request fails.
-const CACHE_NAME = "docket-shell-v2";
+const CACHE_NAME = "docket-shell-v3";
 const SHELL_PATHS = [
   "/login.html",
   "/login.css",
   "/login.js",
   "/depth.js",
+  "/theme.js",
+  "/fonts/fraunces-display.woff2",
+  "/fonts/plex-sans-400.woff2",
+  "/fonts/plex-sans-500.woff2",
+  "/fonts/plex-sans-600.woff2",
+  "/fonts/plex-mono-500.woff2",
   "/app.css",
   "/app.js",
   "/manifest.webmanifest",
