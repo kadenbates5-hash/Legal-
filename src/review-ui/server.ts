@@ -102,7 +102,9 @@ function parseCookies(req: IncomingMessage): Record<string, string> {
     if (idx === -1) continue;
     const key = part.slice(0, idx).trim();
     const value = part.slice(idx + 1).trim();
-    if (key) out[key] = decodeURIComponent(value);
+    // Tolerant: a cookie Docket didn't set (a "promo=50%off" from another
+    // app on the same domain) must not make every request a 400.
+    if (key) out[key] = decodeSegment(value);
   }
   return out;
 }
@@ -288,6 +290,33 @@ function sendBinary(
     ...SECURITY_HEADERS,
   });
   res.end(data);
+}
+
+/**
+ * A route's path segments after `prefix`, each percent-decoded. The
+ * dashboard puts every id into a URL with `encodeURIComponent`, so the
+ * server has to decode it back before keying on it: otherwise a matter
+ * typed as "Ruiz 2026" was stored as "Ruiz%202026" by every route that
+ * takes its id from the path, a different matter from the "Ruiz 2026"
+ * that routes taking it from a JSON body store — and the Cases panel,
+ * encoding the stored id again, couldn't open either. Split before
+ * decoding, so an id containing an encoded "/" stays one segment. A
+ * malformed escape is kept as written; it can't name anything that exists.
+ */
+function pathSegments(url: URL, prefix: RegExp): string[] {
+  return url.pathname
+    .replace(prefix, "")
+    .split("/")
+    .filter(Boolean)
+    .map(decodeSegment);
+}
+
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }
 
 function errorStatus(err: unknown): number {
@@ -921,8 +950,8 @@ async function handleRequest(
       sendJson(res, 404, { error: "e-signature is not configured on this server" });
       return;
     }
-    const segments = url.pathname.replace(/^\/api\/sign\/?/, "").split("/").filter(Boolean);
-    const token = segments[0] ? decodeURIComponent(segments[0]) : "";
+    const segments = pathSegments(url, /^\/api\/sign\/?/);
+    const token = segments[0] ?? "";
     if (!token) {
       sendJson(res, 404, { error: "not found" });
       return;
@@ -1154,7 +1183,7 @@ async function handleRequest(
         onMutated?.();
         return;
       }
-      const segments = url.pathname.replace(/^\/api\/webauthn\/?/, "").split("/").filter(Boolean);
+      const segments = pathSegments(url, /^\/api\/webauthn\/?/);
       if (segments.length === 1 && req.method === "DELETE") {
         const body = await readJsonBody(req);
         const passkeyId = segments[0]!;
@@ -1263,7 +1292,7 @@ async function handleRequest(
         sendJson(res, 404, { error: "Google Calendar connection isn't configured on this server" });
         return;
       }
-      const attorneyActorId = decodeURIComponent(url.pathname.slice("/api/calendar-connection/actor/".length, -"/token".length));
+      const attorneyActorId = decodeSegment(url.pathname.slice("/api/calendar-connection/actor/".length, -"/token".length));
       try {
         sendJson(res, 200, await calendarConnection.accessTokenFor(actor, attorneyActorId));
       } catch (err) {
@@ -1282,9 +1311,9 @@ async function handleRequest(
           sendJson(res, 200, booking.list(actor));
           return;
         }
-        const segments = url.pathname.replace(/^\/api\/booking-requests\/?/, "").split("/").filter(Boolean);
+        const segments = pathSegments(url, /^\/api\/booking-requests\/?/);
         if (segments.length === 2 && req.method === "POST") {
-          const id = decodeURIComponent(segments[0]!);
+          const id = segments[0]!;
           const body = await readJsonBody(req);
           if (segments[1] === "accept") {
             const duration = Number(body["durationMinutes"]);
@@ -1497,7 +1526,7 @@ async function handleRequest(
         sendJson(res, 405, { error: "method not allowed" });
         return;
       }
-      const matterId = decodeURIComponent(url.pathname.slice("/api/client-file/".length));
+      const matterId = decodeSegment(url.pathname.slice("/api/client-file/".length));
       if (!matterId) {
         sendJson(res, 404, { error: "not found" });
         return;
@@ -1621,7 +1650,7 @@ async function handleRequest(
       return;
     }
 
-    const segments = url.pathname.replace(/^\/api\/work-products\/?/, "").split("/").filter(Boolean);
+    const segments = pathSegments(url, /^\/api\/work-products\/?/);
 
     if (segments.length === 0 && req.method === "GET") {
       const status = url.searchParams.get("status");
@@ -1876,7 +1905,7 @@ async function handleIntakeRequest(
     return;
   }
 
-  const segments = url.pathname.replace(/^\/api\/intake\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/intake\/?/);
   if (segments.length === 2 && segments[1] === "message" && req.method === "POST") {
     const sessionId = segments[0]!;
     const body = await readJsonBody(req);
@@ -1917,7 +1946,7 @@ async function handleAccountsRequest(
     return;
   }
 
-  const segments = url.pathname.replace(/^\/api\/accounts\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/accounts\/?/);
   if (segments.length === 2 && req.method === "POST") {
     const id = segments[0]!;
     const action = segments[1];
@@ -1982,7 +2011,7 @@ async function handleDraftingRequest(
   url: URL,
   onMutated?: () => void,
 ): Promise<void> {
-  const segments = url.pathname.replace(/^\/api\/drafting\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/drafting\/?/);
 
   if (segments.length === 1 && segments[0] === "templates" && req.method === "GET") {
     sendJson(res, 200, drafting.listTemplates(actor));
@@ -2087,7 +2116,7 @@ async function handleDocumentsRequest(
   url: URL,
   onMutated?: () => void,
 ): Promise<void> {
-  const segments = url.pathname.replace(/^\/api\/documents\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/documents\/?/);
 
   if (segments.length === 1 && segments[0] === "limits" && req.method === "GET") {
     sendJson(res, 200, { maxUploadBytes: documents.getMaxUploadBytes() });
@@ -2154,7 +2183,7 @@ async function handleESignatureRequest(
   url: URL,
   onMutated?: () => void,
 ): Promise<void> {
-  const segments = url.pathname.replace(/^\/api\/esignature\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/esignature\/?/);
   if (segments[0] !== "matters" || !segments[1]) {
     sendJson(res, 404, { error: "not found" });
     return;
@@ -2236,7 +2265,7 @@ async function handleInvoicingRequest(
     return;
   }
 
-  const segments = url.pathname.replace(/^\/api\/invoices\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/invoices\/?/);
   if (segments[0] !== "matters" || !segments[1]) {
     sendJson(res, 404, { error: "not found" });
     return;
@@ -2363,7 +2392,7 @@ async function handleTimeClockRequest(
   onMutated?: () => void,
 ): Promise<void> {
   const tz = url.searchParams.get("tz") ?? undefined;
-  const segments = url.pathname.replace(/^\/api\/time-clock\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/time-clock\/?/);
 
   // Punching is always self-service, so these take no actor id.
   if (segments.length === 1 && (segments[0] === "clock-in" || segments[0] === "clock-out") && req.method === "POST") {
@@ -2402,7 +2431,7 @@ async function handleTimeClockRequest(
     sendJson(res, 404, { error: "not found" });
     return;
   }
-  const actorId = decodeURIComponent(segments[1]!);
+  const actorId = segments[1]!;
   const from = url.searchParams.get("from") ?? undefined;
   const to = url.searchParams.get("to") ?? undefined;
 
@@ -2447,12 +2476,12 @@ async function handlePayrollRequest(
     return;
   }
 
-  const segments = url.pathname.replace(/^\/api\/payroll\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/payroll\/?/);
   if (segments[0] !== "actor" || !segments[1]) {
     sendJson(res, 404, { error: "not found" });
     return;
   }
-  const actorId = decodeURIComponent(segments[1]!);
+  const actorId = segments[1]!;
 
   if (segments[2] === "rates") {
     if (req.method === "GET") {
@@ -2593,7 +2622,7 @@ async function handleTrustRequest(
     return;
   }
 
-  const segments = url.pathname.replace(/^\/api\/trust\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/trust\/?/);
   if (segments[0] !== "matters" || !segments[1]) {
     sendJson(res, 404, { error: "not found" });
     return;
@@ -2648,7 +2677,7 @@ async function handleClientPortalRequest(
   url: URL,
   onMutated?: () => void,
 ): Promise<void> {
-  const segments = url.pathname.replace(/^\/api\/client-portal\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/client-portal\/?/);
 
   if (segments.length === 1 && segments[0] === "limits" && req.method === "GET") {
     sendJson(res, 200, { maxUploadBytes: clientPortal.getMaxUploadBytes() });
@@ -2727,7 +2756,7 @@ async function handleClientMessagingRequest(
   url: URL,
   onMutated?: () => void,
 ): Promise<void> {
-  const segments = url.pathname.replace(/^\/api\/client-messages\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/client-messages\/?/);
   if (segments[0] !== "matters" || !segments[1]) {
     sendJson(res, 404, { error: "not found" });
     return;
@@ -2793,7 +2822,7 @@ async function handleMattersRequest(
     return;
   }
 
-  const segments = url.pathname.replace(/^\/api\/matters\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/matters\/?/);
 
   if (segments.length === 0 && req.method === "GET") {
     sendJson(res, 200, matters.list(actor));
@@ -2881,7 +2910,7 @@ async function handlePdfReportsRequest(
   url: URL,
   onMutated?: () => void,
 ): Promise<void> {
-  const segments = url.pathname.replace(/^\/api\/pdf-reports\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/pdf-reports\/?/);
 
   if (segments[0] !== "matters" || !segments[1] || !segments[2] || !segments[3]) {
     sendJson(res, 404, { error: "not found" });
@@ -2916,7 +2945,7 @@ async function handleCasesRequest(
   url: URL,
   timeline?: MatterTimelineService,
 ): Promise<void> {
-  const segments = url.pathname.replace(/^\/api\/cases\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/cases\/?/);
 
   // One matter's history across every panel, each source behind its own
   // panel's check — see matter-timeline-service.ts.
@@ -2950,7 +2979,7 @@ async function handleMessagingRequest(
   url: URL,
   onMutated?: () => void,
 ): Promise<void> {
-  const segments = url.pathname.replace(/^\/api\/messages\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/messages\/?/);
 
   if (segments.length === 1 && segments[0] === "announcements" && req.method === "GET") {
     sendJson(res, 200, messaging.listAnnouncements(actor));
@@ -3030,7 +3059,7 @@ async function handleStaffScheduleRequest(
   url: URL,
   onMutated?: () => void,
 ): Promise<void> {
-  const segments = url.pathname.replace(/^\/api\/staff-schedule\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/staff-schedule\/?/);
 
   if (segments[0] === "date" && segments[1] && req.method === "GET") {
     sendJson(res, 200, staffSchedule.listForDate(actor, segments[1]!));
@@ -3074,7 +3103,7 @@ async function handleBillingHoursRequest(
   url: URL,
   onMutated?: () => void,
 ): Promise<void> {
-  const segments = url.pathname.replace(/^\/api\/billing-hours\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/billing-hours\/?/);
 
   if (segments.length === 1 && segments[0] === "mine" && req.method === "GET") {
     sendJson(res, 200, billingHours.listMyHours(actor));
@@ -3128,7 +3157,7 @@ async function handleResearchRequest(
     return;
   }
 
-  const segments = url.pathname.replace(/^\/api\/research\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/research\/?/);
   if (segments[0] !== "matters" || !segments[1]) {
     sendJson(res, 404, { error: "not found" });
     return;
@@ -3175,7 +3204,7 @@ async function handleAssistantRequest(
     return;
   }
 
-  const segments = url.pathname.replace(/^\/api\/assistant\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/assistant\/?/);
   if (segments.length !== 2 || req.method !== "POST") {
     sendJson(res, 404, { error: "not found" });
     return;
@@ -3286,9 +3315,9 @@ async function handleVoiceRequest(
     return;
   }
 
-  const segments = url.pathname.replace(/^\/api\/voice\/twilio\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/voice\/twilio\/?/);
   if (segments.length === 2 && segments[1] === "recording") {
-    const callSid = decodeURIComponent(segments[0]!);
+    const callSid = segments[0]!;
     const recordingUrl = formParams["RecordingUrl"];
     if (!recordingUrl) {
       sendJson(res, 400, { error: "RecordingUrl is required" });
@@ -3345,7 +3374,7 @@ async function handleAppointmentsRequest(
     return;
   }
 
-  const segments = url.pathname.replace(/^\/api\/appointments\/?/, "").split("/").filter(Boolean);
+  const segments = pathSegments(url, /^\/api\/appointments\/?/);
 
   if (segments.length === 0 && req.method === "GET") {
     const matterId = url.searchParams.get("matterId");

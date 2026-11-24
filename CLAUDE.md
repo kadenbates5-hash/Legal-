@@ -2625,6 +2625,23 @@ Hardening that applies to every route, independent of any one panel.
 - `serveStatic` compares against `PUBLIC_DIR + path.sep`, not a bare
   `startsWith`: the latter also accepts a sibling directory whose name
   merely begins with it, which `../public-x/secret` would reach.
+- **Ids in the URL path are decoded, in one place** (`pathSegments()`).
+  The dashboard puts every id into a URL with `encodeURIComponent`, but
+  25 route handlers split the raw path and keyed on what they found, so
+  a matter typed as "Ruiz 2026" was stored as `Ruiz%202026` by every
+  route taking its id from the path (documents, drafting, billing,
+  trust…) and as `Ruiz 2026` by every route taking it from a JSON body
+  (scheduling, assignments) — one matter split in two. The Cases panel
+  then encoded the stored id again and opened an empty matter. Segments
+  are split before decoding, so an encoded `/` stays inside one id, and a
+  malformed escape is kept as written rather than failing. A matter
+  stored percent-encoded before the fix is still reachable under that
+  id. Found in a review pass; `test/path-segments-server.test.ts` pins
+  it.
+- **A cookie Docket didn't set can't lock anyone out.** Cookie values
+  were decoded strictly, so a stray `promo=50%off` from another app on
+  the same domain made every request, the dashboard page included, a 400
+  "URI malformed". Decoding is now tolerant, same as path segments.
 
 ## Real authentication (§5/§6 — resolved)
 
