@@ -396,7 +396,7 @@ function errorStatus(err: unknown): number {
     // "must be released first", "no longer open for signing", and
     // "already signed/declined"/"not yet fully signed" are all conflicts
     // with the envelope's current state, not malformed input.
-    return /is required|not a PDF|type your name/.test(err.message) ? 400 : 409;
+    return /is required|not a PDF|type your name|needs a name|needs at least one/.test(err.message) ? 400 : 409;
   }
   return 400;
 }

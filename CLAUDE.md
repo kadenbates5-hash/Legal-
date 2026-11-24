@@ -308,7 +308,13 @@ agent-drafted text. Content is stored as a base64 string directly on the
 record, matching this project's single-JSON-blob persistence model, so
 `toSnapshot()`/`fromSnapshot()` round-trip a document like every other
 stateful core object. No access control lives here, same split as
-`WorkProductStore`.
+`WorkProductStore`. A document's file name and type come from the
+browser and go straight back out in a download's headers, so `upload()`
+keeps the name on one line (control characters dropped, at most 255
+characters) and stores the type as a bare `type/subtype`, or as
+`application/octet-stream` when it isn't one. A type with a line break
+in it made the file impossible to download, since Node refuses the
+header.
 
 `src/review-ui/documents-service.ts` — `DocumentsService`, the paralegal/
 attorney-facing surface backing the Cases panel's upload/download. Same
@@ -2745,6 +2751,39 @@ accounts:
   other stateful core object, so accounts, live sessions ("remember me"
   survives a restart), and the system key persist across process
   restarts.
+- **An account is a person, with an identity of its own.** Account
+  creation used to store whatever it was sent, which opened two holes
+  (both reproduced against a running server):
+  - *A password login with role `"system"`.* It passed every check that
+    tells the integrations' machine credential from a person: it
+    recorded a `calendar_system` deadline confirmation, so one attorney
+    could supply both of a deadline's "independent" sources; it read
+    every appointment with the client's email attached; and it could
+    fetch another attorney's Google Calendar access token. A role naming
+    nothing ("superuser") was stored too, and passed every "any staff
+    member" check. `createUser()` now accepts only `LOGIN_ROLES`
+    (attorney, paralegal, receptionist, staff, client).
+  - *A second account under a colleague's actor id.* The actor id is who
+    an account *is* everywhere else (audit entries, matter assignments,
+    direct messages, timesheets, payroll), so a "twin" created with a
+    paralegal's actor id read that paralegal's direct messages and was
+    recorded as them. Actor ids are now unique (compared case-
+    insensitively, so "P1" is "p1"), and the ids the server acts as
+    itself (`calendar-integration`, `system`, `public-booking-form`,
+    `anonymous`) are reserved.
+  - Records saved before the fix **fail closed**: `#canSignIn()` runs at
+    every sign-in path (password, passkey, password reset) and on every
+    request, so a stored system-role login, a nameless role, or the
+    later of two accounts sharing an actor id can't sign in or keep a
+    session. The record stays listed in Accounts so an attorney can see
+    it and disable it.
+  - Smaller checks at the same point: a username is one word of at most
+    64 characters, stored trimmed (it is the default actor id, so
+    " dana" and "dana" were different people); a full name is at most
+    120 characters; an email must look like one (a line break in it
+    would be a new mail header) and a phone number needs a digit — on
+    `setEmail`/`setPhone` too. A duplicate username or actor id stays
+    a 400, as before. `test/account-integrity.test.ts` pins all of it.
 
 This is still a real-vendor-shaped seed, not a finished identity system,
 though MFA *is* now built — see "Two-factor authentication" below. Both

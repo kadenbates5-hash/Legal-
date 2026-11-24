@@ -6,6 +6,7 @@ import { MatterStore, type Matter, type PartyRole } from "../src/core/matters.js
 import { ConflictChecker } from "../src/core/conflicts.js";
 import { StaffScheduleStore, type StaffScheduleStatus } from "../src/core/staff-schedule.js";
 import { isCalendarDate } from "../src/core/calendar-date.js";
+import { DocumentStore, normalizedContentType, normalizedFileName } from "../src/core/document-store.js";
 import type { Actor } from "../src/core/types.js";
 
 /**
@@ -172,6 +173,27 @@ describe("the staff schedule", () => {
     expect(() => store.setEntry("a1", "2026-11-30", "office" as StaffScheduleStatus)).toThrow(/in_office, remote or out/);
     expect(() => store.setEntry("a1", "garbage", "remote")).toThrow(/YYYY-MM-DD/);
     expect(store.setEntry("a1", "2026-11-30", "remote").status).toBe("remote");
+  });
+});
+
+describe("uploaded documents: what goes back out in a header", () => {
+  it("stores a file's type as type/subtype, and anything else as plain bytes", () => {
+    expect(normalizedContentType("Application/PDF")).toBe("application/pdf");
+    expect(normalizedContentType("text/plain; charset=utf-8")).toBe("text/plain");
+    for (const bad of ["text/html\r\nX-Evil: 1", "", "pdf", "a/b/c", "image/ png"]) {
+      expect(normalizedContentType(bad), JSON.stringify(bad)).toBe("application/octet-stream");
+    }
+  });
+
+  it("keeps a file name on one line, and refuses one that's only control characters", () => {
+    const store = new DocumentStore();
+    const doc = store.upload({ matterId: "m1", fileName: "Plea\r\n  offer.pdf", contentType: "text/html\nX: 1", content: "aGk=", uploadedBy: "a1" });
+    expect(doc.fileName).toBe("Plea offer.pdf");
+    expect(doc.contentType).toBe("application/octet-stream");
+    expect(normalizedFileName("x".repeat(300))).toHaveLength(255);
+    expect(() => store.upload({ matterId: "m1", fileName: "\r\n", contentType: "", content: "aGk=", uploadedBy: "a1" })).toThrow(
+      /fileName is required/,
+    );
   });
 });
 

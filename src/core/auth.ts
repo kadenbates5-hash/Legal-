@@ -240,6 +240,62 @@ function nextUserId(): string {
   return `user_${userSequence}_${randomBytes(4).toString("hex")}`;
 }
 
+/**
+ * The roles a person can sign in as. `UserRole` is wider than this only
+ * because it shares `Actor`'s vocabulary: `"system"` is the integrations'
+ * machine credential, reached with an API key and never a password, and
+ * `"anonymous"` is someone with no credential at all.
+ *
+ * Account creation used to store whatever role it was sent, so an
+ * attorney could mint a *password* login with role `"system"` — which
+ * then passed every check that exists to tell the calendar integration
+ * from a person: it confirmed a deadline as the `calendar_system`
+ * source (one attorney supplying both "independent" sources), read every
+ * appointment's client email, and could fetch another attorney's Google
+ * Calendar access token. A role that names nothing ("superuser") was
+ * stored too, and passed every "any staff human" check.
+ */
+export const LOGIN_ROLES = ["attorney", "paralegal", "receptionist", "staff", "client"] as const;
+
+export function isLoginRole(role: unknown): role is (typeof LOGIN_ROLES)[number] {
+  return typeof role === "string" && (LOGIN_ROLES as readonly string[]).includes(role);
+}
+
+/**
+ * Actor ids the server itself acts as. An account holding one would have
+ * its actions recorded as the calendar integration's, the payment
+ * webhook's or the public booking form's.
+ */
+const RESERVED_ACTOR_IDS = new Set(["calendar-integration", "system", "public-booking-form", "anonymous"]);
+
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
+/** A plausible address — one `@`, a dot after it, nothing that would split a mail header. */
+function isEmailAddress(value: string): boolean {
+  return value.length <= 254 && /^[^\s@<>(),;:"[\]\\]+@[^\s@<>(),;:"[\]\\]+\.[^\s@<>(),;:"[\]\\]+$/.test(value);
+}
+
+function normalizedEmail(value: string): string {
+  const email = value.trim();
+  if (email && !isEmailAddress(email)) {
+    throw new AuthError(`'${email.slice(0, 80)}' doesn't look like an email address`, "invalid");
+  }
+  return email;
+}
+
+function normalizedPhone(value: string): string {
+  const phone = value.trim();
+  if (CONTROL_CHARACTER.test(phone) || phone.length > 40 || (phone && !/\d/.test(phone))) {
+    throw new AuthError("a phone number needs a digit, fits on one line and is at most 40 characters", "invalid");
+  }
+  return phone;
+}
+
+/** An actor id compared the way a person reads one: "Para" and "para" are the same colleague. */
+function actorKey(actorId: string): string {
+  return actorId.trim().toLowerCase();
+}
+
 export class AuthService {
   #usersById = new Map<string, User>();
   #usersByUsername = new Map<string, User>();
@@ -264,23 +320,48 @@ export class AuthService {
     email?: string;
     phone?: string;
   }): User {
-    const key = params.username.trim().toLowerCase();
+    const username = params.username.trim();
+    const key = username.toLowerCase();
     if (!key) throw new AuthError("username must not be empty", "invalid");
+    if (/\s/.test(username) || CONTROL_CHARACTER.test(username) || username.length > 64) {
+      throw new AuthError("a username is one word of at most 64 characters, with no spaces", "invalid");
+    }
+    if (!isLoginRole(params.role)) {
+      throw new AuthError(`role must be ${LOGIN_ROLES.slice(0, -1).join(", ")} or ${LOGIN_ROLES.at(-1)}`, "invalid");
+    }
     if (params.password.length < 8) throw new AuthError("password must be at least 8 characters", "invalid");
     if (this.#usersByUsername.has(key)) {
-      throw new AuthError(`username '${params.username}' already exists`, "invalid");
+      throw new AuthError(`username '${username}' already exists`, "invalid");
     }
+    // The actor id is who the account *is* everywhere else — audit entries,
+    // matter assignments, direct messages, timesheets, payroll. A second
+    // account given someone's actor id read their direct messages and was
+    // recorded as them.
+    const actorId = (params.actorId ?? username).trim();
+    if (!actorId || CONTROL_CHARACTER.test(actorId) || actorId.length > 64) {
+      throw new AuthError("an actor id is at most 64 characters on one line", "invalid");
+    }
+    if (RESERVED_ACTOR_IDS.has(actorKey(actorId))) {
+      throw new AuthError(`'${actorId}' is reserved for the server itself`, "invalid");
+    }
+    if ([...this.#usersById.values()].some((u) => actorKey(u.actorId) === actorKey(actorId))) {
+      throw new AuthError(`actor id '${actorId}' already belongs to another account`, "invalid");
+    }
+    const displayName = (params.displayName ?? "").replace(/\s+/g, " ").trim();
+    if (CONTROL_CHARACTER.test(displayName) || displayName.length > 120) {
+      throw new AuthError("a full name is at most 120 characters", "invalid");
+    }
+    const email = normalizedEmail(params.email ?? "");
+    const phone = normalizedPhone(params.phone ?? "");
     const salt = randomBytes(16).toString("hex");
-    const email = params.email?.trim();
-    const phone = params.phone?.trim();
     const user: User = {
       id: nextUserId(),
-      username: params.username,
+      username,
       passwordHash: hashSecret(params.password, salt),
       salt,
       role: params.role,
-      actorId: params.actorId ?? params.username,
-      displayName: params.displayName?.trim() || params.username,
+      actorId,
+      displayName: displayName || username,
       disabled: false,
       mustChangePassword: false,
       passkeys: [],
@@ -302,7 +383,7 @@ export class AuthService {
    */
   setEmail(userId: string, email: string): User {
     const user = this.#requireUser(userId);
-    const trimmed = email.trim();
+    const trimmed = normalizedEmail(email);
     const { email: _discard, ...rest } = user;
     const updated: User = trimmed ? { ...rest, email: trimmed } : { ...rest };
     this.#usersById.set(updated.id, updated);
@@ -313,7 +394,7 @@ export class AuthService {
   /** Sets or clears a user's phone number, same set-or-clear convention as `setEmail`. */
   setPhone(userId: string, phone: string): User {
     const user = this.#requireUser(userId);
-    const trimmed = phone.trim();
+    const trimmed = normalizedPhone(phone);
     const { phone: _discard, ...rest } = user;
     const updated: User = trimmed ? { ...rest, phone: trimmed } : { ...rest };
     this.#usersById.set(updated.id, updated);
@@ -329,7 +410,7 @@ export class AuthService {
    */
   login(username: string, password: string, remember: boolean, mfaCode?: string): Session {
     const user = this.#usersByUsername.get(username.trim().toLowerCase());
-    if (!user || user.disabled || !timingSafeStringEqual(hashSecret(password, user.salt), user.passwordHash)) {
+    if (!user || !this.#canSignIn(user) || !timingSafeStringEqual(hashSecret(password, user.salt), user.passwordHash)) {
       throw new AuthError("invalid username or password");
     }
     if (user.mfa) {
@@ -347,6 +428,23 @@ export class AuthService {
       throw new MfaRequiredError(true);
     }
     return this.#issueSession(user.id, remember);
+  }
+
+  /**
+   * Whether this record may hold a session at all — checked at every
+   * sign-in and on every request, so a record saved before account
+   * creation was checked fails closed rather than keeping what it was
+   * given: a password login carrying the `"system"` role, a role that
+   * names nothing, or a second account holding an actor id an earlier
+   * account already had. The record itself stays, visible in the
+   * Accounts panel, so an attorney can see it and disable it.
+   */
+  #canSignIn(user: User): boolean {
+    if (user.disabled || !isLoginRole(user.role)) return false;
+    for (const other of this.#usersById.values()) {
+      if (actorKey(other.actorId) === actorKey(user.actorId)) return other.id === user.id;
+    }
+    return true;
   }
 
   #issueSession(userId: string, remember: boolean): Session {
@@ -481,7 +579,7 @@ export class AuthService {
     this.#passwordResetRequests = this.#passwordResetRequests.filter((r) => Date.parse(r.expiresAt) >= now);
 
     const user = this.#usersByUsername.get(username.trim().toLowerCase());
-    if (!user || user.disabled) return undefined;
+    if (!user || !this.#canSignIn(user)) return undefined;
 
     const token = randomBytes(24).toString("hex");
     const salt = randomBytes(16).toString("hex");
@@ -816,7 +914,7 @@ export class AuthService {
    */
   async beginPasskeyLogin(username: string, password: string): Promise<unknown> {
     const user = this.#usersByUsername.get(username.trim().toLowerCase());
-    if (!user || user.disabled || !timingSafeStringEqual(hashSecret(password, user.salt), user.passwordHash)) {
+    if (!user || !this.#canSignIn(user) || !timingSafeStringEqual(hashSecret(password, user.salt), user.passwordHash)) {
       throw new AuthError("invalid username or password");
     }
     if (user.passkeys.length === 0) {
@@ -842,7 +940,7 @@ export class AuthService {
    */
   async completePasskeyLogin(username: string, response: unknown, remember: boolean): Promise<Session> {
     const user = this.#usersByUsername.get(username.trim().toLowerCase());
-    if (!user || user.disabled) {
+    if (!user || !this.#canSignIn(user)) {
       throw new AuthError("invalid username or password");
     }
     const pending = this.#pendingPasskeyLogin.get(user.id);
@@ -898,7 +996,7 @@ export class AuthService {
     const session = this.#sessionForToken(token);
     if (!session) return undefined;
     const user = this.#usersById.get(session.userId);
-    if (!user) return undefined;
+    if (!user || !this.#canSignIn(user)) return undefined;
     return { id: user.actorId, role: user.role };
   }
 
@@ -906,7 +1004,8 @@ export class AuthService {
   userForToken(token: string | undefined): User | undefined {
     const session = this.#sessionForToken(token);
     if (!session) return undefined;
-    return this.#usersById.get(session.userId);
+    const user = this.#usersById.get(session.userId);
+    return user && this.#canSignIn(user) ? user : undefined;
   }
 
   /**

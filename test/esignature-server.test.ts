@@ -154,6 +154,17 @@ describe("e-signature HTTP API", () => {
     expect(res.status).toBe(403);
   });
 
+  it("calls a nameless or missing signer a mistake in the form (400), not a conflict", async () => {
+    const doc = documents.upload({ matterId: "m1", fileName: "x.pdf", contentType: "application/pdf", content: await realPdfBase64(), uploadedBy: "a1" });
+    for (const signers of [[{ name: " ", email: "x@example.com" }], []]) {
+      const res = await fetch(
+        `${baseUrl}/api/esignature/matters/m1`,
+        withCookie(attorneyCookie, { method: "POST", body: JSON.stringify({ title: "x", sourceKind: "document", sourceId: doc.id, signers }) }),
+      );
+      expect(res.status, JSON.stringify(signers)).toBe(400);
+    }
+  });
+
   it("voiding is attorney-only", async () => {
     const doc = documents.upload({ matterId: "m1", fileName: "x.pdf", contentType: "application/pdf", content: await realPdfBase64(), uploadedBy: "p1" });
     const sendRes = await fetch(

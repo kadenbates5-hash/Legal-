@@ -46,6 +46,29 @@ export interface CaseDocument {
   uploadedByClient: boolean;
 }
 
+/**
+ * A file's type as a response header can carry it: `type/subtype`, lower
+ * case, parameters dropped. Both fields arrive from the browser (or any
+ * HTTP client) and go straight back out in `Content-Type` and the
+ * download's filename, so a line break in either made the file
+ * impossible to download — Node refuses the header — and anything
+ * malformed is stored as plain bytes rather than refused, since the
+ * browser decides the type and a person can't fix it.
+ */
+export function normalizedContentType(value: string): string {
+  const type = value.split(";")[0]!.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/.test(type) ? type : "application/octet-stream";
+}
+
+/** A file name on one line: control characters dropped, runs of space collapsed, at most 255 characters. */
+export function normalizedFileName(value: string): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 255);
+}
+
 export class DocumentStore {
   #byId = new Map<string, CaseDocument>();
   #nextId = 1;
@@ -58,11 +81,13 @@ export class DocumentStore {
     uploadedBy: string;
     uploadedByClient?: boolean;
   }): CaseDocument {
+    const fileName = normalizedFileName(params.fileName);
+    if (!fileName) throw new Error("fileName is required");
     const document: CaseDocument = {
       id: `doc_${this.#nextId++}`,
       matterId: params.matterId,
-      fileName: params.fileName,
-      contentType: params.contentType,
+      fileName,
+      contentType: normalizedContentType(params.contentType),
       content: params.content,
       size: Buffer.byteLength(params.content, "base64"),
       uploadedBy: params.uploadedBy,
