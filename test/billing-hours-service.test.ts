@@ -51,3 +51,26 @@ describe("BillingHoursService", () => {
     expect(service.listMatterHours(paralegal, "m1")).toHaveLength(0);
   });
 });
+
+describe("what an entry can say", () => {
+  // These become lines on an itemised client bill. The CSV import already
+  // refused them; the panel and the API took them until the store did too.
+  it("refuses more than a day's hours in one entry, and absurd numbers", () => {
+    const store = new BillingHoursStore();
+    const base = { matterId: "m1", actorId: "a1", date: "2026-07-28", description: "Trial prep" };
+    expect(store.log({ ...base, hours: 24 }).hours).toBe(24);
+    expect(() => store.log({ ...base, hours: 24.1 })).toThrow(/more than a day/);
+    expect(() => store.log({ ...base, hours: 1e308 })).toThrow(/more than a day/);
+    expect(() => store.log({ ...base, hours: Number.POSITIVE_INFINITY })).toThrow(/positive number/);
+  });
+
+  it("refuses a date that isn't a real calendar day", () => {
+    const store = new BillingHoursStore();
+    const base = { matterId: "m1", actorId: "a1", hours: 1, description: "Call" };
+    expect(store.log({ ...base, date: "2024-02-29" }).date).toBe("2024-02-29");
+    for (const date of ["nope", "2026-02-30", "2026-7-28", "07/28/2026", "2026-13-01", "1066-10-14"]) {
+      expect(() => store.log({ ...base, date }), date).toThrow(/isn't a date/);
+    }
+    expect(() => store.log({ ...base, date: "" })).toThrow(/date is required/);
+  });
+});

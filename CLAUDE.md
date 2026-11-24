@@ -1384,7 +1384,11 @@ each other, when they're in the office, and how they log billable time.
   bookkeeping and payroll both eventually need this data outside the
   browser, and re-typing it from the on-screen list isn't a reasonable
   ask. Same client-side, no-new-route shape as the Audit Log panel's
-  export, sharing its `downloadCsv()` helper.
+  export, sharing its `downloadCsv()` helper. An entry becomes a line
+  on an itemised bill, so `BillingHoursStore.log()` holds every path to
+  the limits the CSV import always applied: a real `YYYY-MM-DD` day and
+  no more than 24 hours. Before, the panel and API took a date of
+  "nope" and 1e308 hours — an Infinity-dollar invoice line.
 - `server.ts` wires these as `GET /api/staff`; `GET|POST /api/messages/
   conversations`, `POST /api/messages/conversations/direct`,
   `POST /api/messages/conversations/group`, `GET|POST /api/messages/
@@ -2636,8 +2640,12 @@ Hardening that applies to every route, independent of any one panel.
   are split before decoding, so an encoded `/` stays inside one id, and a
   malformed escape is kept as written rather than failing. A matter
   stored percent-encoded before the fix is still reachable under that
-  id. Found in a review pass; `test/path-segments-server.test.ts` pins
+  id. Found in a review pass; `test/request-parsing-server.test.ts` pins
   it.
+- **A JSON body must be an object.** Every route reads named fields off
+  it, so `null` came back as "Cannot read properties of null" and `[]`
+  was read as an empty record (an untitled matter). `readJsonBody()`
+  now refuses anything but an object with a plain 400.
 - **A cookie Docket didn't set can't lock anyone out.** Cookie values
   were decoded strictly, so a stray `promo=50%off` from another app on
   the same domain made every request, the dashboard page included, a 400

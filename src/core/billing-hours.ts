@@ -18,6 +18,16 @@ export interface BillingHoursEntry {
   loggedAt: string;
 }
 
+/** A real calendar day written YYYY-MM-DD: "2026-02-30" and "2026-7-28" aren't. */
+function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (y < 1900 || y > 2200 || mo < 1 || mo > 12 || d < 1) return false;
+  return d <= new Date(Date.UTC(y, mo, 0)).getUTCDate();
+}
+
 export class BillingHoursStore {
   #byId = new Map<string, BillingHoursEntry>();
   #nextId = 1;
@@ -25,6 +35,17 @@ export class BillingHoursStore {
   log(params: { matterId: string; actorId: string; date: string; hours: number; description: string }): BillingHoursEntry {
     if (!Number.isFinite(params.hours) || params.hours <= 0) {
       throw new Error("hours must be a positive number");
+    }
+    // An entry is one person's time on one day, and it becomes a line on an
+    // itemised bill — the same limits the CSV import applies. Without them
+    // the panel accepted 1e308 hours (an Infinity-dollar invoice line) and a
+    // date of "nope", printed as the day the work was done.
+    if (params.hours > 24) {
+      throw new Error(`${params.hours} hours in one entry is more than a day — log each day separately`);
+    }
+    if (!params.date) throw new Error("date is required — the day the work was done");
+    if (!isCalendarDate(params.date)) {
+      throw new Error(`'${params.date}' isn't a date — use YYYY-MM-DD, e.g. 2026-07-28`);
     }
     if (!params.description.trim()) {
       throw new Error("description is required");

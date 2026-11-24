@@ -244,11 +244,19 @@ async function readBodyBuffer(req: IncomingMessage): Promise<Buffer> {
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const raw = await readBodyBuffer(req);
   if (raw.length === 0) return {};
+  let parsed: unknown;
   try {
-    return JSON.parse(raw.toString("utf8"));
+    parsed = JSON.parse(raw.toString("utf8"));
   } catch {
     throw new Error("invalid JSON body");
   }
+  // Every route reads named fields off the body. `null` used to reach them
+  // and come back as "Cannot read properties of null", and `[]` or `"x"`
+  // was quietly read as an empty record (an untitled matter, say).
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("the request body must be a JSON object");
+  }
+  return parsed as Record<string, unknown>;
 }
 
 /** Twilio posts webhook bodies as `application/x-www-form-urlencoded`, not JSON. */

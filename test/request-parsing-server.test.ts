@@ -17,7 +17,7 @@ import { DocumentStore } from "../src/core/document-store.js";
  * "Ruiz%202026" by every route taking its id from the path — and the Cases
  * panel, encoding that stored id again, opened an empty matter.
  */
-describe("ids in the URL path", () => {
+describe("reading a request: ids in the path, cookies, bodies", () => {
   let server: Server | undefined;
   afterEach(async () => {
     if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
@@ -75,6 +75,19 @@ describe("ids in the URL path", () => {
     const res = await fetch(`${base}/api/cases/100%25off%E0`, { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     expect((await res.json()).documents).toEqual([]);
+  });
+
+  it("refuses a JSON body that isn't an object, rather than reading fields off null", async () => {
+    const { base, cookie } = await start();
+    for (const body of ["null", "[]", '"x"', "7"]) {
+      const res = await fetch(`${base}/api/documents/matters/m1`, {
+        method: "POST",
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
+        body,
+      });
+      expect(res.status, body).toBe(400);
+      expect((await res.json()).error, body).toBe("the request body must be a JSON object");
+    }
   });
 
   it("isn't knocked over by someone else's cookie with a raw % in it", async () => {
