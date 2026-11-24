@@ -26,11 +26,6 @@ import type {
  * Every call here is audited. A trust ledger's value is evidentiary, so
  * "who recorded this, and when" is part of the record, not metadata.
  */
-const OUTBOUND_TYPES: ReadonlySet<TrustEntryType> = new Set<TrustEntryType>([
-  "disbursement",
-  "earned_fee_transfer",
-  "refund",
-]);
 
 function requireLegalStaff(actor: Actor): void {
   if (actor.role !== "paralegal" && actor.role !== "attorney") {
@@ -75,7 +70,12 @@ export class TrustService {
   record(actor: Actor, matterId: string, input: RecordTrustEntryInput): TrustEntry {
     requireLegalStaff(actor);
     this.#accessControl.authorize({ actor, matterId, category: "billing_internal" });
-    if (OUTBOUND_TYPES.has(input.type) && actor.role !== "attorney") {
+    // Fail closed: anything but an incoming deposit is attorney-only. This
+    // used to name the three outbound types instead, so any other string
+    // ("Disbursement", "teleport", "reversal") passed as a paralegal and was
+    // recorded as money leaving the account. The ledger now refuses unknown
+    // types too; this check doesn't rely on that.
+    if (input.type !== "deposit" && actor.role !== "attorney") {
       throw new AccessDeniedError(
         `moving client funds out of trust ('${input.type}') is attorney-only — recording an incoming deposit is not`,
       );

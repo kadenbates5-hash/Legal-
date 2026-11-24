@@ -73,6 +73,7 @@ export interface InvoiceLineItem {
  * `review-ui/invoicing-service.ts`.
  */
 export type PaymentMethod = "card" | "ach" | "check" | "cash" | "trust_application" | "other";
+const PAYMENT_METHODS: readonly string[] = ["card", "ach", "check", "cash", "trust_application", "other"];
 
 export interface Payment {
   readonly id: string;
@@ -286,6 +287,11 @@ export class InvoiceStore {
     if (invoice.status === "draft") throw new InvoicingError("send the invoice before recording payment against it");
     if (invoice.status === "void") throw new InvoicingError("cannot pay a voided invoice");
     assertPositiveCents(params.amountCents, "payment amount");
+    // Printed on the client's copy as how they paid; an unknown one printed
+    // as nothing at all.
+    if (!PAYMENT_METHODS.includes(params.method)) {
+      throw new InvoicingError(`payment method must be card, ach, check, cash or other (got '${String(params.method)}')`);
+    }
 
     const { balanceCents } = this.totals(invoice.id);
     if (params.amountCents > balanceCents) {

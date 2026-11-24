@@ -29,11 +29,22 @@
  * retainer handling, interest, or unclaimed funds.
  */
 export class TrustAccountingError extends Error {
-  constructor(message: string) {
+  /**
+   * "invalid" is a request that could never be recorded (an unknown entry
+   * type, a fractional cent); "conflict" is one the ledger's current state
+   * refuses (an overdraw, a second reversal). The server maps them to 400
+   * and 409.
+   */
+  readonly kind: "invalid" | "conflict";
+  constructor(message: string, kind: "invalid" | "conflict" = "conflict") {
     super(message);
     this.name = "TrustAccountingError";
+    this.kind = kind;
   }
 }
+
+/** The entry types `record()` accepts. A reversal is only ever made by `reverse()`. */
+const RECORDABLE_TYPES: ReadonlySet<string> = new Set(["deposit", "disbursement", "earned_fee_transfer", "refund"]);
 
 /**
  * Direction is carried by the type, never by the sign of the amount —
@@ -113,10 +124,20 @@ export class TrustLedger {
    */
   record(params: RecordEntryParams): TrustEntry {
     const matterId = params.matterId.trim();
-    if (!matterId) throw new TrustAccountingError("matterId is required");
+    if (!matterId) throw new TrustAccountingError("matterId is required", "invalid");
+    // Only a deposit adds to a balance, so before this check any other
+    // string — "teleport", "Disbursement", "reversal" — was recorded as
+    // money leaving the account, and none of them was on the list the
+    // service makes attorney-only. A paralegal could move client funds out.
+    if (!RECORDABLE_TYPES.has(params.type)) {
+      throw new TrustAccountingError(
+        `a trust entry must be a deposit, disbursement, earned_fee_transfer or refund (got '${String(params.type)}') — a reversal is made from the entry it corrects`,
+        "invalid",
+      );
+    }
     this.#assertValidAmount(params.amountCents);
     if (!params.description.trim()) {
-      throw new TrustAccountingError("every trust entry needs a description — an unexplained movement of client funds is an audit finding");
+      throw new TrustAccountingError("every trust entry needs a description — an unexplained movement of client funds is an audit finding", "invalid");
     }
     return this.#append({
       matterId,
@@ -149,7 +170,7 @@ export class TrustLedger {
     if (this.#entries.some((e) => e.reversalOf === entryId)) {
       throw new TrustAccountingError(`entry '${entryId}' has already been reversed`);
     }
-    if (!reason.trim()) throw new TrustAccountingError("a reversal needs a reason");
+    if (!reason.trim()) throw new TrustAccountingError("a reversal needs a reason", "invalid");
 
     // Exactly undo the original's effect on the balance.
     const signedDelta = INCREASES_BALANCE.has(original.type) ? -original.amountCents : original.amountCents;
@@ -197,8 +218,8 @@ export class TrustLedger {
    * outside this system; the caller supplies it.
    */
   reconcile(bankBalanceCents: number): ReconciliationResult {
-    if (!Number.isInteger(bankBalanceCents)) {
-      throw new TrustAccountingError("bank balance must be an integer number of cents");
+    if (!Number.isSafeInteger(bankBalanceCents)) {
+      throw new TrustAccountingError("bank balance must be an integer number of cents", "invalid");
     }
     const ledgerTotalCents = this.totalBalanceCents();
     return {
@@ -215,10 +236,15 @@ export class TrustLedger {
 
   #assertValidAmount(amountCents: number): void {
     if (!Number.isInteger(amountCents)) {
-      throw new TrustAccountingError("amount must be an integer number of cents — fractional cents don't reconcile");
+      throw new TrustAccountingError("amount must be an integer number of cents — fractional cents don't reconcile", "invalid");
     }
     if (amountCents <= 0) {
-      throw new TrustAccountingError("amount must be positive; the entry type carries the direction");
+      throw new TrustAccountingError("amount must be positive; the entry type carries the direction", "invalid");
+    }
+    // Past 2^53 an integer stops being exact, and a ledger that can't add
+    // to the cent can't reconcile.
+    if (!Number.isSafeInteger(amountCents)) {
+      throw new TrustAccountingError("amount must be one the ledger can hold exactly", "invalid");
     }
   }
 

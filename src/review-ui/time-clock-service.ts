@@ -192,6 +192,15 @@ export class TimeClockService {
         "invalid",
       );
     }
+    // Payroll takes one day's hours per entry; a shift longer than that was
+    // almost certainly left open, and is said so here rather than as a
+    // payroll error about thousandths of an hour.
+    if (hoursMilli > 24_000) {
+      throw new TimeClockError(
+        "this shift runs longer than 24 hours — it was probably left open; correct the clock-out before posting it to payroll",
+        "invalid",
+      );
+    }
     const entry = this.#payroll.recordHours({
       actorId: shift.actorId,
       date: this.#clock.listShifts(shift.actorId, this.#defaultTimeZone).find((s) => s.id === shiftId)!.localDate,

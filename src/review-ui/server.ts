@@ -355,7 +355,8 @@ function errorStatus(err: unknown): number {
     return { invalid: 400, not_found: 404, conflict: 409 }[err.kind];
   }
   if (err instanceof TrustAccountingError) {
-    return err.message.startsWith("no trust entry") ? 404 : 409;
+    if (err.message.startsWith("no trust entry")) return 404;
+    return err.kind === "invalid" ? 400 : 409;
   }
   if (err instanceof ReviewGateError) return 409;
   if (err instanceof Error && err.message.startsWith("no work product")) return 404;

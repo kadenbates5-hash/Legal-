@@ -92,6 +92,9 @@ export class PayrollStore {
     if (!params.actorId.trim()) throw new PayrollError("actorId is required");
     if (!Number.isInteger(params.hourlyCents)) throw new PayrollError("hourly rate must be an integer number of cents");
     if (params.hourlyCents <= 0) throw new PayrollError("hourly rate must be positive");
+    // Exact arithmetic, as on the trust ledger: a rate past 2^53 cents
+    // can't multiply out to a paycheck that adds up.
+    if (!Number.isSafeInteger(params.hourlyCents)) throw new PayrollError("hourly rate must be an amount payroll can hold exactly");
     assertIsoDate(params.effectiveFrom, "effectiveFrom");
 
     const rate: PayRate = Object.freeze({
@@ -130,6 +133,11 @@ export class PayrollStore {
     assertIsoDate(params.date, "date");
     if (!Number.isInteger(params.hoursMilli) || params.hoursMilli <= 0) {
       throw new PayrollError("hours must be a positive integer number of thousandths of an hour");
+    }
+    // One entry is one person's work on one day. A billion hours was
+    // stored as sent and priced into gross pay.
+    if (params.hoursMilli > 24_000) {
+      throw new PayrollError(`${params.hoursMilli / 1000} hours on one day is more than a day — record each day separately`);
     }
     if (!params.description.trim()) throw new PayrollError("worked hours need a description");
 

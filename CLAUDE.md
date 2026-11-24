@@ -2015,6 +2015,19 @@ treatment: enforced in code, not asked of a human.
   Reconciliation is attorney-only too — it deliberately exposes every
   matter's balance at once. Every call is audited; a trust ledger's value
   is evidentiary.
+  - **That gate used to be bypassable.** Only a deposit adds to a
+    balance, so the ledger recorded *any* other type string as money
+    leaving — but the attorney-only check named just the three outbound
+    types. A paralegal sending `"Disbursement"`, `"teleport"` or
+    `"reversal"` moved client funds out with no attorney (reproduced: $600
+    of a $1,000 retainer). Now `TrustLedger.record()` accepts only
+    deposit/disbursement/earned_fee_transfer/refund (a reversal only via
+    `reverse()`), amounts must be safe integers, and the service fails
+    closed — **anything but a deposit is attorney-only**, without relying
+    on the ledger's list. `TrustAccountingError` gained a `kind`, so a
+    malformed entry is a 400 and only a ledger conflict (an overdraw) is a
+    409. Pinned in `test/trust-server.test.ts` and
+    `test/money-integrity.test.ts`.
   `server.ts` wires `GET|POST /api/trust/matters/:matterId`,
   `POST /api/trust/matters/:matterId/:entryId/reverse`, and
   `POST /api/trust/reconcile`. An overdraw returns **409**, not 400 — it
@@ -2055,7 +2068,9 @@ payroll to trust.
   payments exist (that's a refund, not a disappearance), payment is
   refused before sending and after voiding, and **overpayment is
   refused** rather than absorbed into a negative balance, since it's
-  money the firm would then owe back.
+  money the firm would then owe back. A payment's method must be one the
+  client's copy can name (`card`/`ach`/`check`/`cash`/`other`, plus the
+  internal `trust_application`).
 - `integrations/payment-processor.ts` — vendor-agnostic
   `PaymentProcessor`, same pattern as `SpeechToText`/`ClaudeClient`.
   **The compliance point driving the design:** most general-purpose
@@ -2091,7 +2106,11 @@ payroll to trust.
   period already paid. A shift with no rate on record contributes hours
   but no money and is reported in `datesMissingRate` with
   `incomplete: true`; silently pricing it at zero would produce a
-  confidently wrong paycheck. Access is about privacy between
+  confidently wrong paycheck. An entry is one person's hours on one day
+  (at most 24), and a rate must be a safe integer of cents — a billion
+  hours and a 1e17-cent rate used to be stored and priced into gross pay;
+  a shift over 24 hours is refused at "Post to payroll" as probably left
+  open. Access is about privacy between
   colleagues rather than matters: setting a rate is attorney-only, you
   can see your own hours and rate, and only an attorney can see anyone
   else's or run the firm-wide summary. The period summary's
@@ -2315,7 +2334,9 @@ anyone's, and `whoIsOnTheClock` is attorney-only. **Corrections are
 attorney-only even for your own shifts** — a timesheet you can quietly
 rewrite isn't a record, the same reasoning that makes the audit log and
 trust ledger append-only — and they keep the previous values, who
-changed them and why. `postToPayroll` creates the payroll entry *first*
+changed them and why (a correction must move at least one punch — one
+that changed nothing used to add a history line reading as if something
+had). `postToPayroll` creates the payroll entry *first*
 and only then marks the shift posted, so a failure can't mark hours paid
 that aren't; once posted the shift locks against correction, so the two
 records can't disagree.

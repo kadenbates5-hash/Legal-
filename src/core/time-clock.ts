@@ -193,6 +193,11 @@ export class TimeClock {
     const shift = this.#shifts.find((s) => s.id === shiftId);
     if (!shift) throw new TimeClockError(`no shift '${shiftId}'`, "not_found");
     if (!params.reason.trim()) throw new TimeClockError("correcting a punch needs a reason", "invalid");
+    // A correction that moves neither punch only adds a line to the
+    // shift's history that reads as if something changed.
+    if (params.clockInAt === undefined && params.clockOutAt === undefined) {
+      throw new TimeClockError("give a corrected clock-in or clock-out time", "invalid");
+    }
     if (shift.postedPayrollEntryId) {
       throw new TimeClockError(
         `shift '${shiftId}' has already been posted to payroll — correct the payroll entry instead so the two can't disagree`,

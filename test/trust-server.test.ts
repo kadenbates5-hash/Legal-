@@ -75,6 +75,29 @@ describe("trust HTTP API", () => {
     await new Promise<void>((resolve) => bare.close(() => resolve()));
   });
 
+  it("never lets a paralegal record anything but a deposit, whatever the type is called", async () => {
+    // Only a deposit adds to a balance; every other type was recorded as
+    // money leaving, but only three were on the attorney-only list.
+    expect((await post(attorneyCookie, "/api/trust/matters/m-1", { type: "deposit", amountCents: 100000, description: "Retainer" })).status).toBe(200);
+    for (const type of ["disbursement", "Disbursement", "teleport", "reversal", "withdrawal"]) {
+      const res = await post(paralegalCookie, "/api/trust/matters/m-1", { type, amountCents: 20000, description: "moved" });
+      expect(res.status, type).toBe(403);
+    }
+    expect(ledger.balanceForMatter("m-1")).toBe(100000);
+  });
+
+  it("refuses an unknown entry type or an inexact amount as a bad request, even from an attorney", async () => {
+    for (const body of [
+      { type: "teleport", amountCents: 100, description: "x" },
+      { type: "reversal", amountCents: 100, description: "x" },
+      { type: "deposit", amountCents: 1e17, description: "x" },
+      { type: "deposit", amountCents: 1.5, description: "x" },
+    ]) {
+      expect((await post(attorneyCookie, "/api/trust/matters/m-1", body)).status, JSON.stringify(body)).toBe(400);
+    }
+    expect(ledger.listForMatter("m-1")).toHaveLength(0);
+  });
+
   it("denies receptionists entirely", async () => {
     expect((await fetch(`${baseUrl}/api/trust/matters/m-1`, withCookie(receptionCookie))).status).toBe(403);
   });
