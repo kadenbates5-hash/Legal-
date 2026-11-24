@@ -8,6 +8,8 @@ import { WorkProductStore } from "../src/core/work-product-store.js";
 import { AccessControl } from "../src/core/access-control.js";
 import { AuditLog } from "../src/core/audit.js";
 import { AuthService } from "../src/core/auth.js";
+import { MatterStore } from "../src/core/matters.js";
+import { ConflictChecker } from "../src/core/conflicts.js";
 import { criminalLawModule } from "../src/modules/criminal-law/index.js";
 import { AccessDeniedError, type Actor } from "../src/core/types.js";
 
@@ -33,33 +35,61 @@ describe("IntakeDemoSessions (unit)", () => {
   it("progresses a real conversation through the same router/escalation logic as any other channel", () => {
     const sessions = makeSessions();
     const { sessionId } = sessions.start(receptionist);
-    const r1 = sessions.handleMessage(sessionId, "I'm currently in jail and need help");
+    const r1 = sessions.handleMessage(receptionist, sessionId, "I'm currently in jail and need help");
     expect(r1.reply).toMatch(/connecting you/i);
     expect(r1.done).toBe(true);
   });
 
   it("throws a distinguishable error for an unknown session id", () => {
     const sessions = makeSessions();
-    expect(() => sessions.handleMessage("nope", "hi")).toThrow(/no intake demo session/);
+    expect(() => sessions.handleMessage(receptionist, "nope", "hi")).toThrow(/no intake demo session/);
   });
 
   it("prunes a session from memory once the conversation is done", () => {
     const sessions = makeSessions();
     const { sessionId } = sessions.start(receptionist);
-    sessions.handleMessage(sessionId, "I'm currently in jail and need help"); // ends immediately (emergency)
-    expect(() => sessions.handleMessage(sessionId, "hello?")).toThrow(/no intake demo session/);
+    sessions.handleMessage(receptionist, sessionId, "I'm currently in jail and need help"); // ends immediately (emergency)
+    expect(() => sessions.handleMessage(receptionist, sessionId, "hello?")).toThrow(/no intake demo session/);
   });
 
-  it("enforces real access control: an attorney can complete a full demo, a paralegal without an assignment cannot", () => {
+  it("is for the roles that run intake: an attorney can, anyone else is refused before the call starts", () => {
     const sessions = makeSessions();
 
     const attorneyRun = sessions.start(attorney);
-    expect(() => sessions.handleMessage(attorneyRun.sessionId, "I'm a new client")).not.toThrow();
+    expect(() => sessions.handleMessage(attorney, attorneyRun.sessionId, "I'm a new client")).not.toThrow();
 
-    const paralegalRun = sessions.start(paralegal);
-    sessions.handleMessage(paralegalRun.sessionId, "I'm a new client");
-    sessions.handleMessage(paralegalRun.sessionId, "sure, that's fine");
-    expect(() => sessions.handleMessage(paralegalRun.sessionId, "no conflicting parties")).toThrow(AccessDeniedError);
+    // Refused at the start — not three turns in, after the conflicts
+    // screen has already answered whether the firm knows a name.
+    for (const actor of [paralegal, { id: "s1", role: "staff" }, { id: "c1", role: "client" }] as Actor[]) {
+      expect(() => sessions.start(actor), actor.role).toThrow(AccessDeniedError);
+    }
+  });
+
+  it("won't screen names for a client against the firm's matters", () => {
+    const auditLog = new AuditLog();
+    const matters = new MatterStore();
+    matters.upsert("m1", { title: "People v. Quill", status: "open", parties: [{ name: "Quill Hartley", role: "client", note: undefined, email: undefined, phone: undefined }] });
+    const sessions = new IntakeDemoSessions({
+      accessControl: new AccessControl(auditLog),
+      auditLog,
+      module: criminalLawModule,
+      conflictChecker: new ConflictChecker(matters),
+    });
+    expect(() => sessions.start({ id: "c1", role: "client" })).toThrow(AccessDeniedError);
+    // The same three lines from a receptionist reach the screen, as intended.
+    const { sessionId } = sessions.start(receptionist);
+    sessions.handleMessage(receptionist, sessionId, "I'm a new client, I need a lawyer");
+    sessions.handleMessage(receptionist, sessionId, "yes");
+    expect(sessions.handleMessage(receptionist, sessionId, "Quill Hartley").trace.label).toMatch(/conflict/i);
+  });
+
+  it("lets only the person who started a session continue it", () => {
+    const sessions = makeSessions();
+    const { sessionId } = sessions.start(receptionist);
+    const otherReceptionist: Actor = { id: "r2", role: "receptionist" };
+    expect(() => sessions.handleMessage(otherReceptionist, sessionId, "I'm a new client")).toThrow(/no intake demo session/);
+    expect(() => sessions.handleMessage(attorney, sessionId, "I'm a new client")).toThrow(/no intake demo session/);
+    expect(sessions.handleMessage(receptionist, sessionId, "I'm a new client").done).toBe(false);
   });
 });
 
@@ -87,6 +117,7 @@ describe("intake demo HTTP API", () => {
   beforeEach(async () => {
     auth = new AuthService();
     auth.createUser({ username: "reception1", password: "correct-horse", role: "receptionist", actorId: "r1" });
+    auth.createUser({ username: "client1", password: "correct-horse", role: "client", actorId: "c1" });
     const auditLog = new AuditLog();
     const accessControl = new AccessControl(auditLog);
     const intake = new IntakeDemoSessions({ accessControl, auditLog, module: criminalLawModule });
@@ -121,6 +152,12 @@ describe("intake demo HTTP API", () => {
   it("rejects starting a demo with no session", async () => {
     const res = await fetch(`${baseUrl}/api/intake/start`, { method: "POST", body: "{}" });
     expect(res.status).toBe(401);
+  });
+
+  it("refuses a client account before any call starts (403, not a sign-out)", async () => {
+    const cookie = await loginCookie("client1", "correct-horse");
+    const res = await fetch(`${baseUrl}/api/intake/start`, { method: "POST", headers: { Cookie: cookie }, body: "{}" });
+    expect(res.status).toBe(403);
   });
 
   it("starts a session and exchanges turns through to an emergency escalation", async () => {

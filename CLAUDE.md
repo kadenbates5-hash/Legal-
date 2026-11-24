@@ -3462,9 +3462,20 @@ nav item is hidden except **My Matters** and **Security** — see below.
   through the real code path (same escalation/access-control/scripting as
   a real caller), not a mock — the only thing "demo" about it is that
   sessions live only in memory and are pruned the moment a conversation
-  ends, never touching `system-state.ts` or a real matter. A logged-in
-  actor whose role wouldn't be allowed to run intake (e.g. `paralegal`)
-  gets the same `AccessDeniedError` a misconfigured real session would.
+  ends, never touching `system-state.ts` or a real matter.
+  - **Only receptionists and attorneys can start one**, refused up front
+    (`INTAKE_ROLES`), and only the person who started a session can
+    continue it. It used to be open to every signed-in account, with a
+    role check only once the call reached the intake questions — *after*
+    the script's conflicts screen had run against the firm's real
+    matters. So a client account could type a party's name at the
+    conflict question and learn from the reply ("There may be a conflict
+    of interest here") whether the firm acts for or against that person,
+    unaudited (reproduced with the demo seed's "Jordan Smith"). The
+    public booking form never answers that question, and the
+    Conflicts panel's check is staff-only and audited. The tab is hidden
+    for other roles. Found by sweeping every route as each role;
+    `test/intake-demo.test.ts` pins it.
   - **Training mode.** The panel is a training tool, not just a chat
     window. `ReceptionistChatSession.handleMessage()` now returns a
     `TurnTrace` on every turn (`{ label, triggers, state }` — e.g.

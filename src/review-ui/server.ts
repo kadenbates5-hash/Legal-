@@ -1919,7 +1919,7 @@ async function handleIntakeRequest(
   if (segments.length === 2 && segments[1] === "message" && req.method === "POST") {
     const sessionId = segments[0]!;
     const body = await readJsonBody(req);
-    const turn = await intake.respond(sessionId, String(body["text"] ?? ""));
+    const turn = await intake.respond(actor, sessionId, String(body["text"] ?? ""));
     sendJson(res, 200, turn);
     return;
   }

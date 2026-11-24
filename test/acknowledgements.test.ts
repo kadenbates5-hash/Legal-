@@ -137,9 +137,9 @@ function sessionsWith(source?: AcknowledgementSource) {
 
 /** Caller type, consent, conflict check — then the first intake question. */
 async function toFirstIntakeQuestion(sessions: IntakeDemoSessions, sessionId: string) {
-  await sessions.respond(sessionId, "Hi, I'm a new client, I haven't worked with you before.");
-  await sessions.respond(sessionId, "Yes, that's fine with me.");
-  return sessions.respond(sessionId, "Taylor Brooks is the other person involved.");
+  await sessions.respond(receptionist, sessionId, "Hi, I'm a new client, I haven't worked with you before.");
+  await sessions.respond(receptionist, sessionId, "Yes, that's fine with me.");
+  return sessions.respond(receptionist, sessionId, "Taylor Brooks is the other person involved.");
 }
 
 describe("natural phrasing in the intake demo", () => {
@@ -163,8 +163,8 @@ describe("natural phrasing in the intake demo", () => {
     await toFirstIntakeQuestion(plain, a.sessionId);
     await toFirstIntakeQuestion(natural, b.sessionId);
 
-    const scripted = await plain.respond(a.sessionId, "No, I'm not currently in custody.");
-    const phrased = await natural.respond(b.sessionId, "No, I'm not currently in custody.");
+    const scripted = await plain.respond(receptionist, a.sessionId, "No, I'm not currently in custody.");
+    const phrased = await natural.respond(receptionist, b.sessionId, "No, I'm not currently in custody.");
 
     expect(phrased.acknowledgement).toBe("Thank you for telling me.");
     expect(phrased.reply).toBe(`Thank you for telling me. ${scripted.reply}`);
@@ -181,8 +181,8 @@ describe("natural phrasing in the intake demo", () => {
     await toFirstIntakeQuestion(plain, a.sessionId);
     await toFirstIntakeQuestion(natural, b.sessionId);
 
-    const scripted = await plain.respond(a.sessionId, "Yes, he's in custody right now.");
-    const phrased = await natural.respond(b.sessionId, "Yes, he's in custody right now.");
+    const scripted = await plain.respond(receptionist, a.sessionId, "Yes, he's in custody right now.");
+    const phrased = await natural.respond(receptionist, b.sessionId, "Yes, he's in custody right now.");
 
     expect(phrased.done).toBe(true);
     expect(phrased.trace.triggers).toContain("in_custody");
@@ -195,7 +195,7 @@ describe("natural phrasing in the intake demo", () => {
     const sessions = sessionsWith(recordingSource(undefined));
     const { sessionId } = sessions.start(receptionist, { naturalPhrasing: true });
     await toFirstIntakeQuestion(sessions, sessionId);
-    const turn = await sessions.respond(sessionId, "No, I'm not currently in custody.");
+    const turn = await sessions.respond(receptionist, sessionId, "No, I'm not currently in custody.");
     expect(turn.acknowledgement).toBeUndefined();
     expect(turn.reply).toMatch(/court/i);
   });
@@ -205,7 +205,7 @@ describe("natural phrasing in the intake demo", () => {
     const sessions = sessionsWith(source);
     const { sessionId } = sessions.start(receptionist);
     await toFirstIntakeQuestion(sessions, sessionId);
-    const turn = await sessions.respond(sessionId, "No, I'm not currently in custody.");
+    const turn = await sessions.respond(receptionist, sessionId, "No, I'm not currently in custody.");
     expect(turn.acknowledgement).toBeUndefined();
     expect(source.calls).toHaveLength(0);
   });
@@ -215,7 +215,7 @@ describe("natural phrasing in the intake demo", () => {
     expect(sessions.naturalPhrasingAvailable).toBe(false);
     const { sessionId } = sessions.start(receptionist, { naturalPhrasing: true });
     await toFirstIntakeQuestion(sessions, sessionId);
-    const turn = await sessions.respond(sessionId, "No, I'm not currently in custody.");
+    const turn = await sessions.respond(receptionist, sessionId, "No, I'm not currently in custody.");
     expect(turn.acknowledgement).toBeUndefined();
   });
 });

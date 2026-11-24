@@ -459,6 +459,12 @@ async function loadWhoami() {
       }
       return;
     }
+    // Live Intake trains the roles that run intake. The server refuses
+    // anyone else before a call starts (its conflicts screen would answer
+    // "does the firm know this name?"), so don't offer a door that 403s.
+    if (me.role !== "receptionist" && me.role !== "attorney") {
+      document.querySelector('nav.nav button[data-panel="intake"]').hidden = true;
+    }
     if (me.role === "attorney") {
       document.getElementById("navAccounts").hidden = false;
       document.getElementById("navAudit").hidden = false;
