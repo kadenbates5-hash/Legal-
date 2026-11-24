@@ -43,6 +43,30 @@ describe("reading a request: ids in the path, cookies, bodies", () => {
     return { base, cookie, documentStore };
   }
 
+  it("takes a large body only from someone signed in", async () => {
+    const { base, cookie, documentStore } = await start();
+    const big = "A".repeat(2 * 1024 * 1024);
+    // Routes that need no sign-in used to buffer ~34 MB for anyone.
+    // (The signer and webhook routes 404 here before reading anything: this
+    // server has neither configured. Their limit is the same one.)
+    for (const path of ["/api/login", "/api/forgot-password", "/api/reset-password/confirm", "/api/login/passkey/begin"]) {
+      const res = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: "atty", password: big }),
+      });
+      expect(res.status, path).toBe(413);
+    }
+    // The same size from a signed-in attorney is an ordinary upload.
+    const upload = await fetch(`${base}/api/documents/matters/m1`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName: "scan.pdf", contentType: "application/pdf", content: Buffer.from(big).toString("base64") }),
+    });
+    expect(upload.status).toBe(200);
+    expect(documentStore.listByMatter("m1")).toHaveLength(1);
+  });
+
   it("stores a matter id with a space as typed, and the Cases panel can open it", async () => {
     const { base, cookie, documentStore } = await start();
     const matterId = "Ruiz 2026 / appeal ñ";

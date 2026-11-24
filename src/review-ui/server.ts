@@ -200,6 +200,18 @@ export function maxRequestBodyBytesFor(maxUploadBytes: number): number {
 const DEFAULT_MAX_REQUEST_BODY_BYTES = maxRequestBodyBytesFor(DEFAULT_MAX_UPLOAD_BYTES);
 
 /**
+ * The ceiling until a request has shown a session or the system key. The
+ * full ceiling above exists for one thing — a signed-in person uploading
+ * a document — but it used to apply from the first byte of every request,
+ * so the routes that need no sign-in (login, password reset, the public
+ * booking form, a signer's link, the Stripe and Twilio webhooks) each
+ * buffered up to ~34 MB for anyone who asked, a few dozen requests from
+ * running the process out of memory. None of them takes more than a few
+ * kilobytes; 1 MB leaves room for the largest webhook payload.
+ */
+const UNAUTHENTICATED_BODY_LIMIT_BYTES = 1024 * 1024;
+
+/**
  * Set once per request by `handleRequest`/`handleVoiceRequest`, so the
  * body readers can enforce the configured cap without threading it
  * through all ~20 route handlers. A `WeakMap` keeps this per-request and
@@ -679,9 +691,9 @@ async function handleRequest(
     mfaRequiredRoles,
   } = options;
   // Bound every buffered body for this request before any route runs — see
-  // `readBodyBuffer`. Applies to the unauthenticated routes (login, Twilio
-  // webhooks) too, which is exactly where it matters most.
-  requestBodyLimits.set(req, maxRequestBodyBytes);
+  // `readBodyBuffer`. Small until the caller is identified (see
+  // UNAUTHENTICATED_BODY_LIMIT_BYTES); raised once `resolveActor` succeeds.
+  requestBodyLimits.set(req, Math.min(maxRequestBodyBytes, UNAUTHENTICATED_BODY_LIMIT_BYTES));
   const url = new URL(req.url ?? "/", "http://localhost");
 
   if (url.pathname.startsWith("/api/voice/")) {
@@ -1273,6 +1285,8 @@ async function handleRequest(
 
   try {
     const actor = resolveActor(req, auth);
+    // Signed in (or the system key): a document upload may now arrive.
+    requestBodyLimits.set(req, maxRequestBodyBytes);
 
     if (mfaRequiredRoles?.has(actor.role as UserRole)) {
       const user = auth.userForToken(parseCookies(req)[SESSION_COOKIE_NAME]);

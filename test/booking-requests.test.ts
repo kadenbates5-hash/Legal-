@@ -271,3 +271,17 @@ describe("booking over HTTP", () => {
     expect((await fetch(`${baseUrl}/api/booking-requests`)).status).toBe(401);
   });
 });
+
+describe("what the booking form says back", () => {
+  const valid = { name: "Pat Lee", email: "pat@example.com", matterType: "dui", preferredDate: "2026-11-30", preferredTime: "morning" };
+
+  it("names the box that's too long", () => {
+    expect(() => validateBookingSubmission({ ...valid, name: `Pat ${"x".repeat(200)}` }, NOW)).toThrow(/^Your name can be at most 100 characters\.$/);
+    expect(() => validateBookingSubmission({ ...valid, otherPartyName: "y".repeat(200) }, NOW)).toThrow(/other party's name can be at most 120/);
+  });
+
+  it("refuses a day that doesn't exist, even one that sorts inside the window", () => {
+    expect(() => validateBookingSubmission({ ...valid, preferredDate: "2026-11-31" }, NOW)).toThrow(/Please choose a day/);
+    expect(validateBookingSubmission(valid, NOW).preferredDate).toBe("2026-11-30");
+  });
+});

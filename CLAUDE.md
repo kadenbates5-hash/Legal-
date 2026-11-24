@@ -455,7 +455,11 @@ available.
   exactly what the receptionist's `pre_retention_factual_narrative`
   trigger stops, and a web form shouldn't undo that. Names are validated
   to look like names, so the other-party field can't carry a narrative,
-  a link or markup either.
+  a link or markup either. A day must be a real one ("2026-11-31" used
+  to pass, sorting inside the 60-day window), and a box that's too long
+  is named in the reply ("Your name can be at most 100 characters.") —
+  the form's own `maxlength` stops it first; the message is for anything
+  posting to the route directly.
 - **Conflicts are screened on arrival, and never disclosed.** The
   requester is screened as the would-be client and the other party as
   adverse, against every matter (Rule 1.10, same `ConflictChecker` as
@@ -1658,7 +1662,10 @@ to begin with; it must actually be a PDF (`contentType ===
   Nowak (as typed: U+0141 ukasz Nowak)"). A long value also no longer
   runs off the bottom of the page (room is checked per line), and names
   are capped at 200 characters where staff enter them and where the
-  signer types theirs.
+  signer types theirs. A signer's optional reason for declining used to
+  be stored whole, on the envelope and in the audit log (900 KB, in a
+  probe); it's kept to 2,000 characters, marked "(shortened)", and the
+  decline itself always goes through.
 
 What this doesn't do: let a client sign through the client portal (the
 signer is deliberately outside that surface entirely, reached only
@@ -2722,7 +2729,18 @@ Hardening that applies to every route, independent of any one panel.
   `test/mfa-server.test.ts` pins that each of those mistakes leaves the
   session working.
 - **Request-body ceiling** — see "PDF intake…" above for why the
-  per-file upload cap alone wasn't one.
+  per-file upload cap alone wasn't one. That ceiling (~34 MB, sized for a
+  document upload) used to apply from the first byte of *every* request,
+  so each route that needs no sign-in — login, passkey login, password
+  reset, the public booking form, a signer's link, the Stripe and Twilio
+  webhooks — buffered up to 34 MB for anyone who asked, a few dozen
+  concurrent requests from running the process out of memory. A request
+  is now held to 1 MB (`UNAUTHENTICATED_BODY_LIMIT_BYTES`) until
+  `resolveActor()` has seen a session or the system key, and only then
+  gets the full ceiling. None of those routes takes more than a few
+  kilobytes. `test/request-parsing-server.test.ts` pins both halves: a
+  2 MB anonymous body is a 413 before it's buffered, and the same size
+  from a signed-in attorney is an ordinary upload.
 - `serveStatic` compares against `PUBLIC_DIR + path.sep`, not a bare
   `startsWith`: the latter also accepts a sibling directory whose name
   merely begins with it, which `../public-x/secret` would reach.

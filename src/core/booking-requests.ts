@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { ConflictChecker } from "./conflicts.js";
+import { isCalendarDate } from "./calendar-date.js";
 
 /**
  * Self-service booking requests: what a prospective client submits from
@@ -90,10 +91,11 @@ export const BOOKING_MAX_DAYS_AHEAD = 60;
 /** Beyond this many undecided requests the form stops accepting more, rather than letting a flood bury real ones. */
 export const BOOKING_MAX_PENDING = 200;
 
-function clean(value: string | undefined, max: number): string | undefined {
+/** The form shows this message to the person filling it in, so it says which box. */
+function clean(value: string | undefined, max: number, label: string): string | undefined {
   const trimmed = (value ?? "").replace(/\s+/g, " ").trim();
   if (!trimmed) return undefined;
-  if (trimmed.length > max) throw new BookingRequestError(`must be at most ${max} characters`, "invalid");
+  if (trimmed.length > max) throw new BookingRequestError(`${label} can be at most ${max} characters.`, "invalid");
   return trimmed;
 }
 
@@ -106,23 +108,26 @@ export function validateBookingSubmission(
   input: BookingSubmission,
   now: Date = new Date(),
 ): Omit<BookingRequest, "id" | "createdAt" | "status" | "conflict" | "decidedBy" | "decidedAt" | "appointmentId" | "declineReason"> {
-  const name = clean(input.name, 100);
+  const name = clean(input.name, 100, "Your name");
   if (!name || !NAME_RE.test(name)) throw new BookingRequestError("Please enter your name.", "invalid");
 
-  const email = clean(input.email, 254);
+  const email = clean(input.email, 254, "The email address");
   if (email && !EMAIL_RE.test(email)) throw new BookingRequestError("That email address doesn't look right.", "invalid");
-  const phone = clean(input.phone, 20);
+  const phone = clean(input.phone, 20, "The phone number");
   if (phone && !PHONE_RE.test(phone)) throw new BookingRequestError("That phone number doesn't look right.", "invalid");
   if (!email && !phone) throw new BookingRequestError("Please leave an email address or a phone number so we can confirm.", "invalid");
 
   if (!(input.matterType in BOOKING_MATTER_TYPES)) throw new BookingRequestError("Please choose what this is about.", "invalid");
 
-  const otherPartyName = clean(input.otherPartyName, 120);
+  const otherPartyName = clean(input.otherPartyName, 120, "The other party's name");
   if (otherPartyName && !NAME_RE.test(otherPartyName)) {
     throw new BookingRequestError("Please enter only a name for the other party.", "invalid");
   }
 
-  if (!DATE_RE.test(input.preferredDate)) throw new BookingRequestError("Please choose a day.", "invalid");
+  // A pattern alone let "2026-02-30" through, as a day that sorts inside the window.
+  if (!DATE_RE.test(input.preferredDate) || !isCalendarDate(input.preferredDate)) {
+    throw new BookingRequestError("Please choose a day.", "invalid");
+  }
   const today = localDateString(now);
   const latest = localDateString(new Date(now.getFullYear(), now.getMonth(), now.getDate() + BOOKING_MAX_DAYS_AHEAD));
   if (input.preferredDate < today || input.preferredDate > latest) {

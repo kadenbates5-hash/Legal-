@@ -306,3 +306,25 @@ describe("names on a signature", () => {
     expect(asTyped("José O’Brien")).toBe("José O'Brien");
   });
 });
+
+describe("a signer declining", () => {
+  it("keeps a long reason to a sensible length instead of storing it whole, and still records the decline", async () => {
+    const { esignature, documents, auditLog } = makeEnv();
+    const doc = documents.upload({ matterId: "m1", fileName: "x.pdf", contentType: "application/pdf", content: PDF, uploadedBy: "a1" });
+    const { envelope, signingUrls } = await esignature.send(attorney, {
+      matterId: "m1",
+      title: "x",
+      sourceKind: "document",
+      sourceId: doc.id,
+      signers: [{ name: "Dana Cole", email: "dana@example.com" }],
+    });
+    esignature.decline(new URL(signingUrls[envelope.signers[0]!.id]!).searchParams.get("token")!, "r".repeat(900_000));
+    const declined = esignature.get(attorney, "m1", envelope.id);
+    expect(declined.status).toBe("declined");
+    const reason = declined.signers[0]!.declineReason!;
+    expect(reason.length).toBeLessThan(2100);
+    expect(reason.endsWith("(shortened)")).toBe(true);
+    const entry = auditLog.read("attorney").find((e) => e.action === "esignature_declined")!;
+    expect(entry.detail.length).toBeLessThan(2300);
+  });
+});

@@ -10,6 +10,9 @@ import { canStampPdf, documentHash, renderPlainTextPdf, stampCertificateOfComple
 /** A signer's name, as staff enter it and as the signer types it — long enough for any real name, short enough to fit the certificate. */
 const MAX_NAME_LENGTH = 200;
 
+/** How much of a signer's reason for declining is kept. */
+const MAX_DECLINE_REASON_LENGTH = 2000;
+
 /**
  * The paralegal/attorney-facing surface backing a "Signatures" panel —
  * getting an already-attorney-approved document actually signed, by
@@ -324,12 +327,18 @@ export class ESignatureService {
   decline(token: string, reason: string): void {
     const found = this.#store.findSignerByToken(token);
     if (!found) throw new EsignatureError("this signing link is invalid, expired, or has already been used");
-    this.#store.declineBySigner(found.envelope.id, found.signer.id, reason.trim());
+    // Optional, typed by someone with no account, and kept on the envelope
+    // and in the audit log for good: a reason of any length used to be
+    // stored whole (900 KB, in a test). Declining is what matters, so a long
+    // reason is shortened rather than the decline refused.
+    const trimmed = reason.trim();
+    const note = trimmed.length > MAX_DECLINE_REASON_LENGTH ? `${trimmed.slice(0, MAX_DECLINE_REASON_LENGTH)} … (shortened)` : trimmed;
+    this.#store.declineBySigner(found.envelope.id, found.signer.id, note);
     this.#auditLog.append({
       actor: { id: found.signer.email, role: "anonymous" },
       matterId: found.envelope.matterId,
       action: "esignature_declined",
-      detail: `envelope=${found.envelope.id} signer=${found.signer.id} reason=${reason.trim()}`,
+      detail: `envelope=${found.envelope.id} signer=${found.signer.id} reason=${note}`,
     });
   }
 
