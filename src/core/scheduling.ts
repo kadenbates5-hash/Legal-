@@ -12,9 +12,41 @@ import { AccessDeniedError, type Actor } from "./types.js";
  * voice-agent.ts staying vendor-agnostic for STT/TTS).
  */
 export class SchedulingError extends Error {
-  constructor(message: string) {
+  /**
+   * "invalid" is a request that could never be booked (a duration of
+   * minus thirty minutes); "conflict" is one the calendar says no to
+   * right now (that slot is taken). The server maps them to 400 and 409.
+   */
+  readonly kind: "invalid" | "conflict";
+  constructor(message: string, kind: "invalid" | "conflict" = "conflict") {
     super(message);
     this.name = "SchedulingError";
+    this.kind = kind;
+  }
+}
+
+/** The longest appointment that can be booked: a full day. */
+export const MAX_APPOINTMENT_MINUTES = 24 * 60;
+
+/**
+ * An appointment's length decides what it overlaps, so it is checked
+ * before the overlap test rather than trusted. A negative duration
+ * overlapped nothing — a way around the double-booking rule — and one of
+ * a billion minutes overlapped every future booking that attorney could
+ * ever have, from a single request any receptionist could make.
+ */
+function assertBookableDuration(durationMinutes: number): void {
+  if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > MAX_APPOINTMENT_MINUTES) {
+    throw new SchedulingError(
+      `an appointment must be between 1 and ${MAX_APPOINTMENT_MINUTES} minutes long (got ${durationMinutes})`,
+      "invalid",
+    );
+  }
+}
+
+function assertValidTime(time: Date, what: string): void {
+  if (!(time instanceof Date) || Number.isNaN(time.getTime())) {
+    throw new SchedulingError(`${what} must be a date and time, e.g. 2026-12-01T15:00`, "invalid");
   }
 }
 
@@ -105,12 +137,16 @@ export class SchedulingService {
 
     const attorneyId = params.attorneyId ?? this.#autoAssignAttorney(params.practiceAreaId);
     if (!attorneyId) {
-      throw new SchedulingError("no attorney available to assign — check FirmConfig.attorneys");
+      throw new SchedulingError(
+        "no attorney available to assign — choose one for the appointment, or list the firm's attorneys in its firm config (FirmConfig.attorneys)",
+      );
     }
 
-    this.#assertBusinessHours(params.startTime, params.allowOutsideBusinessHours);
-
+    assertValidTime(params.startTime, "the start time");
     const durationMinutes = params.durationMinutes ?? DEFAULT_DURATION_MINUTES;
+    assertBookableDuration(durationMinutes);
+
+    this.#assertBusinessHours(params.startTime, params.allowOutsideBusinessHours);
     this.#assertNoOverlap(attorneyId, params.startTime, durationMinutes);
 
     const appointment: Appointment = {
@@ -137,6 +173,7 @@ export class SchedulingService {
       throw new SchedulingError(`cannot reschedule a '${appointment.status}' appointment`);
     }
 
+    assertValidTime(params.newStartTime, "the new start time");
     this.#assertBusinessHours(params.newStartTime, params.allowOutsideBusinessHours);
     this.#assertNoOverlap(appointment.attorneyId, params.newStartTime, appointment.durationMinutes, id);
 

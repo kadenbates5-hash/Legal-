@@ -1,3 +1,5 @@
+import { isCalendarDate } from "./calendar-date.js";
+
 /**
  * The staff work schedule: when each person on the team is in the office,
  * working remotely, or out — one entry per (actor, date). Deliberately
@@ -17,6 +19,8 @@ export interface StaffScheduleEntry {
   updatedAt: string;
 }
 
+const STATUSES: readonly string[] = ["in_office", "remote", "out"];
+
 export class StaffScheduleStore {
   #byId = new Map<string, StaffScheduleEntry>();
   #idByActorAndDate = new Map<string, string>();
@@ -28,6 +32,13 @@ export class StaffScheduleStore {
 
   /** Upserts the single entry for this actor/date pair. */
   setEntry(actorId: string, date: string, status: StaffScheduleStatus, note?: string): StaffScheduleEntry {
+    // Both used to be stored as sent: a day of "garbage" that no date view
+    // ever finds, and a status of "office" that the panel can't show as in,
+    // remote or out.
+    if (!STATUSES.includes(status)) {
+      throw new Error(`status must be in_office, remote or out (got '${String(status)}')`);
+    }
+    if (!isCalendarDate(date)) throw new Error(`date must be a date in YYYY-MM-DD form (got '${date}')`);
     const key = this.#key(actorId, date);
     const existingId = this.#idByActorAndDate.get(key);
     const entry: StaffScheduleEntry = {

@@ -151,6 +151,15 @@ function compareNormalized(left: NormalizedName, right: NormalizedName): MatchSt
   return undefined;
 }
 
+/** Which side a role puts someone on; an unrecognised role is both, so it can't hide a conflict. */
+function sidesOf(role: string): { client: boolean; adverse: boolean } {
+  const r = typeof role === "string" ? role.trim().toLowerCase() : "";
+  if (r === "client") return { client: true, adverse: false };
+  if (r === "adverse") return { client: false, adverse: true };
+  if (r === "related") return { client: false, adverse: false };
+  return { client: true, adverse: true };
+}
+
 /**
  * Severity is a function of adversity plus whether the existing matter is
  * still live. The party's own note is never consulted — only structural
@@ -161,12 +170,18 @@ function classify(matter: Matter, party: MatterParty, incomingRole: PartyRole): 
   explanation: string;
 } {
   const live = matter.status !== "closed";
-  const adverseToUs = incomingRole === "adverse";
-  const theyAreClient = party.role === "client";
-  const theyAreAdverse = party.role === "adverse";
+  // A role this checker doesn't recognise — on a record saved before roles
+  // were checked, or in a request — counts as possibly either side, so it
+  // over-matches the way the rest of this file does rather than passing
+  // as "informational".
+  const theirs = sidesOf(party.role);
+  const ours = sidesOf(incomingRole);
+  const adverseToUs = ours.adverse;
+  const theyAreClient = theirs.client;
+  const theyAreAdverse = theirs.adverse;
 
   // Rule 1.7: acting against a current client, from either direction.
-  if (live && ((adverseToUs && theyAreClient) || (incomingRole === "client" && theyAreAdverse))) {
+  if (live && ((adverseToUs && theyAreClient) || (ours.client && theyAreAdverse))) {
     return {
       severity: "direct",
       explanation:
@@ -176,7 +191,7 @@ function classify(matter: Matter, party: MatterParty, incomingRole: PartyRole): 
   }
 
   // Rule 1.9: the same adversity, but the matter is closed.
-  if (!live && ((adverseToUs && theyAreClient) || (incomingRole === "client" && theyAreAdverse))) {
+  if (!live && ((adverseToUs && theyAreClient) || (ours.client && theyAreAdverse))) {
     return {
       severity: "former_client",
       explanation:
@@ -185,7 +200,7 @@ function classify(matter: Matter, party: MatterParty, incomingRole: PartyRole): 
     };
   }
 
-  if (theyAreClient && incomingRole === "client") {
+  if (theyAreClient && ours.client) {
     return {
       severity: "same_side",
       explanation:

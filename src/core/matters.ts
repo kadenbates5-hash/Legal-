@@ -1,3 +1,5 @@
+import { isCalendarDate } from "./calendar-date.js";
+
 /**
  * Real matter records.
  *
@@ -137,6 +139,28 @@ export interface MatterInput {
   closingNote?: string;
 }
 
+const MATTER_STATUSES: readonly string[] = ["prospective", "open", "closed"];
+const PARTY_ROLES: readonly string[] = ["client", "adverse", "related"];
+
+/**
+ * A party's side, read forgivingly — "Adverse" and " adverse " are
+ * adverse — or undefined when it names no side at all. Every conflicts
+ * check reads this field, and before it was checked a party saved as
+ * "Adverse" or "opposing party" screened as merely informational: a
+ * Rule 1.7 conflict that required no attorney review. An unknown role is
+ * refused rather than guessed at, because guessing the wrong side is
+ * exactly how a conflict is missed.
+ */
+export function partyRoleFrom(value: unknown): PartyRole | undefined {
+  const role = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return PARTY_ROLES.includes(role) ? (role as PartyRole) : undefined;
+}
+
+function matterStatusFrom(value: unknown): MatterStatus | undefined {
+  const status = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return MATTER_STATUSES.includes(status) ? (status as MatterStatus) : undefined;
+}
+
 export class MatterStore {
   #byId = new Map<string, Matter>();
 
@@ -162,7 +186,27 @@ export class MatterStore {
     if (!id) throw new Error("matterId is required");
     const now = new Date().toISOString();
     const existing = this.#byId.get(id);
-    const status = input.status ?? existing?.status ?? "open";
+    let inputStatus: MatterStatus | undefined;
+    if (input.status !== undefined) {
+      inputStatus = matterStatusFrom(input.status);
+      if (!inputStatus) throw new Error(`status must be prospective, open or closed (got '${String(input.status)}')`);
+    }
+    const parties = input.parties?.map((p) => {
+      const name = typeof p.name === "string" ? p.name.trim() : "";
+      if (!name) throw new Error("every party needs a name");
+      const role = partyRoleFrom(p.role);
+      if (!role) {
+        throw new Error(`party '${name}' has role '${String(p.role)}' — it must be client, adverse or related`);
+      }
+      return { ...p, name, role };
+    });
+    for (const d of input.keyDates ?? []) {
+      if (typeof d.label !== "string" || !d.label.trim()) throw new Error("every key date needs a label");
+      if (!isCalendarDate(d.date)) {
+        throw new Error(`key date '${d.label}' must be a date in YYYY-MM-DD form (got '${String(d.date)}')`);
+      }
+    }
+    const status = inputStatus ?? existing?.status ?? "open";
     const record: Matter = {
       matterId: id,
       title: input.title ?? existing?.title ?? id,
@@ -174,7 +218,7 @@ export class MatterStore {
       caseNumber: input.caseNumber ?? existing?.caseNumber,
       opposingCounsel: input.opposingCounsel ?? existing?.opposingCounsel,
       keyDates: (input.keyDates ?? existing?.keyDates ?? []).map((d) => ({ ...d })),
-      parties: (input.parties ?? existing?.parties ?? []).map((p) => ({ ...p })),
+      parties: (parties ?? existing?.parties ?? []).map((p) => ({ ...p })),
       openedAt: existing?.openedAt ?? historical.openedAt ?? now,
       // Closing stamps a date; reopening clears it, so "closed" and
       // "closedAt" can never disagree.

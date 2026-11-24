@@ -1,3 +1,5 @@
+import { isCalendarDate } from "./calendar-date.js";
+
 /**
  * Billable-hours entries logged by an attorney or paralegal against a
  * matter — distinct from `core/utilization.ts`'s `UtilizationTracker`,
@@ -16,16 +18,6 @@ export interface BillingHoursEntry {
   hours: number;
   description: string;
   loggedAt: string;
-}
-
-/** A real calendar day written YYYY-MM-DD: "2026-02-30" and "2026-7-28" aren't. */
-function isCalendarDate(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!m) return false;
-  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  if (y < 1900 || y > 2200 || mo < 1 || mo > 12 || d < 1) return false;
-  return d <= new Date(Date.UTC(y, mo, 0)).getUTCDate();
 }
 
 export class BillingHoursStore {

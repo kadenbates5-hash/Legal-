@@ -75,6 +75,17 @@ const SECTIONS: { source: InvoiceLineItem["source"]; heading: string; quantityLa
   { source: "flat", heading: "Fixed fees", quantityLabel: "Qty" },
 ];
 
+/**
+ * The section that prints a line. Before the store checked a line's
+ * category, one saved as anything else was counted in the total and
+ * printed under no heading at all — a charge on the bill the client
+ * couldn't see. Such a line prints under fixed fees, so everything the
+ * total adds up is on the page.
+ */
+export function sectionFor(source: string): InvoiceLineItem["source"] {
+  return source === "time" || source === "expense" ? source : "flat";
+}
+
 const PAYMENT_METHOD_LABEL: Record<Payment["method"], string> = {
   card: "Card",
   ach: "Bank transfer",
@@ -111,7 +122,7 @@ export function renderInvoice(params: RenderInvoiceParams): RenderedInvoice {
   t.push("");
 
   for (const section of SECTIONS) {
-    const lines = invoice.lineItems.filter((l) => l.source === section.source);
+    const lines = invoice.lineItems.filter((l) => sectionFor(l.source) === section.source);
     if (lines.length === 0) continue;
     t.push(section.heading.toUpperCase());
     for (const line of lines) {
@@ -179,7 +190,7 @@ export function renderInvoice(params: RenderInvoiceParams): RenderedInvoice {
   }
 
   for (const section of SECTIONS) {
-    const lines = invoice.lineItems.filter((l) => l.source === section.source);
+    const lines = invoice.lineItems.filter((l) => sectionFor(l.source) === section.source);
     if (lines.length === 0) continue;
     h.push(`<h3 style="font-size:13px;text-transform:uppercase;color:#666;margin:20px 0 6px">${escapeHtml(section.heading)}</h3>`);
     h.push(`<table style="width:100%;border-collapse:collapse;font-size:13px">`);

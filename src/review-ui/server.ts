@@ -48,7 +48,7 @@ import { TrustAccountingError, type TrustEntryType } from "../core/trust-ledger.
 import { EsignatureError } from "../core/esignature.js";
 import type { ESignatureService } from "./esignature-service.js";
 import { INTAKE_SCENARIOS } from "./intake-scenarios.js";
-import type { MatterStatus, PartyRole } from "../core/matters.js";
+import { partyRoleFrom, type MatterStatus, type PartyRole } from "../core/matters.js";
 import { MatterClosingError } from "./matters-service.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
@@ -372,7 +372,8 @@ function errorStatus(err: unknown): number {
   if (err instanceof Error && err.message.startsWith("matter assignment only applies")) return 400;
   if (err instanceof Error && err.message.startsWith("matter access only applies")) return 400;
   if (err instanceof SchedulingError) {
-    return err.message.startsWith("no appointment") ? 404 : 409;
+    if (err.message.startsWith("no appointment")) return 404;
+    return err.kind === "invalid" ? 400 : 409;
   }
   if (err instanceof BookingRequestError) {
     return { invalid: 400, not_found: 404, conflict: 409, busy: 429 }[err.kind];
@@ -2800,11 +2801,20 @@ async function handleMattersRequest(
   if (url.pathname === "/api/conflicts/check" && req.method === "POST") {
     const body = await readJsonBody(req);
     const names = Array.isArray(body["names"]) ? body["names"].map(String) : [];
+    // A role the checker doesn't know would screen as no side at all, so
+    // it's refused here rather than read as one.
+    let roleByName: Record<string, PartyRole> | undefined;
+    if (body["roleByName"] && typeof body["roleByName"] === "object" && !Array.isArray(body["roleByName"])) {
+      roleByName = {};
+      for (const [name, raw] of Object.entries(body["roleByName"] as Record<string, unknown>)) {
+        const role = partyRoleFrom(raw);
+        if (!role) throw new Error(`the role for '${name}' must be client, adverse or related (got '${String(raw)}')`);
+        roleByName[name] = role;
+      }
+    }
     const result = matters.checkConflicts(actor, {
       names,
-      ...(body["roleByName"] && typeof body["roleByName"] === "object"
-        ? { roleByName: body["roleByName"] as Record<string, PartyRole> }
-        : {}),
+      ...(roleByName ? { roleByName } : {}),
       ...(typeof body["excludeMatterId"] === "string" && body["excludeMatterId"]
         ? { excludeMatterId: body["excludeMatterId"] }
         : {}),

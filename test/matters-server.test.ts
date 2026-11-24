@@ -177,6 +177,26 @@ describe("conflicts HTTP API", () => {
     expect(result.hits[0].severity).toBe("direct");
   });
 
+  it("refuses a requested role that names no side, and a party saved with one", async () => {
+    const check = await fetch(
+      `${baseUrl}/api/conflicts/check`,
+      withCookie(attorneyCookie, {
+        method: "POST",
+        body: JSON.stringify({ names: ["Carlos Ruiz"], roleByName: { "Carlos Ruiz": "opposing" } }),
+      }),
+    );
+    expect(check.status).toBe(400);
+    const save = await fetch(
+      `${baseUrl}/api/matters/m-new-role`,
+      withCookie(attorneyCookie, {
+        method: "PUT",
+        body: JSON.stringify({ title: "Role check", parties: [{ name: "Quill Hartley", role: "opposing party" }] }),
+      }),
+    );
+    expect(save.status).toBe(400);
+    expect((await save.json()).error).toMatch(/must be client, adverse or related/);
+  });
+
   it("returns a clean result for an unknown party", async () => {
     const res = await fetch(
       `${baseUrl}/api/conflicts/check`,

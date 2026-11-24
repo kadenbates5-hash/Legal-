@@ -362,7 +362,18 @@ the rest of core:
   duplicating the logic.
 - Prevents double-booking: refuses to schedule/reschedule an attorney into
   a time slot that overlaps one of their existing (non-cancelled)
-  appointments.
+  appointments. The length is checked before the overlap test, because
+  it decides what overlaps: a duration of -30 minutes overlapped nothing
+  (a way around the rule) and one of a billion minutes overlapped every
+  booking that attorney could ever have — from one request any
+  receptionist could make. An appointment is now 1 to 1,440 minutes and
+  its start a real time; either mistake is a 400 (`SchedulingError`
+  gained a `kind`), not a 409 or "Invalid time value".
+- The Scheduling panel's booking form gained an **Attorney** picker. It
+  had none, so a firm whose firm config lists no attorneys couldn't book
+  a consultation from the panel at all — every attempt ended in "no
+  attorney available". The first option keeps auto-assignment from firm
+  settings; an attorney booking defaults to themselves.
 - Computes reminder due-times (default: 24h and 1h before) as plain data —
   `getDueReminders(actor)` returns what's due right now for a host
   process to poll and actually send. Sending itself is a vendor
@@ -1366,7 +1377,10 @@ each other, when they're in the office, and how they log billable time.
   who's in when); write access is narrower — anyone can set their own
   day, but only an attorney can set someone else's, the same
   self-service-vs-attorney-gated split as password change vs. password
-  reset.
+  reset. An entry's day must be a real date and its status one the panel
+  can show; "garbage" and "office" used to be stored as sent.
+  `core/calendar-date.ts`'s `isCalendarDate()` is the one date check the
+  billing, invoice, matter and schedule stores now share.
 - `core/billing-hours.ts` / `review-ui/billing-hours-service.ts` —
   billable-hours entries a lawyer or paralegal logs against a matter,
   backing the "Billing" panel. Deliberately distinct from
@@ -1737,6 +1751,20 @@ any client or adversary actually was.
     (same surname and first initial) so a human can triage.
   - Nothing auto-clears. The result is an input to an attorney's
     judgement, the same philosophy as the review gate.
+  - **A role that names no side can't hide a conflict.** Party roles and
+    matter statuses used to be stored exactly as sent, so a party saved
+    as "Adverse" or "opposing party" screened as *informational* — a
+    Rule 1.7 conflict that required no attorney review, through the
+    Conflicts panel and the receptionist's intake gate alike.
+    `MatterStore.upsert()` now reads a role or status forgivingly ("
+    Adverse " is adverse, "Open" is open) and refuses anything else
+    rather than guess a side; party names and key-date labels are
+    required, and a key date must be a real day. A record already saved
+    with an unrecognised role is screened as *possibly either side*
+    (`sidesOf()` in `conflicts.ts`), so it over-matches like the rest of
+    the checker, and `POST /api/conflicts/check` refuses a requested
+    role it doesn't know. Found by sending each write route what a
+    careless caller would; `test/input-integrity.test.ts` pins it.
 - `review-ui/matters-service.ts` — two *different* access shapes on
   purpose. Matter records are matter-scoped like everything else (a
   paralegal sees only their assigned matter), and **editing one is
@@ -2080,6 +2108,17 @@ for one of the three and merging them hides which. Rendering is pure: no
 store, no access control, no transport, so the same output backs the
 on-screen preview and the emailed copy and what an attorney approves is
 character-for-character what the client gets.
+
+**Everything the total adds up is printed.** A line's category was
+never checked, and the bill prints only time, expenses and fixed fees —
+so a line sent as `"source": "other"` was counted in the total and
+printed under no heading: an invisible charge on a client's bill
+(reproduced: a $900 "Hidden surcharge" inside a $950 total, nowhere on
+the page). `addLineItem()` now refuses any other category, and
+`sectionFor()` prints a line already saved that way under fixed fees in
+all three renderings. Amounts must also be *safe* integers — past 2^53
+an integer stops being exact, and 1e16 cents plus a cent is still 1e16 —
+and a line's "date worked" must be a real day.
 
 `InvoiceLineItem` gained `workedOn` / `timekeeperId` / `sourceEntryId`
 to make that possible. `sourceEntryId` also closes a real hole:

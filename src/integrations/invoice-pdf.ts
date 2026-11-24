@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import type { InvoiceLineItem } from "../core/invoicing.js";
-import { formatCents, formatQuantity, type RenderInvoiceParams } from "../core/invoice-render.js";
+import { formatCents, formatQuantity, sectionFor, type RenderInvoiceParams } from "../core/invoice-render.js";
 
 /**
  * The invoice as a PDF — the form a client can file, print, or forward to
@@ -242,7 +242,7 @@ export class PdfLibInvoicePdfRenderer implements InvoicePdfRenderer {
     };
 
     for (const section of SECTIONS) {
-      const lines = invoice.lineItems.filter((item) => item.source === section.source);
+      const lines = invoice.lineItems.filter((item) => sectionFor(item.source) === section.source);
       if (lines.length === 0) continue;
 
       l.y -= 12;

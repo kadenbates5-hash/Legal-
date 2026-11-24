@@ -1176,6 +1176,31 @@ function fillMatterResponsibleAttorneySelect() {
   el.value = previous && knownStaff.some((m) => m.actorId === previous) ? previous : "";
 }
 
+// Booking used to have no attorney field at all, so a firm without an
+// attorney list in its firm config couldn't book a consultation from this
+// panel: every attempt ended in "no attorney available". The first option
+// keeps the firm-settings auto-assignment; an attorney booking defaults
+// to themselves.
+function fillAppointmentAttorneySelect() {
+  const el = document.getElementById("apptAttorneyId");
+  if (!el) return;
+  const previous = el.value;
+  el.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "";
+  auto.textContent = "Assign from firm settings";
+  el.appendChild(auto);
+  for (const m of knownStaff) {
+    if (m.role !== "attorney" || m.disabled) continue;
+    const opt = document.createElement("option");
+    opt.value = m.actorId;
+    opt.textContent = m.displayName;
+    el.appendChild(opt);
+  }
+  const has = (id) => [...el.options].some((o) => o.value === id);
+  el.value = previous && has(previous) ? previous : currentRole === "attorney" && has(currentActorId) ? currentActorId : "";
+}
+
 async function refreshPeoplePickers() {
   try {
     knownStaff = await api("/api/staff");
@@ -1189,6 +1214,7 @@ async function refreshPeoplePickers() {
   fillPeopleSelect(document.getElementById("scheduleActorId"));
   fillPeopleSelect(document.getElementById("scheduleViewActorId"));
   fillMatterResponsibleAttorneySelect();
+  fillAppointmentAttorneySelect();
   // Default the schedule pickers to yourself — by far the common case.
   for (const id of ["scheduleActorId", "scheduleViewActorId"]) {
     const el = document.getElementById(id);
@@ -1684,6 +1710,7 @@ async function bookAppointment() {
         matterId: document.getElementById("apptMatterId").value,
         startTime: new Date(startTimeLocal).toISOString(),
         practiceAreaId: document.getElementById("apptPracticeArea").value,
+        ...(document.getElementById("apptAttorneyId").value ? { attorneyId: document.getElementById("apptAttorneyId").value } : {}),
         allowOutsideBusinessHours: document.getElementById("apptOverrideHours").checked,
       }),
     });

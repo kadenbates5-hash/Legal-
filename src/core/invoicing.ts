@@ -1,3 +1,5 @@
+import { isCalendarDate } from "./calendar-date.js";
+
 /**
  * Client invoicing and payments.
  *
@@ -34,6 +36,7 @@ export type InvoiceStatus = "draft" | "sent" | "partially_paid" | "paid" | "void
  * fixed fee.
  */
 export type LineItemSource = "time" | "expense" | "flat";
+const LINE_ITEM_SOURCES: readonly string[] = ["time", "expense", "flat"];
 
 export interface InvoiceLineItem {
   readonly id: string;
@@ -137,6 +140,10 @@ export interface InvoiceTotals {
 function assertPositiveCents(value: number, what: string): void {
   if (!Number.isInteger(value)) throw new InvoicingError(`${what} must be an integer number of cents`);
   if (value <= 0) throw new InvoicingError(`${what} must be positive`);
+  // Past 2^53 an "integer" stops being exact — 1e16 cents plus a cent is
+  // still 1e16 — and a bill that doesn't add up to the cent is worse than
+  // one that's refused.
+  if (!Number.isSafeInteger(value)) throw new InvoicingError(`${what} must be an amount the ledger can hold exactly`);
 }
 
 export class InvoiceStore {
@@ -191,10 +198,23 @@ export class InvoiceStore {
       );
     }
     if (!params.description.trim()) throw new InvoicingError("every line item needs a description");
-    if (!Number.isInteger(params.quantityMilli) || params.quantityMilli <= 0) {
+    // The bill prints time, expenses and fixed fees under their own
+    // headings; a line in any other category was totalled but printed
+    // nowhere.
+    if (!LINE_ITEM_SOURCES.includes(params.source)) {
+      throw new InvoicingError(`a line's category must be time, expense or flat (got '${String(params.source)}')`);
+    }
+    if (!Number.isSafeInteger(params.quantityMilli) || params.quantityMilli <= 0) {
       throw new InvoicingError("quantity must be a positive integer number of thousandths");
     }
     assertPositiveCents(params.unitAmountCents, "unit amount");
+    if (!Number.isSafeInteger(params.quantityMilli * params.unitAmountCents)) {
+      throw new InvoicingError("quantity × unit amount must be an amount the ledger can hold exactly");
+    }
+    // The date the work was done is printed on the client's itemised bill.
+    if (params.workedOn !== undefined && !isCalendarDate(params.workedOn)) {
+      throw new InvoicingError(`the date worked must be a date in YYYY-MM-DD form (got '${params.workedOn}')`);
+    }
 
     const item: InvoiceLineItem = Object.freeze({
       id: `line_${this.#nextId++}`,
