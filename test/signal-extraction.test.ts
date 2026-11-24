@@ -1,6 +1,46 @@
 import { describe, expect, it } from "vitest";
 import { extractSignalsFromText, parseHoursUntil, RECORDING_CONSENT_REFUSAL_RE } from "../src/receptionist/signal-extraction.js";
 
+describe("parseHoursUntil, as a voice transcript says it", () => {
+  // Wednesday 25 November 2026, 10am.
+  const wed = new Date(2026, 10, 25, 10, 0, 0);
+
+  it("reads minutes, however they're counted, as within the hour", () => {
+    for (const phrase of ["in 30 minutes", "in thirty minutes", "in forty five minutes", "in like twenty mins", "in half an hour"]) {
+      expect(parseHoursUntil(phrase), phrase).toBe(1);
+    }
+  });
+
+  it("reads spoken numbers past twelve, including compounds", () => {
+    expect(parseHoursUntil("in twenty four hours")).toBe(24);
+    expect(parseHoursUntil("in forty-eight hours")).toBe(48);
+    expect(parseHoursUntil("in fifteen days")).toBe(360);
+  });
+
+  it("reads a date said as an ordinal, with or without its month", () => {
+    expect(parseHoursUntil("the twenty sixth", wed)).toBe(24);
+    expect(parseHoursUntil("november twenty-sixth", wed)).toBe(24);
+    expect(parseHoursUntil("the twenty sixth of november", wed)).toBe(24);
+    expect(parseHoursUntil("the 27th", wed)).toBe(48);
+    expect(parseHoursUntil("the 25th", wed)).toBe(12);
+  });
+
+  it("puts a day already past this month into next month", () => {
+    expect(parseHoursUntil("the fifth", wed)).toBe(10 * 24);
+    // In December, "the fifth" is January's.
+    expect(parseHoursUntil("the fifth", new Date(2026, 11, 20, 10, 0, 0))).toBe(16 * 24);
+  });
+
+  it("doesn't turn a count into a date", () => {
+    expect(parseHoursUntil("my second arrest", wed)).toBeUndefined();
+  });
+
+  it("ignores fillers and stutters inside a timing phrase", () => {
+    expect(parseHoursUntil("in uh like an hour")).toBe(1);
+    expect(parseHoursUntil("tomorrow tomorrow morning")).toBe(24);
+  });
+});
+
 describe("parseHoursUntil", () => {
   it("parses explicit hour counts", () => {
     expect(parseHoursUntil("in 6 hours")).toBe(6);

@@ -383,3 +383,140 @@ describe("fuzzed conversations never crash, never stall, and stay ended", () => 
     }
   });
 });
+
+/*
+ * Round three: what a speech-to-text engine actually hands over. A voice
+ * call reaches the receptionist as a transcript — lower case, no
+ * punctuation, fillers and stutters left in, numbers spelled out, and the
+ * same handful of words misheard every time. Its first run found that a
+ * filler in the middle of a phrase ("i want to uh die") defeated almost
+ * every pattern, that minutes ("court in thirty minutes") and spoken
+ * dates ("the twenty sixth") weren't understood at all, and that
+ * "arraignment" transcribed as "arrangement" went straight past.
+ */
+const plain = (s: string) => s.toLowerCase().replace(/[.,!?;:"]/g, "").replace(/\s+/g, " ").trim();
+const VOICE: Record<string, (s: string) => string> = {
+  "as transcribed": plain,
+  "without apostrophes": (s) => plain(s).replace(/['’]/g, ""),
+  "with fillers mid-phrase": (s) => {
+    const words = plain(s).split(" ");
+    words.splice(Math.min(3, words.length), 0, "uh");
+    return `um ${words.join(" ")}`;
+  },
+  "with a false start": (s) => {
+    const words = plain(s).split(" ");
+    return [...words.slice(0, 2), ...words].join(" ");
+  },
+};
+
+const VOICE_EMERGENCIES: Record<string, { trigger: string; lines: string[] }> = {
+  custody: {
+    trigger: "in_custody",
+    lines: [
+      "my son he got arrested and he's still in jail",
+      "hi yeah so my brother got locked up last night",
+      "they're holding my daughter at the at the police station",
+      "my boyfriend's in jail and his bail is like five thousand",
+      "i need to bail my son out",
+      "i need to post bale for my son",
+      "he got a rested last night",
+      "my son is incarcerated",
+      "my nephew got arrested and they won't let him go",
+    ],
+  },
+  police: {
+    trigger: "imminent_police_questioning",
+    lines: [
+      "the police are like at my door right now",
+      "the cops called and they want me to come down to the station tomorrow",
+      "an officer is coming by to talk to me in an hour",
+      "there's a cop knocking on my door",
+    ],
+  },
+  court: {
+    trigger: "court_appearance_imminent",
+    lines: [
+      "i have court tomorrow at nine thirty",
+      "court is in like an hour and a half",
+      "my court date is in forty five minutes",
+      "i have court in thirty minutes",
+      "court is in half an hour",
+      "my arrangement is tomorrow morning",
+      "i have cord tomorrow",
+      "my court date is the twenty sixth",
+      "court is on november twenty sixth",
+      "my hearing is on the twenty sixth of november",
+      "i have a court date on the twenty seventh",
+      "court is on the 26th",
+      "court's at eight am tomorrow",
+      "my hearing is in twenty four hours",
+    ],
+  },
+  "protective order": {
+    trigger: "active_protective_order",
+    lines: ["she got a t r o on me", "he got a p f a against me", "there's a no contact order and i texted her"],
+  },
+  crisis: {
+    trigger: "crisis_risk",
+    lines: [
+      "i want to die",
+      "he's got a knife and he's here",
+      "i took a whole bottle of pills",
+      "i'm thinking about killing myself",
+      "i just want it all to stop",
+      "i'm scared he's gonna kill me",
+    ],
+  },
+};
+
+describe("round three: voice transcripts, every emergency, every point in the call", () => {
+  // Every phrasing from all three rounds, as a transcript would carry it.
+  const all: Array<[string, string, string]> = [];
+  for (const source of [EMERGENCIES, VOICE_EMERGENCIES]) {
+    for (const [group, { trigger, lines }] of Object.entries(source)) {
+      for (const line of lines) all.push([group, trigger, line]);
+    }
+  }
+  for (const [group, trigger, line] of all) {
+    it(`${group}: escalates "${line}" as a transcript`, () => {
+      for (const [variantName, variant] of Object.entries(VOICE)) {
+        for (const [positionName, position] of Object.entries(POSITIONS)) {
+          const result = at(position).handleMessage(variant(line));
+          const where = `${variantName}, ${positionName}`;
+          expect(result.done, where).toBe(true);
+          expect(result.trace.triggers, where).toContain(trigger);
+        }
+      }
+    });
+  }
+});
+
+describe("round three: ordinary transcribed answers don't end the call", () => {
+  // At the court-date question, so none of these may carry a time within
+  // two days — there, any "today" or "tomorrow" is read as the court date.
+  const benign = [
+    "no no i'm not in jail",
+    "uh no court date yet",
+    "um i think court is like next month",
+    "court is on the fifth of december",
+    "court is on the fifth",
+    "my lawyer said court is the twenty eighth",
+    "the first hearing was in october",
+    "my second hearing is in march",
+    "i was arrested like last year",
+    "no there's no restraining order",
+    "court is in like forty five days",
+    "i need to bail out of this contract",
+    "he he used to hit me years ago but not anymore",
+    "i think i was charged with a d u i",
+  ];
+  for (const line of benign) {
+    it(`continues after "${line}"`, () => {
+      for (const [variantName, variant] of Object.entries(VOICE)) {
+        const result = at(POSITIONS["at the court-date question"]!).handleMessage(variant(line));
+        expect(result.done, variantName).toBe(false);
+        expect(result.trace.triggers, variantName).toEqual([]);
+      }
+    });
+  }
+});

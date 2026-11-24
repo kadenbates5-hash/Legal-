@@ -25,10 +25,10 @@ const CUSTODY_RES: RegExp[] = [
   new RegExp(String.raw`\b(?:took|taken|hauled|carted|brought|sent)\s+(?:\w+\s+){0,2}(?:to|into)\s+(?:the\s+)?(?:\w+\s+)?(?:${CUSTODY_PLACE}|custody|the station)\b`, "i"),
   // The optional word between the verb and the participle is never a
   // negation, so "he's not locked up" is a denial rather than a match.
-  /(?:\b(?:was|were|got|gotten|been|is|are|am|im|being|just|still)|'s|'re|'m)\s+(?:(?!not\b|never\b)\w+\s+)?(?:arrested|detained|booked\s+in(?:to)?|picked up|taken into custody|taken in|hauled in|brought in|locked up|handcuffed|cuffed|in handcuffs|nicked|remanded|busted)\b/i,
+  /(?:\b(?:was|were|got|gotten|been|is|are|am|im|being|just|still)|'s|'re|'m)\s+(?:(?!not\b|never\b)\w+\s+)?(?:arrested|detained|booked\s+in(?:to)?|picked up|taken into custody|taken in|hauled in|brought in|locked up|handcuffed|cuffed|in handcuffs|nicked|remanded|busted|incarcerated|jailed|imprisoned)\b/i,
   /\b(?:they|police|cops|officers?|deput(?:y|ies)|ice|immigration|border patrol|feds|agents|marshals|troopers?|sheriffs?)\s+(?:just\s+)?(?:arrested|detained|picked up|took|locked up|booked|hauled|cuffed)\s+(?:him|her|them|me|my|our|us)\b/i,
   /\b(?:under arrest|collect call|being held|been held|behind bars|(?:holding|detaining|keeping) (?:me|him|her|them|my \w+)(?! back))\b/i,
-  /\b(?:post|posting|make|making|pay|paying)\s+(?:his |her |their |my )?(?:bail|bond)\b/i,
+  /\b(?:post|posting|make|making|pay|paying)\s+(?:his |her |their |my )?(?:bail|bond)\b|\bbail(?:ing)?\s+(?:him|her|them|me|us|my \w+|\w+)\s+out\b/i,
   // "not out of jail yet" means still in it — the one place a negation adds custody rather than removing it.
   /\b(?:not|n't|never)\s+(?:\w+\s+)?(?:out of|released from|let out of|bailed out)\b/i,
   // "the cops picked him up", "they hauled her in", "took my son away".
@@ -55,13 +55,13 @@ const OWN_PAST_ARREST_RE = /\b(?:i|i've|ive|i have|i had)\s+(?:just\s+|already\s
 
 /* Imminent police contact: someone from law enforcement *and* a sign they want to talk now or soon. */
 const LAW_ENFORCEMENT_RE = /\b(?:police|cops?|detectives?|officers?|investigators?|agents?|fbi|dea|atf|sheriff'?s?|deput(?:y|ies)|troopers?|feds|law enforcement)\b/i;
-const POLICE_CONTACT_RE = /\b(?:(?:attend|come in for|go (?:in )?for|do) (?:a |an |the )?(?:voluntary |police )?interview|want(?:s|ed)? to (?:talk|speak|question|interview|meet|see|ask)(?: (?:to|with))? (?:me|him|her|them|us|my \w+)|want(?:s|ed)? (?:me|him|her|them|us|my \w+) to (?:come|talk|meet|answer|go)|(?:at|outside|on) (?:my|the|our) (?:door|house|home|porch|work|job|apartment|place)|outside|knocking|asking (?:me )?questions|question(?:ing)? me|interview me|(?:give|make|take|get|want|wants|need|needs) (?:a |my )?statement|come (?:in|down) (?:to the (?:station|precinct)|for (?:questioning|an interview))|left (?:me )?a (?:card|message|voicemail|note)|called me|showed up|came (?:to|by)|(?:is|are) here|on (?:their|the|his|her) way)\b/i;
+const POLICE_CONTACT_RE = /\b(?:(?:attend|come in for|go (?:in )?for|do) (?:a |an |the )?(?:voluntary |police )?interview|want(?:s|ed)? to (?:talk|speak|question|interview|meet|see|ask)(?: (?:to|with))? (?:me|him|her|them|us|my \w+)|want(?:s|ed)? (?:me|him|her|them|us|my \w+) to (?:come|talk|meet|answer|go)|(?:at|outside|on) (?:my|the|our) (?:door|house|home|porch|work|job|apartment|place)|outside|knocking|asking (?:me )?questions|question(?:ing)? me|interview me|(?:give|make|take|get|want|wants|need|needs) (?:a |my )?statement|come (?:in|down) (?:to the (?:station|precinct)|for (?:questioning|an interview))|left (?:me )?a (?:card|message|voicemail|note)|called me|showed up|came (?:to|by)|(?:is|are) here|on (?:their|the|his|her) way|coming (?:by|over|here|round|back|to (?:my|the|our) (?:house|home|door|work|place)))\b/i;
 const IMMINENT_POLICE_RE = /\b(police (?:want|are going|is going) to (?:question|interview|talk to) me|(?:talking|about to talk) to (?:the )?police (?:now|tonight|today)|detective(?:s)? (?:want|need) to (?:speak|talk) (?:with|to) me)\b/i;
 /* Spanish: "la policía está en mi casa", "la policía quiere hablar conmigo". */
 const SPANISH_POLICE_RE = /\b(?:polic[ií]as?|detectives?|agentes?)\b.{0,30}(?:est[aá]n? (?:aqu[ií]|afuera|en (?:mi|la) (?:casa|puerta))|vin(?:o|ieron)|viene|quieren? (?:hablar|interrogar)|toc(?:a|an|ando))/i;
 
 /* A court appearance is named many ways; the timing is parsed separately (parseHoursUntil). */
-const COURT_MENTION_RE = /\b(?:court|hearing|arraignment|arraigned|trial|judge|sentencing|docket|magistrates?|appearance|appear|(?:case|matter) is (?:called|heard|up|on|set|scheduled|listed)|corte|audiencia|juicio|juez|tribunal)\b/i;
+const COURT_MENTION_RE = /\b(?:courts?|hearing|arraignment|arraigned|trial|judge|sentencing|docket|magistrates?|appearance|appear|(?:case|matter) is (?:called|heard|up|on|set|scheduled|listed)|corte|audiencia|juicio|juez|tribunal)\b/i;
 
 const PROTECTIVE_ORDER_RE = /\b(?:(?:protective|restraining|no[- ]contact|stay[- ]away|protection) order|order of protection|pfa|tro|dvro|epo|ppo|cpo|an? ro (?:against|on))\b/i;
 // What makes an order an *issue* rather than background: a breach, the
@@ -88,11 +88,11 @@ const VULNERABLE_RE = /\b(i(?:'ve| have) been drinking|i(?:'m| am) (?:scared|ter
 // caller" gentler-handoff path — a crisis needs resource information (988),
 // not just a faster human handoff. Never negation-guarded: "I'm not
 // suicidal" reaching a human costs nothing.
-const CRISIS_SELF_HARM_RE = /\b(kill myself|end(?:ing)? my life|ending it all|want to die|don'?t want to (?:live|be here anymore)|hurt myself|suicidal|suicide|self[- ]harm|end it all|end things|want to end it|(?:no|don'?t see (?:the|any)|there'?s no) (?:point|reason) (?:in |to |of )?(?:living|going on|life|being alive)|better off dead|wish i (?:was|were) dead|take my (?:own )?life|not worth living|can'?t go on|cut(?:ting)? myself|overdos(?:e|ed|ing)|(?:took|swallowed|taking|take) (?:a bunch of|too many|all (?:my|the|of my)|a lot of|a handful of) (?:pills|meds|medication|tablets))\b/i;
+const CRISIS_SELF_HARM_RE = /\b(kill(?:ing)? myself|want (?:it|this|everything) (?:all )?to (?:stop|end)|want (?:it|this|everything) to be over|end(?:ing)? my life|ending it all|want to die|don'?t want to (?:live|be here anymore)|hurt myself|suicidal|suicide|self[- ]harm|end it all|end things|want to end it|(?:no|don'?t see (?:the|any)|there'?s no) (?:point|reason) (?:in |to |of )?(?:living|going on|life|being alive)|better off dead|wish i (?:was|were) dead|take my (?:own )?life|not worth living|can'?t go on|cut(?:ting)? myself|overdos(?:e|ed|ing)|(?:took|swallowed|taking|take) (?:a (?:whole )?bunch of|too many|all (?:my|the|of my)|a lot of|a handful of|a (?:whole )?bottle of|the whole bottle of) (?:pills|meds|medication|tablets|sleeping pills|painkillers))\b/i;
 const CRISIS_DANGER_RE = /\b(he'?s going to (?:kill|hurt) me|she'?s going to (?:kill|hurt) me|(?:someone|he|she|they) (?:is|are) (?:trying to (?:kill|hurt|attack) me|attacking me)|i(?:'m| am|m)? not safe|i need help right now|(?:he|she|they) (?:has|have|got|pulled|is pointing|are pointing) a (?:gun|knife|weapon)|(?:is|are|keeps?|he'?s|she'?s|they'?re|been) (?:hitting|beating|choking|strangling|hurting|attacking|punching|kicking) me|threaten(?:ing|ed|s)? to (?:kill|hurt|shoot|stab) (?:me|us|my)|i(?:'m| am|m)? in danger|(?:just|has|have|he|she|they|husband|wife|boyfriend|girlfriend|partner|ex|dad|mom|father|mother)\s+(?:just\s+)?(?:hit|punched|kicked|choked|strangled|beat|attacked|stabbed|shot|slapped|shoved|pushed) me|beat me up)\b/i;
 // A weapon *here, now* — outside, at the door, in the house, on the way. Not
 // "charged with a gun", which is an ordinary call to a criminal practice.
-const CRISIS_WEAPON_NEARBY_RE = /\b(?:outside|here|at (?:my|the) (?:door|house|window)|in (?:my|the) (?:house|home|yard)|on (?:his|her|their) way|coming (?:over|here))\b.{0,30}\b(?:gun|knife|weapon|firearm)\b|\b(?:gun|knife|weapon|firearm)\b.{0,30}\b(?:outside|at (?:my|the) (?:door|house|window)|in (?:my|the) (?:house|home|yard)|coming (?:over|here))\b/i;
+const CRISIS_WEAPON_NEARBY_RE = /\b(?:outside|here|at (?:my|the) (?:door|house|window)|in (?:my|the) (?:house|home|yard)|on (?:his|her|their) way|coming (?:over|here))\b.{0,30}\b(?:gun|knife|weapon|firearm)\b|\b(?:gun|knife|weapon|firearm)\b.{0,30}\b(?:outside|at (?:my|the) (?:door|house|window)|in (?:my|the) (?:house|home|yard)|coming (?:over|here)|(?:he|she|they)(?:'s|'re| is| are) (?:here|inside|in the house))\b/i;
 // Spanish: "me quiero morir", "me está pegando", "me quiere matar".
 const SPANISH_CRISIS_RE = /(?:\bme quiero (?:morir|matar)|\bquiero morir|\bno quiero vivir|\bme voy a matar|\bme (?:est[aá]n? )?(?:pegando|golpeando)|\bme (?:quiere|quieren|va a|van a) matar|\bsuicid)/i;
 const OPT_OUT_RE = /\b(don'?t want (?:an? )?ai|no ai|human only|talk to a human please|opt out of ai)\b/i;
@@ -119,6 +119,39 @@ export function normalizeCallerText(text: string): string {
  * matchers see this: party names for conflicts screening are taken from
  * the caller's own words, where turning "R" into "are" would mangle them.
  */
+/**
+ * What speech-to-text produces, cleaned up the same way and for the same
+ * reason as texting shorthand below — a voice caller's words arrive as a
+ * transcript, and a transcript isn't what anyone wrote. Applied first, so
+ * spelled-out letters are rejoined before "r" can become "are".
+ *
+ * - Vocal fillers ("um", "uh") and stutters ("i i", "my my husband")
+ *   sit in the middle of phrases and broke nearly every multi-word
+ *   pattern: "i want to uh die" read as nothing at all.
+ * - Abbreviations said letter by letter: "a t r o", "p f a", "f b i".
+ * - The slips transcription engines reliably make on exactly the words
+ *   that matter here: "arraignment" heard as "arrangement", "court" as
+ *   "cord", "bail" as "bale", "arrested" as "a rested". Each is only
+ *   rewritten where the context makes the legal word likely — and
+ *   "court" is deliberately never recovered from "caught", because "I got
+ *   caught…" is how half of all calls to a criminal practice begin.
+ */
+const VOICE_FIXES: Array<[RegExp, string]> = [
+  [/\b(?:u+m+|u+h+m*|e+r+m+|h+m+|m{2,}|a+h+)\b[,.]?\s*/gi, ""],
+  [/\b(\w+(?:'\w+)?)(?:\s+\1\b)+/gi, "$1"],
+  [/\bt\.?\s*r\.?\s*o\b\.?/gi, "tro"],
+  [/\bp\.?\s*f\.?\s*a\b\.?/gi, "pfa"],
+  [/\bd\.?\s*v\.?\s*r\.?\s*o\b\.?/gi, "dvro"],
+  [/\bf\.?\s+b\.?\s+i\b\.?/gi, "fbi"],
+  [/\ba\s+(?=r\s+o\s+(?:against|on)\b)/gi, "an "],
+  [/\br\s+o(?=\s+(?:against|on)\b)/gi, "ro"],
+  [/\ba rested\b/gi, "arrested"],
+  [/\bbale\b/gi, "bail"],
+  [/\b(my|his|her|their|the)\s+arrangement\b(?!s)/gi, "$1 arraignment"],
+  [/\b(have|had|got|to|in|at|my|his|her|their|for)\s+cord\b/gi, "$1 court"],
+  [/\bcord(?=\s+(?:date|hearing|house|room|tomorrow|today|tonight|this|next)\b)/gi, "court"],
+];
+
 const SHORTHAND: Array<[RegExp, string]> = [
   [/\b(?:2mor+ow|2moro|2mrw|tmrw|tmw|tomoz|tomor+ow|tom+or+ow)\b/gi, "tomorrow"],
   [/\b2day\b/gi, "today"],
@@ -146,6 +179,7 @@ const CONTRACTIONS: Record<string, string> = {
 };
 export function expandShorthand(text: string): string {
   let out = text;
+  for (const [re, replacement] of VOICE_FIXES) out = out.replace(re, replacement);
   for (const [re, replacement] of SHORTHAND) out = out.replace(re, replacement);
   return out.replace(/\u0000(\w+)/g, (_, word: string) => CONTRACTIONS[word.toLowerCase()] ?? word);
 }
@@ -181,9 +215,55 @@ function isOwnPastArrest(preceding: string, match: string): boolean {
 
 const NUMBER_WORDS: Record<string, number> = {
   a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
   "a few": 3, "a couple": 2, "a couple of": 2, couple: 2, few: 3,
 };
-const RELATIVE_RE = /\bin\s+(?:about\s+|around\s+|like\s+|roughly\s+|maybe\s+|approximately\s+|just\s+)?(\d{1,3}(?=\s*(?:hours?|hrs?|days?|weeks?)\b)|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a few|a couple(?: of)?)\s*(hours?|hrs?|days?|weeks?)\b/gi;
+/**
+ * Spoken numbers, as a transcript writes them: "forty eight", "twenty-four".
+ * Longest alternatives first, so "forty eight" isn't read as "forty".
+ */
+const NUMBER_WORD = String.raw`(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|ten|eleven|twelve|one|two|three|four|five|six|seven|eight|nine|an?|a few|a couple(?: of)?)`;
+function numberFromWords(raw: string): number {
+  if (/^\d+$/.test(raw)) return Number(raw);
+  const key = raw.toLowerCase().replace(/ of$/, "");
+  if (NUMBER_WORDS[key] !== undefined) return NUMBER_WORDS[key]!;
+  return key.split(/[\s-]+/).reduce((sum, word) => sum + (NUMBER_WORDS[word] ?? 0), 0) || 1;
+}
+const RELATIVE_QUALIFIER = String.raw`(?:about\s+|around\s+|like\s+|roughly\s+|maybe\s+|approximately\s+|just\s+|another\s+)?`;
+const RELATIVE_RE = new RegExp(
+  String.raw`\bin\s+${RELATIVE_QUALIFIER}(\d{1,3}(?=\s*(?:hours?|hrs?|days?|weeks?)\b)|${NUMBER_WORD})\s*(hours?|hrs?|days?|weeks?)\b`,
+  "gi",
+);
+/** "in forty five minutes", "in 30 mins", "in half an hour" — whatever the count, it's within the hour or so. */
+const MINUTES_RE = new RegExp(
+  String.raw`\bin\s+${RELATIVE_QUALIFIER}(?:\d{1,4}\s*|${NUMBER_WORD}\s+)(?:minutes?|mins?)\b|\bin\s+${RELATIVE_QUALIFIER}half an? (?:hour|hr)\b`,
+  "i",
+);
+/**
+ * Dates said as ordinals — "the twenty sixth", "november twenty-sixth",
+ * "the fifth of december" — rewritten as "26th" so the date patterns
+ * below read them. Only after "the" or a month name, so "my second
+ * arrest" stays a count rather than becoming a date.
+ */
+const ORDINAL_UNITS: Record<string, number> = {
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9,
+};
+const ORDINAL_TEENS: Record<string, number> = {
+  tenth: 10, eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14, fifteenth: 15, sixteenth: 16,
+  seventeenth: 17, eighteenth: 18, nineteenth: 19, twentieth: 20, thirtieth: 30,
+};
+const MONTH_WORD = String.raw`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?`;
+const ORDINAL_WORD_RE = new RegExp(
+  String.raw`\b(the|${MONTH_WORD})\s+(?:(twenty|thirty)[\s-](first|second|third|fourth|fifth|sixth|seventh|eighth|ninth)|(${Object.keys(ORDINAL_UNITS).join("|")}|${Object.keys(ORDINAL_TEENS).join("|")}))\b`,
+  "gi",
+);
+function ordinalsToDigits(text: string): string {
+  return text.replace(ORDINAL_WORD_RE, (_, lead: string, tens?: string, unit?: string, single?: string) => {
+    const day = tens ? NUMBER_WORDS[tens.toLowerCase()]! + ORDINAL_UNITS[unit!.toLowerCase()]! : (ORDINAL_UNITS[single!.toLowerCase()] ?? ORDINAL_TEENS[single!.toLowerCase()]!);
+    return `${lead} ${day}th`;
+  });
+}
 const SAME_DAY_RE = /\b(?:today|tonight|this (?:morning|afternoon|evening)|right now|in an hour|hoy|esta (?:noche|tarde))\b/i;
 const TOMORROW_RE = /(?:\b(?:tomorrow|tmrw|tmr|in the morning|first thing)\b|\bma[nñ]ana)/i;
 const THIS_WEEK_RE = /\b(?:this week|in a day or two|in the next (?:day|two days|couple (?:of )?days)|day after tomorrow|pasado ma[nñ]ana)\b/i;
@@ -191,6 +271,10 @@ const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "frida
 const WEEKDAY_RE = /\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i;
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const MONTH_DAY_RE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i;
+/** "the 26th of november". */
+const DAY_OF_MONTH_RE = /\b(\d{1,2})(?:st|nd|rd|th)\s+of\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/i;
+/** "the 26th", no month: this month's if it's still to come, otherwise next month's. */
+const BARE_DAY_RE = /\bthe\s+(\d{1,2})(?:st|nd|rd|th)\b(?!\s+of\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))/i;
 const NUMERIC_DATE_RE = /\b(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\b/;
 
 function hoursUntilDate(month: number, day: number, now: Date): number | undefined {
@@ -215,14 +299,14 @@ function hoursUntilDate(month: number, day: number, now: Date): number | undefin
  * if no recognizable timing phrase is present.
  */
 export function parseHoursUntil(rawText: string, now?: Date): number | undefined {
-  const text = expandShorthand(normalizeCallerText(rawText));
+  const text = ordinalsToDigits(expandShorthand(normalizeCallerText(rawText)));
   const found: number[] = [];
   for (const match of text.matchAll(RELATIVE_RE)) {
-    const raw = match[1]!.toLowerCase();
-    const count = /^\d+$/.test(raw) ? Number(raw) : (NUMBER_WORDS[raw] ?? NUMBER_WORDS[raw.replace(/ of$/, "")] ?? 1);
+    const count = numberFromWords(match[1]!);
     const unit = match[2]!.toLowerCase();
     found.push(unit.startsWith("h") ? count : unit.startsWith("d") ? count * 24 : count * 168);
   }
+  if (MINUTES_RE.test(text)) found.push(1);
   if (SAME_DAY_RE.test(text)) found.push(12);
   if (TOMORROW_RE.test(text)) found.push(24);
   if (THIS_WEEK_RE.test(text)) found.push(48);
@@ -240,6 +324,20 @@ export function parseHoursUntil(rawText: string, now?: Date): number | undefined
     const numeric = text.match(NUMERIC_DATE_RE);
     if (numeric) {
       const hours = hoursUntilDate(Number(numeric[1]) - 1, Number(numeric[2]), now);
+      if (hours !== undefined) found.push(hours);
+    }
+    const dayOfMonth = text.match(DAY_OF_MONTH_RE);
+    if (dayOfMonth) {
+      const hours = hoursUntilDate(MONTHS.indexOf(dayOfMonth[2]!.toLowerCase().slice(0, 3)), Number(dayOfMonth[1]), now);
+      if (hours !== undefined) found.push(hours);
+    }
+    const bareDay = text.match(BARE_DAY_RE);
+    if (bareDay) {
+      const day = Number(bareDay[1]);
+      // Still to come this month, or else next month's — December's
+      // "the 5th" being January's, which hoursUntilDate rolls into next year.
+      const month = day >= now.getDate() ? now.getMonth() : (now.getMonth() + 1) % 12;
+      const hours = hoursUntilDate(month, day, now);
       if (hours !== undefined) found.push(hours);
     }
   }

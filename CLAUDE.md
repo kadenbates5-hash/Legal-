@@ -233,6 +233,42 @@ script changed as a result: its old opening ("my son, he's been
 arrested") is now, correctly, a custody emergency, so it no longer
 reached the confidentiality default it exists to show.
 
+**A third round** asked what a voice call actually delivers: a
+speech-to-text transcript — lower case, no punctuation, fillers and
+stutters left in, numbers spelled out, and the same few words misheard
+every time. Every emergency phrasing from all three rounds now also runs
+as a transcript (as transcribed, without apostrophes, with a filler
+mid-phrase, with a false start) at every point in a call. Its first run
+found:
+
+- *A filler in the middle of a phrase defeated almost everything.* "i
+  want to uh die", "in uh like an hour", "i'm scared he's gonna uh kill
+  me" — every multi-word pattern broke on the "uh". `expandShorthand()`
+  now drops vocal fillers and collapses stutters ("i i", "my my
+  husband") first, still only for escalation matching.
+- *Minutes and spoken dates weren't understood at all.* "court in
+  thirty minutes", "my court date is in forty five minutes", "the twenty
+  sixth", "november twenty-sixth", "the 26th of november" — none
+  escalated. `parseHoursUntil()` now reads minutes (any count is "within
+  the hour"), spoken numbers past twelve including compounds ("forty
+  eight"), and ordinal dates after "the" or a month — a bare "the
+  fifth" is this month's if still to come, otherwise next month's
+  (December's rolls into January). "My second arrest" stays a count.
+- *The words transcription mishears on exactly the calls that matter.*
+  "arraignment" → "arrangement", "court" → "cord", "bail" → "bale",
+  "arrested" → "a rested", and TRO/PFA/DVRO/FBI said letter by letter.
+  Each is repaired only where context makes the legal word likely ("my
+  arrangement", "have cord", "cord tomorrow"). "Court" is deliberately
+  never recovered from "caught": "I got caught…" opens half the calls to
+  a criminal practice.
+- *Phrasings no round had tried:* "bail my son out", "incarcerated",
+  "an officer is coming by", "he's got a knife and he's here", "a whole
+  bottle of pills", "killing myself", "I just want it all to stop".
+
+A benign set of transcribed answers — denials with stutters, court dates
+three days or more out, "my second hearing", "bail out of this
+contract", a past "he used to hit me" — is pinned not to end the call.
+
 - `voice-agent.ts` — `VoiceReceptionistSession`, the voice channel (§8
   build order step 6). Wraps the exact same `ReceptionistChatSession`
   behind vendor-agnostic `SpeechToText`/`TextToSpeech` interfaces — no
