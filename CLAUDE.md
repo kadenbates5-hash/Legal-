@@ -2462,6 +2462,49 @@ between a limitation and a trap. (Drafting a report from a PDF extracts
 its text into work product, which *is* searchable.) `server.ts` wires
 `GET /api/search?q=`; 404 without a `SearchService`.
 
+## Matter timeline
+
+`review-ui/matter-timeline-service.ts` — a "Timeline" card on the Cases
+panel's matter detail: everything on file for one matter, newest first —
+the matter opened and closed, drafts created and every trip through
+review (with who), documents uploaded, deadlines as entered (and by which
+source), appointments booked/moved/cancelled, invoices drafted, issued
+and voided, payments, trust movements, client messages and signature
+requests. Each entry opens the panel that owns it *with this matter
+already loaded*, so the jump lands on the record rather than an empty
+form. The question it answers is the one every file review starts with —
+"what's happened on this matter?" — which used to mean opening seven
+panels and putting the dates together by hand.
+
+- **Nothing here is a new permission.** Opening the timeline needs the
+  same `case_file` check as opening the matter on the Cases panel, and a
+  refusal there refuses the whole request. Inside it, each source is read
+  through its own panel's check: `billing_internal` for invoices,
+  payments and trust; `SchedulingService`'s own check for appointments;
+  deadlines for an attorney only, as on the Deadlines panel. A source the
+  viewer can't reach is **silently omitted** — no "3 items hidden", the
+  same reasoning as Search. A test runs it against a stricter rule set
+  that refuses billing, and billing simply isn't there.
+- **Dates are never guessed.** `WorkProduct` gained `createdAt` (set at
+  creation, persisted in its snapshot) because `history` only records
+  transitions, so a draft never submitted had no date at all. Drafts
+  persisted before it existed show "date not recorded" at the end of the
+  list rather than an invented date. An appointment carries its time as
+  `scheduledFor` so the browser shows it in the viewer's own time zone,
+  and only on the newest entry, since an older "scheduled" may have been
+  for a time since moved.
+- Read-only; `GET /api/cases/:matterId/timeline` (404 without a
+  `MatterTimelineService`), capped at the newest 500 entries with a note
+  when cut. Always on — it only re-reads what other panels already
+  guard. Laid out as a docket sheet: dates down the margin, a rule beside
+  them, stacking to one column on a phone; entries aren't clickable rows,
+  only their "Open in…" link is.
+
+What this doesn't do: logged billable time (that's the Billing panel's
+list, and would drown the rest), audit-log entries (attorney-only, and a
+different question — who *looked*, not what happened), or anything about
+a matter that was never recorded in Docket.
+
 ## Analytics
 
 `review-ui/analytics-service.ts` — `AnalyticsService`, backing the

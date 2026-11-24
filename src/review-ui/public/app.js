@@ -2467,6 +2467,85 @@ async function downloadDocument(matterId, doc) {
   }
 }
 
+/* ===== Matter timeline =====
+   One history across every panel. Each entry carries the panel that owns
+   it; opening one puts this matter in that panel's matter field and loads
+   it, so the jump lands on the record rather than an empty form. */
+const TIMELINE_KIND_LABEL = {
+  matter: "matter",
+  work_product: "draft",
+  document: "document",
+  deadline: "deadline",
+  appointment: "appointment",
+  invoice: "invoice",
+  payment: "payment",
+  trust: "trust",
+  client_message: "message",
+  signature: "signature",
+};
+const PANEL_MATTER_FIELD = {
+  drafting: ["draftingMatterId", "loadMatterDrafts"],
+  scheduling: ["scheduleListMatterId", "refreshAppointments"],
+  invoices: ["invoiceMatterId", "loadInvoices"],
+  trust: ["trustMatterId", "loadTrustLedger"],
+  signatures: ["signaturesMatterId", "loadSignatures"],
+  conflicts: ["matterRecordId", "loadMatterRecord"],
+  deadlines: ["deadlineMatterId", null],
+};
+
+function openMatterIn(panel, matterId) {
+  goToPanel(panel);
+  const [fieldId, loadId] = PANEL_MATTER_FIELD[panel] || [];
+  const field = fieldId && document.getElementById(fieldId);
+  if (!field) return;
+  field.value = matterId;
+  if (loadId) document.getElementById(loadId)?.click();
+  field.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
+function timelineWhen(at) {
+  if (!at) return "date not recorded";
+  const d = new Date(at);
+  return `${d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })} · ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+}
+
+async function loadMatterTimeline(matterId) {
+  const list = document.getElementById("caseTimeline");
+  if (!list) return;
+  const result = await tryApi(`/api/cases/${encodeURIComponent(matterId)}/timeline`);
+  if (!result) {
+    list.closest(".card").hidden = true;
+    return;
+  }
+  list.innerHTML = "";
+  for (const item of result.items) {
+    const li = document.createElement("li");
+    li.className = `timeline-item timeline-${item.kind}`;
+    li.innerHTML = `<time${item.at ? ` datetime="${escapeHtml(item.at)}"` : ""}>${escapeHtml(timelineWhen(item.at))}</time>
+      <div class="timeline-body"><span class="badge">${escapeHtml(TIMELINE_KIND_LABEL[item.kind] || item.kind)}</span>
+      <strong>${escapeHtml(item.title)}</strong>${item.scheduledFor ? `<div class="meta-tight">For ${escapeHtml(timelineWhen(item.scheduledFor))}</div>` : ""}${item.detail ? `<div class="meta-tight">${escapeHtml(item.detail)}</div>` : ""}</div>`;
+    // Documents and messages live on this same page; everything else opens its panel.
+    if (item.panel !== "cases") {
+      const open = document.createElement("button");
+      open.className = "matter-link timeline-open";
+      open.textContent = `Open in ${PANEL_TITLES[item.panel] || item.panel}`;
+      open.addEventListener("click", () => openMatterIn(item.panel, matterId));
+      const actions = document.createElement("div");
+      actions.className = "timeline-actions";
+      actions.appendChild(open);
+      li.querySelector(".timeline-body").appendChild(actions);
+    }
+    list.appendChild(li);
+  }
+  if (result.items.length === 0) list.innerHTML = '<li class="timeline-empty">Nothing on file for this matter yet.</li>';
+  if (result.truncated) {
+    const more = document.createElement("li");
+    more.className = "timeline-empty";
+    more.textContent = `Showing the newest ${result.items.length} entries.`;
+    list.appendChild(more);
+  }
+}
+
 async function loadCaseDetail(matterId) {
   showError("");
   try {
@@ -2500,8 +2579,14 @@ async function loadCaseDetail(matterId) {
           <button class="btn primary" id="caseMessageSend">Send</button>
         </div>
       </div>
+      <div class="card">
+        <h3>Timeline</h3>
+        <p class="subtitle-inline">Everything on file for this matter, newest first — each entry opens the panel it belongs to. Only what you can already see on those panels appears here.</p>
+        <ol id="caseTimeline" class="timeline"></ol>
+      </div>
     `;
 
+    loadMatterTimeline(matterId);
     await loadMessageThread(matterId, "caseMessageThread");
     document.getElementById("caseMessageSend").addEventListener("click", () =>
       sendMessage(matterId, "caseMessageBody", "caseMessageThread"),

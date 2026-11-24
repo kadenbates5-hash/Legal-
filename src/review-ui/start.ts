@@ -45,6 +45,7 @@ import { PayrollService } from "./payroll-service.js";
 import { AnalyticsService } from "./analytics-service.js";
 import { ImportService } from "./import-service.js";
 import { CalendarExportService } from "./calendar-export-service.js";
+import { MatterTimelineService } from "./matter-timeline-service.js";
 import { CalendarConnectionService } from "./calendar-connection-service.js";
 import { TimeClockService } from "./time-clock-service.js";
 import { ManualPaymentProcessor } from "../integrations/payment-processor.js";
@@ -591,6 +592,24 @@ const calendarExport = new CalendarExportService({
 });
 
 /**
+ * The Cases panel's per-matter timeline. Always on: it only re-reads
+ * stores other panels already guard, through those panels' own checks.
+ */
+const matterTimeline = new MatterTimelineService({
+  accessControl: state.accessControl,
+  workProducts: state.workProductStore,
+  documents: state.documentStore,
+  matters: state.matters,
+  deadlines: state.deadlineTracker,
+  scheduling: state.scheduling,
+  invoices: state.invoices,
+  trust: state.trustLedger,
+  clientMessages: state.clientMessages,
+  signatures: state.esignatures,
+  nameFor: (actorId) => state.auth.listUsers().find((u) => u.actorId === actorId)?.displayName,
+});
+
+/**
  * Backs the "Import" panel: bringing matters and time entries over from
  * Clio, MyCase, PracticePanther or a spreadsheet, as CSV. Always on — it
  * needs no vendor and no key, and it's attorney-only with a mandatory
@@ -957,6 +976,7 @@ const server = createReviewServer(service, state.auth, {
   analytics,
   dataImport,
   calendarExport,
+  matterTimeline,
   maxRequestBodyBytes,
   loginThrottle: state.loginThrottle,
   auditLog: state.auditLog,

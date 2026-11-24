@@ -12,6 +12,7 @@ import { BookingRequestError } from "../core/booking-requests.js";
 import type { BookingService } from "./booking-service.js";
 import type { ImportService } from "./import-service.js";
 import type { CalendarExportService } from "./calendar-export-service.js";
+import type { MatterTimelineService } from "./matter-timeline-service.js";
 import { DataImportError } from "../core/data-import.js";
 import { CsvError } from "../core/csv.js";
 import { ReviewGateService } from "./review-service.js";
@@ -509,6 +510,8 @@ export interface ReviewServerOptions {
   dataImport?: ImportService;
   /** Enables `GET /api/calendar/export.ics` (deadlines and appointments as a calendar file). Absent means 404. */
   calendarExport?: CalendarExportService;
+  /** Enables `GET /api/cases/:matterId/timeline` (one matter's history across every panel). Absent means 404. */
+  matterTimeline?: MatterTimelineService;
   /** Hard ceiling on any buffered request body — see `maxRequestBodyBytesFor`. Defaults to what a 25 MB upload needs. */
   maxRequestBodyBytes?: number;
   /** Brute-force protection for `POST /api/login`. Absent = unthrottled (tests that don't care); `start.ts` always supplies one. */
@@ -621,6 +624,7 @@ async function handleRequest(
     booking,
     dataImport,
     calendarExport,
+    matterTimeline,
     voiceCalls,
     audioClips,
     twilio,
@@ -1369,7 +1373,7 @@ async function handleRequest(
         sendJson(res, 404, { error: "cases are not configured on this server" });
         return;
       }
-      await handleCasesRequest(cases, req, res, actor, url);
+      await handleCasesRequest(cases, req, res, actor, url, matterTimeline);
       return;
     }
 
@@ -2910,8 +2914,20 @@ async function handleCasesRequest(
   res: ServerResponse,
   actor: Actor,
   url: URL,
+  timeline?: MatterTimelineService,
 ): Promise<void> {
   const segments = url.pathname.replace(/^\/api\/cases\/?/, "").split("/").filter(Boolean);
+
+  // One matter's history across every panel, each source behind its own
+  // panel's check — see matter-timeline-service.ts.
+  if (segments.length === 2 && segments[1] === "timeline" && req.method === "GET") {
+    if (!timeline) {
+      sendJson(res, 404, { error: "the matter timeline is not configured on this server" });
+      return;
+    }
+    sendJson(res, 200, timeline.timeline(actor, segments[0]!));
+    return;
+  }
 
   if (segments.length === 0 && req.method === "GET") {
     sendJson(res, 200, cases.listCases(actor));

@@ -39,6 +39,8 @@ export interface WorkProductSnapshot {
   content: string;
   flags: string[];
   history: WorkProductTransition[];
+  /** Absent on snapshots written before it was recorded. */
+  createdAt?: string;
 }
 
 export class WorkProduct {
@@ -49,6 +51,13 @@ export class WorkProduct {
   #content: string;
   readonly flags = new Set<string>();
   readonly history: WorkProductTransition[] = [];
+  /**
+   * When the draft was first created. `history` only records transitions,
+   * so without this a draft never submitted has no date at all — the
+   * matter timeline needs one. Undefined for drafts persisted before it
+   * existed, which is shown as "date not recorded" rather than guessed.
+   */
+  createdAt: string | undefined = new Date().toISOString();
 
   #auditLog: AuditLog;
 
@@ -153,6 +162,7 @@ export class WorkProduct {
       content: this.#content,
       flags: [...this.flags],
       history: this.history.map((t) => ({ ...t })),
+      ...(this.createdAt ? { createdAt: this.createdAt } : {}),
     };
   }
 
@@ -173,6 +183,7 @@ export class WorkProduct {
     workProduct.status = snapshot.status;
     for (const flag of snapshot.flags) workProduct.flags.add(flag);
     workProduct.history.push(...snapshot.history.map((t) => ({ ...t })));
+    workProduct.createdAt = snapshot.createdAt;
     return workProduct;
   }
 
