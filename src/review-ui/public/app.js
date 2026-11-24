@@ -4878,12 +4878,24 @@ function partyToLine(party) {
   let line = party.name;
   if (party.email) line += ` <${party.email}>`;
   if (party.phone) line += ` [${party.phone}]`;
+  if (party.note) line += ` — ${party.note}`;
   return line;
 }
+
+// A note goes last, after " — " (or " -- " typed on a keyboard without
+// an em dash). Before notes and related parties had a place here, saving
+// a matter from this panel deleted every related party and every note,
+// because the save rebuilds the whole list from these boxes.
+const PARTY_NOTE_RE = /^(.*?)\s+(?:—|--)\s+(.+)$/;
 
 function lineToParty(line, role) {
   let rest = line.trim();
   const party = { name: rest, role };
+  const noteMatch = PARTY_NOTE_RE.exec(rest);
+  if (noteMatch) {
+    party.note = noteMatch[2].trim();
+    rest = noteMatch[1].trim();
+  }
   const phoneMatch = /^(.*?)\s*\[([^\]]+)\]\s*$/.exec(rest);
   if (phoneMatch) {
     party.phone = phoneMatch[2].trim();
@@ -4906,6 +4918,7 @@ function partiesToTextareas(matter) {
       .join("\n");
   document.getElementById("matterClients").value = pick("client");
   document.getElementById("matterAdverse").value = pick("adverse");
+  document.getElementById("matterRelated").value = pick("related");
 }
 
 // The key-dates list being edited for whatever matter is currently
@@ -5057,6 +5070,7 @@ async function loadMatterRecord() {
       document.getElementById("matterDescription").value = "";
       document.getElementById("matterClients").value = "";
       document.getElementById("matterAdverse").value = "";
+      document.getElementById("matterRelated").value = "";
       currentKeyDates = [];
       renderKeyDatesList();
       renderMatterLifecycle(null);
@@ -5075,6 +5089,7 @@ async function saveMatterRecord() {
     const parties = [
       ...linesOf("matterClients").map((line) => lineToParty(line, "client")),
       ...linesOf("matterAdverse").map((line) => lineToParty(line, "adverse")),
+      ...linesOf("matterRelated").map((line) => lineToParty(line, "related")),
     ];
     await api(`/api/matters/${encodeURIComponent(id)}`, {
       method: "PUT",

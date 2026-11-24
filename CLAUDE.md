@@ -1797,6 +1797,15 @@ any client or adversary actually was.
   screening work — the matter-record form is organized into sections
   (Basics, Court & docket, Opposing counsel, Key dates, Parties, Notes)
   rather than one flat block, now that it covers this many fields.
+  - **Saving the form keeps every party.** A save rebuilds the whole
+    party list from the form's boxes, and there were only two — clients
+    and adverse — with no way to write a note. So saving a matter from
+    the panel, even just to fix its title, deleted every *related* party
+    (witnesses, co-defendants) and every party's note that the API or
+    an import had recorded. A third box takes related parties, and any
+    party line can end in `— note` (or `-- note`), so the form can now
+    show everything it saves. `test/matter-party-lines.test.ts` runs the
+    page's own `partyToLine`/`lineToParty` to pin the round trip.
 
 ### Firm-wide conflicts audit
 
