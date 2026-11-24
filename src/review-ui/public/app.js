@@ -165,6 +165,9 @@ function setPanelHeading(panel) {
 for (const btn of document.querySelectorAll("nav.nav button")) {
   btn.addEventListener("click", () => {
     const panel = btn.dataset.panel;
+    // An error belongs to the panel it happened on. Left up, Accounts'
+    // "username must not be empty" sat on top of the Import panel too.
+    showError("");
     for (const b of document.querySelectorAll("nav.nav button")) b.classList.toggle("active", b === btn);
     for (const s of document.querySelectorAll("section.panel")) s.classList.toggle("active", s.id === `panel-${panel}`);
     setPanelHeading(panel);
@@ -182,7 +185,7 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
       loadDueReminders();
       loadBookingRequests();
     }
-    if (panel === "signatures" && signaturesMatterId().trim()) {
+    if (panel === "signatures" && signaturesMatterId().trim() && capabilities?.esignature !== false) {
       loadSignatureSources();
       loadSignatures();
     }
@@ -363,6 +366,54 @@ let currentRole = null;
 let currentActorId = null;
 /** Whether the server has text-to-speech configured (SPEECH_TOOLS) — see canUseSpeechTools. */
 let speechAvailable = false;
+/**
+ * Which optional features this server was started with (GET
+ * /api/capabilities), or null if that couldn't be read — in which case
+ * every panel behaves exactly as it did before the probe existed. Only
+ * ever used to *explain* a missing feature up front; the server still
+ * refuses anything it isn't configured for.
+ */
+let capabilities = null;
+
+/**
+ * What each optional feature needs, written for whoever reads it: the
+ * person at the desk wants to know it isn't them, and whoever runs
+ * Docket wants the setting that turns it on.
+ */
+const UNCONFIGURED = {
+  assistant: {
+    panel: "assistant",
+    title: "The assistant isn't set up on this server",
+    body: "It needs an Anthropic API key. Whoever runs Docket for the firm turns it on by setting <code>ANTHROPIC_API_KEY</code> and restarting — until then nothing typed here goes anywhere.",
+  },
+  esignature: {
+    panel: "signatures",
+    title: "E-signature isn't set up on this server",
+    body: "Signing links have to work from outside the office, so Docket needs the address people reach it at. Whoever runs Docket turns this on by setting <code>PUBLIC_BASE_URL</code> and restarting. Email is optional: without it, each signer's link is shown here for you to send.",
+  },
+};
+
+/** Puts a "not set up here" note at the top of a panel and disables its controls. */
+function markUnconfigured(feature) {
+  const info = UNCONFIGURED[feature];
+  const panel = document.getElementById(`panel-${info.panel}`);
+  if (!panel || panel.querySelector(".unconfigured")) return;
+  const note = document.createElement("div");
+  note.className = "card unconfigured";
+  note.setAttribute("role", "note");
+  note.innerHTML = `<h3>${escapeHtml(info.title)}</h3><p>${info.body}</p>`;
+  panel.querySelector(".subtitle")?.after(note);
+  for (const el of panel.querySelectorAll(".card:not(.unconfigured) :is(button, input, select, textarea)")) el.disabled = true;
+}
+
+async function loadCapabilities() {
+  if (currentRole !== "attorney" && currentRole !== "paralegal" && currentRole !== "receptionist") return;
+  capabilities = await tryApi("/api/capabilities");
+  if (!capabilities) return;
+  for (const feature of Object.keys(UNCONFIGURED)) {
+    if (capabilities[feature] === false) markUnconfigured(feature);
+  }
+}
 
 async function loadWhoami() {
   try {
@@ -439,6 +490,7 @@ async function loadWhoami() {
       renderAttorneyOnly("queue", "Review Queue is attorney-only.");
       renderAttorneyOnly("conflictList", "Deadlines are attorney-only.");
     }
+    await loadCapabilities();
     // Pickers first: Home greets you by display name, which comes from the
     // staff directory those pickers load.
     await refreshPeoplePickers();
@@ -694,6 +746,10 @@ document.getElementById("passkeyAddBtn").addEventListener("click", async () => {
  */
 async function loadCalendarConnectionStatus() {
   const card = document.getElementById("calendarConnectionCard");
+  if (capabilities && capabilities.calendarConnection === false) {
+    card.hidden = true;
+    return;
+  }
   const status = await tryApi("/api/calendar-connection");
   if (!status) {
     card.hidden = true;
@@ -1143,6 +1199,9 @@ async function refreshPeoplePickers() {
 async function refreshMatterOptions() {
   const list = document.getElementById("matterOptions");
   if (!list) return;
+  // Cases is paralegal/attorney-only; asking anyway left a receptionist's
+  // console with a 403 on nearly every panel. They just get no suggestions.
+  if (currentRole !== "attorney" && currentRole !== "paralegal") return;
   try {
     const cases = await api("/api/cases");
     list.innerHTML = "";
@@ -1652,6 +1711,11 @@ function bookingDefaultStart(request) {
 async function loadBookingRequests() {
   const card = document.getElementById("bookingRequestsCard");
   const list = document.getElementById("bookingRequestList");
+  // Known to be off: don't ask, and don't leave a 404 in the console.
+  if (capabilities && capabilities.publicBooking === false) {
+    card.hidden = true;
+    return;
+  }
   const requests = await tryApi("/api/booking-requests");
   if (!requests) {
     card.hidden = true;
@@ -2143,6 +2207,17 @@ function draftingMatterId() {
   return document.getElementById("draftingMatterId").value;
 }
 
+/**
+ * The matter a new draft is for. Without this, "Draft" with the matter
+ * box empty posted to /api/drafting/matters//… and came back with the
+ * server's bare "not found" — true, and no help at all.
+ */
+function requiredDraftingMatterId() {
+  const id = draftingMatterId().trim();
+  if (!id) throw new Error("Pick a matter first — the draft is filed against it.");
+  return id;
+}
+
 async function loadTemplates() {
   try {
     const templates = await api("/api/drafting/templates");
@@ -2250,7 +2325,7 @@ async function createTemplateDraft() {
       body.deadlineDate = deadlineDate;
       body.deadlineType = document.getElementById("draftDeadlineType").value;
     }
-    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-template`, {
+    await api(`/api/drafting/matters/${encodeURIComponent(requiredDraftingMatterId())}/draft-template`, {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -2278,7 +2353,7 @@ async function createRiskDraft() {
   showError("");
   const lines = (id) => document.getElementById(id).value.split("\n").map((l) => l.trim()).filter(Boolean);
   try {
-    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-risk-assessment`, {
+    await api(`/api/drafting/matters/${encodeURIComponent(requiredDraftingMatterId())}/draft-risk-assessment`, {
       method: "POST",
       body: JSON.stringify({
         description: document.getElementById("riskDescription").value,
@@ -2311,7 +2386,7 @@ async function createResearchDraft() {
       .value.split("\n")
       .map((c) => c.trim())
       .filter(Boolean);
-    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-research`, {
+    await api(`/api/drafting/matters/${encodeURIComponent(requiredDraftingMatterId())}/draft-research`, {
       method: "POST",
       body: JSON.stringify({ content: document.getElementById("researchContent").value, citations }),
     });
@@ -2327,7 +2402,7 @@ async function createResearchDraft() {
 async function createBillingDraft() {
   showError("");
   try {
-    await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/draft-billing`, {
+    await api(`/api/drafting/matters/${encodeURIComponent(requiredDraftingMatterId())}/draft-billing`, {
       method: "POST",
       body: JSON.stringify({ content: document.getElementById("billingContent").value }),
     });

@@ -2528,6 +2528,19 @@ Hardening that applies to every route, independent of any one panel.
     that existed became utility classes in `app.css`, since `style-src
     'self'` blocks inline style attributes too (including any written
     into `innerHTML`).
+- **Only a sign-in failure is a 401.** The dashboard answers every 401
+  by sending the browser to the sign-in page, so a 401 for anything else
+  throws a signed-in person out mid-task. The status used to be picked by
+  matching `AuthError` message text, and anything unmatched fell through
+  to 401: a mistyped code while setting up two-factor, confirming before
+  starting, an expired passkey registration, a blank username on "Create
+  account". `AuthError` now carries a `kind` (`unauthenticated` /
+  `invalid` / `forbidden` / `conflict` / `not_found` / `unavailable`),
+  defaulting to `unauthenticated` so every sign-in path keeps its 401
+  (and the login throttle its accounting), and `errorStatus` maps the
+  kind — the same fix `TimeClockError` got when its prose-matching broke.
+  `test/mfa-server.test.ts` pins that each of those mistakes leaves the
+  session working.
 - **Request-body ceiling** — see "PDF intake…" above for why the
   per-file upload cap alone wasn't one.
 - `serveStatic` compares against `PUBLIC_DIR + path.sep`, not a bare
@@ -3632,6 +3645,38 @@ things:
 the first pass's worst finding: any selector reset with `all: unset`
 must have a `:focus-visible` rule, so a new button style can't silently
 lose its ring again.
+
+### Dead ends — features a server wasn't started with
+
+A sweep booted Docket with no optional configuration and, as attorney,
+paralegal and receptionist, opened every panel and pressed every
+primary button. What it found:
+
+- **Two panels whose main action could only fail.** Assistant (no
+  `ANTHROPIC_API_KEY`) answered "Start" with a raw "not configured", and
+  Signatures (no `PUBLIC_BASE_URL`) failed only once a matter was typed.
+  `GET /api/capabilities` now tells the dashboard, once per sign-in,
+  which optional features exist (booleans only; staff roles only), and
+  each such panel opens on a plain note — what isn't set up, which
+  setting turns it on, and for Signatures that email is optional — with
+  its controls disabled. The tab stays, so the feature stays
+  discoverable. Nothing is decided by the probe: every route still
+  404s on its own when its service is absent, and a failed probe leaves
+  the panels exactly as they were.
+- **Requests made only to be refused.** Scheduling asked for booking
+  requests and Security for the calendar connection on every visit,
+  logging a 404 each time; both now skip the request when the probe
+  says the feature is off. A receptionist's matter autocomplete asked
+  for the attorney/paralegal-only matter list on nearly every panel
+  and got a 403 each time; it no longer asks.
+- **"Draft" with no matter chosen** posted to `/api/drafting/matters//…`
+  and showed the server's bare "not found". It now says to pick a matter
+  first.
+- **An error followed you between panels.** Accounts' "username must not
+  be empty" was still on screen on the Import panel. Switching panels
+  clears the banner.
+- And the 401 above: pressing "Create account" with a blank username
+  signed the attorney out.
 
 `/api/appointments*` (see `scheduling.ts` above) is wired into the same
 server, gated by `SchedulingService`'s own optional `AccessControl`

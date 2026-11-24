@@ -292,16 +292,13 @@ function sendBinary(
 function errorStatus(err: unknown): number {
   if (err instanceof RequestBodyTooLargeError) return 413;
   if (err instanceof AuthError) {
-    // Account-creation validation (bad password/duplicate username) is a
-    // 400 from an already-authenticated caller, not an auth failure —
-    // only login/system-key mismatches are genuinely 401.
-    if (err.message.includes("already exists") || err.message.includes("must be at least")) return 400;
-    // A wrong *current* password on self-service change is a 403, not a 401 —
-    // the caller has a perfectly valid session; a 401 here would trip the
-    // dashboard's global "401 means log in again" redirect instead of just
-    // showing an inline error and letting them retry.
-    if (err.message.includes("current password is incorrect")) return 403;
-    return 401;
+    // The error says what kind it is. Only a real sign-in failure is a
+    // 401, because the dashboard answers every 401 by sending the browser
+    // to the sign-in page — a mistyped two-factor code or a blank field
+    // from someone already signed in must be an inline error instead
+    // (see AuthErrorKind). A wrong *current* password is "forbidden": the
+    // session is fine, the proof offered for this one action wasn't.
+    return { unauthenticated: 401, invalid: 400, forbidden: 403, conflict: 409, not_found: 404, unavailable: 404 }[err.kind];
   }
   if (err instanceof AccessDeniedError) return 403;
   // An overdraw or a double-reversal is a conflict with the ledger's current
@@ -979,6 +976,34 @@ async function handleRequest(
         username: user?.username,
         mustChangePassword: user?.mustChangePassword ?? false,
         mfaSetupRequired: needsMfaSetup(user, mfaRequiredRoles),
+      });
+    } catch (err) {
+      sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });
+    }
+    return;
+  }
+
+  /**
+   * Which optional features this server was started with, so the
+   * dashboard can say "not set up here, and here's what turns it on"
+   * before anyone clicks, rather than a raw 404 after. Booleans only —
+   * whether a feature exists, never how it's configured — and staff only,
+   * since a client's portal has nothing to switch on. Every surface it
+   * describes still enforces its own access server-side; this decides
+   * nothing, it only spares people a dead end.
+   */
+  if (url.pathname === "/api/capabilities" && req.method === "GET") {
+    try {
+      const actor = resolveActor(req, auth);
+      if (actor.role !== "attorney" && actor.role !== "paralegal" && actor.role !== "receptionist") {
+        throw new AccessDeniedError(`capabilities are for staff (got role '${actor.role}')`);
+      }
+      sendJson(res, 200, {
+        assistant: Boolean(assistant),
+        esignature: Boolean(esignature),
+        publicBooking: Boolean(booking),
+        speech: Boolean(speech),
+        calendarConnection: Boolean(calendarConnection),
       });
     } catch (err) {
       sendJson(res, errorStatus(err), { error: err instanceof Error ? err.message : "unknown error" });

@@ -705,6 +705,13 @@ ul.list li.skeleton-row:hover { box-shadow: none; transform: none; border-color:
   .import-rows .import-reason, .import-rows .import-warnings, .import-rows .import-conflicts { grid-column: 1; }
 }
 
+/* A feature this server wasn't started with: said up front, in place of
+   the panel's first card, rather than as an error after a click. A note,
+   not an alarm — nothing is wrong, it just isn't switched on here. */
+.card.unconfigured { border-style: dashed; border-color: var(--border-strong); background: var(--surface-2); }
+.card.unconfigured h3 { margin-bottom: 0.35rem; }
+.card.unconfigured p { margin: 0; font-size: 0.88rem; line-height: 1.55; color: var(--text); max-width: 68ch; }
+
 /* Firm-wide conflicts audit: each finding is the two sides of a file,
    side by side, with the matter ids as tabs you can pull. */
 .audit-summary { font-size: 0.85rem; line-height: 1.5; padding: 0.6rem 0.8rem; border-radius: 6px; background: var(--surface-2); border-left: 3px solid var(--accent); margin-top: 0.5rem; }

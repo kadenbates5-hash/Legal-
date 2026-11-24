@@ -54,6 +54,39 @@ afterEach(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
+describe("a signed-in mistake is never a 401", () => {
+  // The dashboard answers every 401 by sending the browser to the sign-in
+  // page. These used to be 401s, so a mistyped code or a blank field threw
+  // a signed-in attorney out of the app mid-task.
+  it("a mistyped code while setting up two-factor is a 400, and the session survives it", async () => {
+    const { cookie } = await login("dana");
+    await post(cookie!, "/api/mfa/begin", { password: "correct-horse" });
+    const wrong = await post(cookie!, "/api/mfa/confirm", { code: "000000" });
+    expect(wrong.status).toBe(400);
+    expect((await fetch(`${baseUrl}/api/me`, { headers: { Cookie: cookie! } })).status).toBe(200);
+  });
+
+  it("confirming before starting, or enabling twice, is a conflict rather than a sign-in failure", async () => {
+    const { cookie } = await login("dana");
+    expect((await post(cookie!, "/api/mfa/confirm", { code: "123456" })).status).toBe(409);
+    const { secret } = (await (await post(cookie!, "/api/mfa/begin", { password: "correct-horse" })).json()) as { secret: string };
+    await post(cookie!, "/api/mfa/confirm", { code: totpCode(secret, Date.now() - 30_000) });
+    const again = await login("dana", "correct-horse", totpCode(secret));
+    expect((await post(again.cookie!, "/api/mfa/begin", { password: "correct-horse" })).status).toBe(409);
+  });
+
+  it("a blank username when creating an account is a 400", async () => {
+    const { cookie } = await login("dana");
+    const res = await post(cookie!, "/api/accounts", { username: "", password: "correct-horse", role: "paralegal" });
+    expect(res.status).toBe(400);
+    expect((await fetch(`${baseUrl}/api/me`, { headers: { Cookie: cookie! } })).status).toBe(200);
+  });
+
+  it("a wrong password at sign-in is still a 401", async () => {
+    expect((await login("dana", "wrong-password")).res.status).toBe(401);
+  });
+});
+
 describe("MFA over HTTP", () => {
   it("requires a session for every /api/mfa route", async () => {
     for (const path of ["/api/mfa", "/api/mfa/begin", "/api/mfa/confirm", "/api/mfa/disable"]) {

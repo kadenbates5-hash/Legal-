@@ -133,10 +133,27 @@ export interface AuthSnapshot {
   passwordResetRequests?: PasswordResetRequest[];
 }
 
+/**
+ * What kind of failure an `AuthError` is, which is what decides its HTTP
+ * status — never the wording of its message.
+ *
+ * Only `unauthenticated` is a 401, and that matters more here than for
+ * any other error: the dashboard treats every 401 as "your session is
+ * gone" and sends the browser to the sign-in page. When the status was
+ * picked by matching message text, anything unmatched fell through to
+ * 401 — so a signed-in attorney who mistyped a code while setting up
+ * two-factor, or left a field blank creating an account, was thrown out
+ * to the sign-in page mid-task. The default stays `unauthenticated` so
+ * every sign-in failure keeps its 401 without saying so at each site.
+ */
+export type AuthErrorKind = "unauthenticated" | "invalid" | "forbidden" | "conflict" | "not_found" | "unavailable";
+
 export class AuthError extends Error {
-  constructor(message: string) {
+  readonly kind: AuthErrorKind;
+  constructor(message: string, kind: AuthErrorKind = "unauthenticated") {
     super(message);
     this.name = "AuthError";
+    this.kind = kind;
   }
 }
 
@@ -248,10 +265,10 @@ export class AuthService {
     phone?: string;
   }): User {
     const key = params.username.trim().toLowerCase();
-    if (!key) throw new AuthError("username must not be empty");
-    if (params.password.length < 8) throw new AuthError("password must be at least 8 characters");
+    if (!key) throw new AuthError("username must not be empty", "invalid");
+    if (params.password.length < 8) throw new AuthError("password must be at least 8 characters", "invalid");
     if (this.#usersByUsername.has(key)) {
-      throw new AuthError(`username '${params.username}' already exists`);
+      throw new AuthError(`username '${params.username}' already exists`, "invalid");
     }
     const salt = randomBytes(16).toString("hex");
     const email = params.email?.trim();
@@ -356,7 +373,7 @@ export class AuthService {
   verifyPassword(userId: string, password: string): void {
     const user = this.#requireUser(userId);
     if (!timingSafeStringEqual(hashSecret(password, user.salt), user.passwordHash)) {
-      throw new AuthError("current password is incorrect");
+      throw new AuthError("current password is incorrect", "forbidden");
     }
   }
 
@@ -416,7 +433,7 @@ export class AuthService {
     if (!user) {
       throw new Error(`no user '${userId}'`);
     }
-    if (newPassword.length < 8) throw new AuthError("password must be at least 8 characters");
+    if (newPassword.length < 8) throw new AuthError("password must be at least 8 characters", "invalid");
     const updated = this.#applyNewPassword(user, newPassword, true);
     this.#revokeAllSessions(userId);
     return updated;
@@ -437,9 +454,9 @@ export class AuthService {
       throw new Error(`no user '${userId}'`);
     }
     if (!timingSafeStringEqual(hashSecret(currentPassword, user.salt), user.passwordHash)) {
-      throw new AuthError("current password is incorrect");
+      throw new AuthError("current password is incorrect", "forbidden");
     }
-    if (newPassword.length < 8) throw new AuthError("password must be at least 8 characters");
+    if (newPassword.length < 8) throw new AuthError("password must be at least 8 characters", "invalid");
     const updated = this.#applyNewPassword(user, newPassword, false);
     this.#revokeAllSessions(userId);
     return updated;
@@ -493,7 +510,7 @@ export class AuthService {
     if (!request) {
       throw new AuthError("this password reset link is invalid or has expired — request a new one");
     }
-    if (newPassword.length < 8) throw new AuthError("password must be at least 8 characters");
+    if (newPassword.length < 8) throw new AuthError("password must be at least 8 characters", "invalid");
 
     const user = this.#usersById.get(request.userId);
     if (!user) {
@@ -554,7 +571,7 @@ export class AuthService {
   beginMfaEnrollment(userId: string, password: string, options: { issuer?: string } = {}): { secret: string; uri: string } {
     const user = this.#requireUser(userId);
     this.verifyPassword(userId, password);
-    if (user.mfa) throw new AuthError("two-factor authentication is already enabled for this account");
+    if (user.mfa) throw new AuthError("two-factor authentication is already enabled for this account", "conflict");
     const secret = generateTotpSecret();
     this.#replaceUser({ ...user, pendingMfaSecret: secret });
     return { secret, uri: totpUri({ secret, account: user.username, issuer: options.issuer ?? "Docket" }) };
@@ -575,11 +592,11 @@ export class AuthService {
    */
   confirmMfaEnrollment(userId: string, code: string): { recoveryCodes: string[] } {
     const user = this.#requireUser(userId);
-    if (user.mfa) throw new AuthError("two-factor authentication is already enabled for this account");
-    if (!user.pendingMfaSecret) throw new AuthError("start enrollment before confirming it");
+    if (user.mfa) throw new AuthError("two-factor authentication is already enabled for this account", "conflict");
+    if (!user.pendingMfaSecret) throw new AuthError("start enrollment before confirming it", "conflict");
     const step = verifyTotp(user.pendingMfaSecret, code);
     if (step === undefined) {
-      throw new AuthError("that code isn't valid — check your authenticator app's clock and try the current code");
+      throw new AuthError("that code isn't valid — check your authenticator app's clock and try the current code", "invalid");
     }
     const { plaintext, stored } = generateRecoveryCodes();
     const { pendingMfaSecret: _pending, ...rest } = user;
@@ -635,7 +652,7 @@ export class AuthService {
   /** A fresh set of recovery codes, invalidating the old ones. Plaintext returned once. */
   regenerateRecoveryCodes(userId: string): string[] {
     const user = this.#requireUser(userId);
-    if (!user.mfa) throw new AuthError("two-factor authentication is not enabled for this account");
+    if (!user.mfa) throw new AuthError("two-factor authentication is not enabled for this account", "conflict");
     const { plaintext, stored } = generateRecoveryCodes();
     this.#replaceUser({ ...user, mfa: { ...user.mfa, recoveryCodes: stored } });
     return plaintext;
@@ -697,7 +714,7 @@ export class AuthService {
    * ------------------------------------------------------------------ */
 
   #requireWebAuthn(): WebAuthnProvider {
-    if (!this.#webauthn) throw new AuthError("passkeys are not configured on this server");
+    if (!this.#webauthn) throw new AuthError("passkeys are not configured on this server", "unavailable");
     return this.#webauthn;
   }
 
@@ -732,7 +749,7 @@ export class AuthService {
       excludeCredentials: user.passkeys,
     });
     const challenge = (options as { challenge?: string }).challenge;
-    if (!challenge) throw new AuthError("could not start passkey registration");
+    if (!challenge) throw new AuthError("could not start passkey registration", "invalid");
     this.#pendingPasskeyRegistration.set(userId, { challenge, expiresAt: Date.now() + PASSKEY_CHALLENGE_TTL_MS });
     return options;
   }
@@ -748,10 +765,10 @@ export class AuthService {
     const pending = this.#pendingPasskeyRegistration.get(userId);
     this.#pendingPasskeyRegistration.delete(userId);
     if (!pending || pending.expiresAt < Date.now()) {
-      throw new AuthError("passkey registration has expired — start again");
+      throw new AuthError("passkey registration has expired — start again", "invalid");
     }
     const result = await this.#requireWebAuthn().verifyRegistration({ response, expectedChallenge: pending.challenge });
-    if (!result.verified) throw new AuthError("could not verify the new passkey");
+    if (!result.verified) throw new AuthError("could not verify the new passkey", "invalid");
     const record: PasskeyRecord = {
       ...result.credential,
       nickname: nickname.trim() || "Passkey",
@@ -780,7 +797,7 @@ export class AuthService {
     const user = this.#requireUser(userId);
     this.verifyPassword(userId, password);
     if (!user.passkeys.some((p) => p.id === passkeyId)) {
-      throw new AuthError(`no passkey '${passkeyId}' on this account`);
+      throw new AuthError(`no passkey '${passkeyId}' on this account`, "not_found");
     }
     const remaining = user.passkeys.filter((p) => p.id !== passkeyId);
     this.#replaceUser({ ...user, passkeys: remaining });
@@ -901,7 +918,7 @@ export class AuthService {
    * `core/deadline.ts`).
    */
   setSystemApiKey(rawKey: string): void {
-    if (rawKey.length < 16) throw new AuthError("system API key must be at least 16 characters");
+    if (rawKey.length < 16) throw new AuthError("system API key must be at least 16 characters", "invalid");
     const salt = randomBytes(16).toString("hex");
     this.#systemApiKey = { hash: hashSecret(rawKey, salt), salt };
   }
