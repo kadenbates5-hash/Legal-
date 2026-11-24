@@ -2833,7 +2833,7 @@ function renderSignerRows() {
     const row = document.createElement("div");
     row.className = "field-row signer-row";
     row.innerHTML = `
-      <label class="field">Name <input type="text" value="${escapeHtml(signer.name)}" data-signer-field="name" /></label>
+      <label class="field">Name <input type="text" maxlength="200" value="${escapeHtml(signer.name)}" data-signer-field="name" /></label>
       <label class="field">Email <input type="email" value="${escapeHtml(signer.email)}" data-signer-field="email" /></label>
     `;
     row.querySelector('[data-signer-field="name"]').addEventListener("input", (e) => { currentSigners[i].name = e.target.value; });

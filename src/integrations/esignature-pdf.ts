@@ -40,6 +40,24 @@ function toWinAnsi(value: string): string {
     .replace(/[^\x20-\x7e\xa1-\xff\n]/g, "?");
 }
 
+/**
+ * A value for the certificate, with nothing lost. The standard fonts
+ * can't draw "Ł" or "李", and `toWinAnsi` prints those as "?" — fine in a
+ * drafted letter, but a certificate whose job is to say who signed would
+ * read "?ukasz" or "??". Such a value is followed by every character
+ * written as a code point, so the record can still be read exactly.
+ */
+export function asTyped(value: string): string {
+  const drawable = toWinAnsi(value);
+  // The punctuation toWinAnsi swaps for a plain equivalent isn't a loss.
+  const swappedPunctuation = /[\u2018\u2019\u201a\u2032\u201c\u201d\u201e\u2033\u2013\u2014\u2212\u2026\u00a0\r\t]/g;
+  if (!/[^\x20-\x7e\xa1-\xff\n]/.test(value.replace(swappedPunctuation, ""))) return drawable;
+  const codes = [...value]
+    .map((c) => (/^[\x20-\x7e]$/.test(c) ? c : ` U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")} `))
+    .join("");
+  return `${drawable} (as typed: ${codes.replace(/\s+/g, " ").trim()})`;
+}
+
 function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const words = toWinAnsi(text).split(/\s+/).filter(Boolean);
   if (words.length === 0) return [""];
@@ -69,6 +87,24 @@ function wrap(text: string, font: PDFFont, size: number, maxWidth: number): stri
   }
   if (line) lines.push(line);
   return lines;
+}
+
+/**
+ * Whether these bytes are a PDF the certificate can later be appended to.
+ * Checked when a document is *sent*, because the certificate is built
+ * only when the last signer signs: a damaged or password-protected file
+ * (pdf-lib refuses encrypted ones) used to be accepted, and then failed
+ * at that last signature — after it was recorded, so the signer saw a
+ * parser error, the envelope read "completed" with no signed copy, and
+ * the signature never reached the audit log.
+ */
+export async function canStampPdf(bytes: Buffer): Promise<boolean> {
+  try {
+    await PDFDocument.load(bytes);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** SHA-256 hex of the exact bytes a signer will be shown — what every signature on this envelope is bound to. */
@@ -160,10 +196,13 @@ export async function stampCertificateOfCompletion(
   page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 0.5, color: RULE });
   y -= 18;
 
+  // Room is checked on every line, not once per field: a long value used
+  // to run off the bottom of the page, and what ran off isn't on the
+  // certificate at all.
   const field = (label: string, value: string) => {
-    ensure(14);
-    page.drawText(label, { x: MARGIN, y, size: 8, font: bold, color: MUTED });
-    for (const line of wrap(value, font, 9, maxWidth - 90)) {
+    for (const [i, line] of wrap(asTyped(value), font, 9, maxWidth - 90).entries()) {
+      ensure(14);
+      if (i === 0) page.drawText(label, { x: MARGIN, y, size: 8, font: bold, color: MUTED });
       page.drawText(line, { x: MARGIN + 90, y, size: 9, font, color: INK });
       y -= 12;
     }

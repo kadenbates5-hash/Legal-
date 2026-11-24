@@ -21,7 +21,7 @@
     <iframe id="pdfFrame" class="pdf-frame" title="Document to review and sign"></iframe>
 
     <form id="signForm">
-      <label>Type your full name to sign <input id="signatureText" type="text" autocomplete="name" required /></label>
+      <label>Type your full name to sign <input id="signatureText" type="text" autocomplete="name" maxlength="200" required /></label>
       <label class="consent"><input id="consentCheck" type="checkbox" required /> I agree that typing my name and clicking "Sign document" constitutes my legal signature on this document.</label>
       <button type="submit" class="submit">Sign document</button>
       <div id="formError" class="error"></div>

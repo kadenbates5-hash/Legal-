@@ -5,7 +5,10 @@ import { ESignatureStore, EsignatureError, type SignatureEnvelope, type Signer }
 import type { DocumentStore } from "../core/document-store.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
 import { assertSafeEmailAddress, type EmailSender } from "../integrations/email-sender.js";
-import { documentHash, renderPlainTextPdf, stampCertificateOfCompletion } from "../integrations/esignature-pdf.js";
+import { canStampPdf, documentHash, renderPlainTextPdf, stampCertificateOfCompletion } from "../integrations/esignature-pdf.js";
+
+/** A signer's name, as staff enter it and as the signer types it — long enough for any real name, short enough to fit the certificate. */
+const MAX_NAME_LENGTH = 200;
 
 /**
  * The paralegal/attorney-facing surface backing a "Signatures" panel —
@@ -149,6 +152,7 @@ export class ESignatureService {
     if (params.signers.length === 0) throw new EsignatureError("at least one signer is required");
     for (const s of params.signers) {
       if (!s.name.trim()) throw new EsignatureError("every signer needs a name");
+      if (s.name.trim().length > MAX_NAME_LENGTH) throw new EsignatureError(`a signer's name must be at most ${MAX_NAME_LENGTH} characters`);
       assertSafeEmailAddress(s.email);
     }
 
@@ -231,8 +235,13 @@ export class ESignatureService {
     requireSigningRole(actor);
     this.#accessControl.authorize({ actor, matterId, category: "case_file" });
     const envelope = this.#requireOnMatter(matterId, id);
-    if (envelope.status !== "completed" || !envelope.finalPdfContent) {
+    if (envelope.status !== "completed") {
       throw new EsignatureError(`envelope '${id}' is not yet fully signed`);
+    }
+    if (!envelope.finalPdfContent) {
+      throw new EsignatureError(
+        `every signer has signed envelope '${id}', but the signed copy with its certificate couldn't be produced — the audit log has the reason`,
+      );
     }
     const safe = envelope.title.replace(/[^\w\-. ]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
     return { filename: `${safe || id}.pdf`, data: Buffer.from(envelope.finalPdfContent, "base64") };
@@ -264,6 +273,9 @@ export class ESignatureService {
     if (!found) throw new EsignatureError("this signing link is invalid, expired, or has already been used");
     const signatureText = params.signatureText.trim();
     if (!signatureText) throw new EsignatureError("type your name to sign");
+    if (signatureText.length > MAX_NAME_LENGTH) {
+      throw new EsignatureError(`type your name to sign — at most ${MAX_NAME_LENGTH} characters`);
+    }
 
     const updated = this.#store.recordSignature(found.envelope.id, found.signer.id, {
       signatureText,
@@ -271,8 +283,21 @@ export class ESignatureService {
       ...(params.userAgent ? { userAgent: params.userAgent } : {}),
     });
 
-    let completedNote = "";
-    if (updated.status === "completed") {
+    // The signature is recorded, so it is audited now, before anything
+    // that could fail. Building the certificate used to come first, and
+    // when it threw the signature was on the envelope but in no log.
+    const completed = updated.status === "completed";
+    this.#auditLog.append({
+      actor: { id: found.signer.email, role: "anonymous" },
+      matterId: found.envelope.matterId,
+      action: "esignature_signed",
+      detail: `envelope=${found.envelope.id} signer=${found.signer.id} signedAs=${signatureText}${completed ? " (all signers complete — envelope fully executed)" : ""}`,
+    });
+    if (!completed) return;
+
+    // A failure here is the firm's to sort out, not the signer's: their
+    // signature stands, so they aren't shown an error for it.
+    try {
       const final = await stampCertificateOfCompletion(Buffer.from(updated.pdfContent, "base64"), {
         envelopeId: updated.id,
         title: updated.title,
@@ -286,15 +311,14 @@ export class ESignatureService {
         })),
       });
       this.#store.setFinalDocument(updated.id, final.toString("base64"));
-      completedNote = " (all signers complete — envelope fully executed)";
+    } catch (err) {
+      this.#auditLog.append({
+        actor: { id: found.signer.email, role: "anonymous" },
+        matterId: found.envelope.matterId,
+        action: "esignature_certificate_failed",
+        detail: `envelope=${found.envelope.id} error=${err instanceof Error ? err.message : String(err)}`,
+      });
     }
-
-    this.#auditLog.append({
-      actor: { id: found.signer.email, role: "anonymous" },
-      matterId: found.envelope.matterId,
-      action: "esignature_signed",
-      detail: `envelope=${found.envelope.id} signer=${found.signer.id} signedAs=${signatureText}${completedNote}`,
-    });
   }
 
   decline(token: string, reason: string): void {
@@ -323,7 +347,13 @@ export class ESignatureService {
       if (doc.contentType !== "application/pdf") {
         throw new EsignatureError(`'${doc.fileName}' is not a PDF — only a PDF document can be sent for signature`);
       }
-      return { bytes: Buffer.from(doc.content, "base64"), title: titleOverride.trim() || doc.fileName };
+      const bytes = Buffer.from(doc.content, "base64");
+      if (!(await canStampPdf(bytes))) {
+        throw new EsignatureError(
+          `'${doc.fileName}' couldn't be opened as a PDF — it may be damaged or password-protected. Save an unprotected copy and upload that.`,
+        );
+      }
+      return { bytes, title: titleOverride.trim() || doc.fileName };
     }
     const wp = this.#workProducts.get(sourceId);
     if (!wp || wp.matterId !== matterId) throw new EsignatureError(`no draft '${sourceId}' on matter '${matterId}'`);

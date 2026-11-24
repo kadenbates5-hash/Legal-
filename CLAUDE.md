@@ -1637,6 +1637,28 @@ to begin with; it must actually be a PDF (`contentType ===
   already allows with no policy change needed), a "type your full name
   to sign" field plus an explicit consent checkbox, and a "Decline to
   sign" option.
+- **A file that can't carry a certificate is refused when it's sent.**
+  The certificate is appended only when the last signer signs, and a
+  file labelled PDF that pdf-lib can't open — damaged, or
+  password-protected, which court and bank documents often are — used
+  to be accepted and fail at that moment. By then the signature was
+  recorded, so the signer saw the raw parser error for a signature that
+  had gone through, the envelope read "completed" while its download
+  said "not yet fully signed", the link was spent, and **the signature
+  never reached the audit log** (reproduced against a running server).
+  Now `send()` checks the file opens (`canStampPdf()`), and `sign()`
+  audits the signature *before* building the certificate; if that still
+  fails it writes `esignature_certificate_failed` with the reason, the
+  signer is told they've signed, and the download says the signed copy
+  couldn't be produced rather than that anyone still has to sign.
+- **The certificate says exactly who signed.** The standard PDF fonts
+  can't draw "Ł" or "李", which printed as "?ukasz" and "??" — on the
+  one page whose job is to identify the signer. `asTyped()` keeps the
+  drawable text and adds every character as a code point ("?ukasz
+  Nowak (as typed: U+0141 ukasz Nowak)"). A long value also no longer
+  runs off the bottom of the page (room is checked per line), and names
+  are capped at 200 characters where staff enter them and where the
+  signer types theirs.
 
 What this doesn't do: let a client sign through the client portal (the
 signer is deliberately outside that surface entirely, reached only
