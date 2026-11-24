@@ -830,33 +830,40 @@ async function handleRequest(
     if (result?.user.email) {
       const link = `${passwordReset.baseUrl}/reset-password.html?token=${encodeURIComponent(result.token)}`;
       const firmName = passwordReset.firmName ?? "Docket";
-      try {
-        await passwordReset.email.send({
-          to: assertSafeEmailAddress(result.user.email),
-          subject: `${firmName} password reset`,
-          text: [
-            "Hello,",
-            "",
-            `A password reset was requested for your ${firmName} account.`,
-            "",
-            `${link}`,
-            "",
-            "This link expires in an hour and can only be used once. If you didn't request this, you can ignore this message — your password hasn't changed.",
-          ].join("\n"),
+      auditLog?.append({
+        actor: { id: result.user.actorId, role: "anonymous" },
+        matterId: undefined,
+        action: "password_reset_requested",
+        detail: `user=${result.user.id} username=${result.user.username}`,
+      });
+      // Sent after the reply, not before it. Waiting on the mail server
+      // made a real account with an email answer a second or more later
+      // than any other username, which told whoever was asking exactly
+      // which usernames exist — the thing the identical message is for.
+      const userId = result.user.id;
+      void Promise.resolve()
+        .then(() =>
+          passwordReset.email.send({
+            to: assertSafeEmailAddress(result.user.email!),
+            subject: `${firmName} password reset`,
+            text: [
+              "Hello,",
+              "",
+              `A password reset was requested for your ${firmName} account.`,
+              "",
+              `${link}`,
+              "",
+              "This link expires in an hour and can only be used once. If you didn't request this, you can ignore this message — your password hasn't changed.",
+            ].join("\n"),
+          }),
+        )
+        .catch((err: unknown) => {
+          // The link was already issued — not sending the email isn't a
+          // reason to invent a different response, but it is worth a
+          // loud server-side log, since the account holder now thinks
+          // one is coming.
+          console.error(`password reset email failed for user ${userId}:`, err);
         });
-        auditLog?.append({
-          actor: { id: result.user.actorId, role: "anonymous" },
-          matterId: undefined,
-          action: "password_reset_requested",
-          detail: `user=${result.user.id} username=${result.user.username}`,
-        });
-      } catch (err) {
-        // The link was already issued — not sending the email isn't a
-        // reason to invent a different response, but it is worth a
-        // loud server-side log, since the account holder now thinks
-        // one is coming.
-        console.error(`password reset email failed for user ${result.user.id}:`, err);
-      }
     }
     sendJson(res, 200, { message: GENERIC_MESSAGE });
     onMutated?.();

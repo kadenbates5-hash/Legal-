@@ -1560,10 +1560,12 @@ to begin with; it must actually be a PDF (`contentType ===
   the exact bytes sent (`pdfContent`, base64) and their SHA-256
   (`documentHash`) at send time — never a live reference to a source
   that could change out from under a signature already collected. Each
-  `Signer` gets a single-use, hashed, salted, time-boxed (14-day) bearer
+  `Signer` gets a single-use, hashed, time-boxed (14-day) bearer
   token — the identical shape and reasoning as `core/auth.ts`'s
   `PasswordResetRequest`: whoever holds it can sign with no other proof
   of identity, so only the hash is ever stored, never the plaintext.
+  The hash is one SHA-256, not scrypt — see "Bearer tokens are checked
+  in one hash" under "Transport & session security".
   The envelope completes (`status: "completed"`) the moment every
   signer has signed; a signer declining moves the *whole* envelope to
   `"declined"` rather than just that signer, since a document missing a
@@ -2765,6 +2767,29 @@ Hardening that applies to every route, independent of any one panel.
   were decoded strictly, so a stray `promo=50%off` from another app on
   the same domain made every request, the dashboard page included, a 400
   "URI malformed". Decoding is now tolerant, same as path segments.
+- **Bearer tokens are checked in one hash** (`core/token-hash.ts`).
+  Signing links and password-reset links were stored with a per-record
+  salt and scrypt, so checking a presented token meant one scrypt *per
+  outstanding link*, and `scryptSync` blocks the process. With 30
+  signatures out, each request to `/api/sign/<anything>` — public, no
+  sign-in — held the whole server for 1.5 s (measured), so a few
+  requests a second took Docket down for everyone. These tokens are 192
+  random bits, which leaves a slow hash nothing to slow down, so they're
+  now one SHA-256 per lookup, compared timing-safely, and anything not
+  shaped like a token (48 hex characters) is refused before hashing.
+  Measured after: 1.1 ms with 30 outstanding. A record issued before the
+  change (non-empty salt) is still checked the old way until it
+  expires, so no link already sent stops working. Passwords keep
+  scrypt — they're guessable, which is what it's for.
+- **Sign-in takes as long for a username that doesn't exist.** Both
+  `login()` and `beginPasskeyLogin()` returned before hashing when the
+  account was missing or disabled: about 0 ms against about 50 ms for a
+  wrong password, so the identical message hid nothing from a
+  stopwatch. `#checkPassword()` now hashes every attempt, against a
+  random value no password produces when there's no account (measured
+  on a running server: 56.4 ms unknown vs 56.8 ms wrong password). The
+  forgot-password route had the same leak through its email; see
+  "Self-service password reset".
 
 ## Real authentication (§5/§6 — resolved)
 
@@ -3140,7 +3165,10 @@ not stored as plaintext anywhere, including in the persisted snapshot.
 
 - `AuthService.requestPasswordReset(username, ttlMinutes = 60)` issues
   a token (returned once, in-memory, never logged) for a known, enabled
-  username — and `undefined` for an unknown or disabled one. The
+  username — and `undefined` for an unknown or disabled one, or for an
+  account that already has `MAX_LIVE_PASSWORD_RESETS_PER_ACCOUNT` (3)
+  live, unused links: each one is an email to the account holder, so
+  without a cap anyone who knew a username could fill that inbox. The
   distinction never leaves this method: the HTTP route
   (`POST /api/forgot-password`, public/unauthenticated, same bucket as
   `/api/login`) sends the *exact same* response either way, the same
@@ -3164,11 +3192,14 @@ not stored as plaintext anywhere, including in the persisted snapshot.
   `POST /api/forgot-password` still returns the identical generic
   message (nothing it ever says distinguishes "no such account" from
   "account exists but has no email") — the holder calls the office,
-  the same fallback this project already names for every other gap. If
-  the email transport itself fails *after* the token was already
-  issued, that's logged server-side rather than changing the response —
-  the token is real either way, so inventing a different answer because
-  the send failed would just be a second kind of lie.
+  the same fallback this project already names for every other gap. The
+  email is sent **after** the reply, not before it: waiting on the mail
+  server made a real account with an email answer a second or more
+  later than any other username, which told anyone timing the route
+  which usernames exist. If the transport fails, that's logged
+  server-side rather than changing the response — the token is real
+  either way, so inventing a different answer because the send failed
+  would just be a second kind of lie.
 - `server.ts`'s `PasswordResetConfig` (a plain config object, same
   shape as `TwilioVoiceConfig`) carries the `EmailSender` and the
   externally-reachable base URL the reset link points at. Absent
@@ -3187,10 +3218,10 @@ not stored as plaintext anywhere, including in the persisted snapshot.
 
 What this doesn't do: email verification at signup (there is no
 self-service signup at all — an account is still always created by an
-attorney), rate-limit `/api/forgot-password` beyond the request-body
-ceiling every route already has (the token's 192 bits of entropy is the
-real defense against guessing, the same reasoning session tokens rely
-on without their own separate throttle), or support a second mail
+attorney), rate-limit `/api/forgot-password` per address beyond the
+per-account cap above (the token's 192 bits of entropy is the real
+defense against guessing, the same reasoning session tokens rely on
+without their own separate throttle), or support a second mail
 template/locale.
 
 ## Client portal

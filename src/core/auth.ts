@@ -1,6 +1,7 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { AgentRole } from "./types.js";
 import { generateTotpSecret, totpUri, verifyTotp } from "./totp.js";
+import { bearerTokenDigest, looksLikeBearerToken, sameDigest } from "./token-hash.js";
 import type { StoredPasskey, WebAuthnProvider } from "../integrations/webauthn-provider.js";
 
 /**
@@ -111,11 +112,13 @@ export interface SystemApiKeyRecord {
 }
 
 /**
- * A self-service "forgot password" link's bearer token, stored the same
- * way a recovery code is — hashed, never the plaintext — because it's
- * the same shape of secret: whoever holds it can set a new password
- * with no other proof of identity. `requestPasswordReset()` is the one
- * moment the plaintext exists; after that only this hash does.
+ * A self-service "forgot password" link's bearer token, stored hashed,
+ * never the plaintext — whoever holds it can set a new password with no
+ * other proof of identity. `requestPasswordReset()` is the one moment
+ * the plaintext exists; after that only this hash does. The token is 192
+ * random bits, so the hash is a single SHA-256 (`token-hash.ts`) and
+ * `salt` is empty; a salted record is one issued before that, checked
+ * with scrypt until its hour runs out.
  */
 export interface PasswordResetRequest {
   readonly userId: string;
@@ -200,6 +203,28 @@ function timingSafeStringEqual(a: string, b: string): boolean {
   if (bufA.length !== bufB.length) return false;
   return timingSafeEqual(bufA, bufB);
 }
+
+/**
+ * What a sign-in attempt for an account that doesn't exist is checked
+ * against. Without it, an unknown username was refused before the
+ * password was hashed — in about 0 ms, against about 50 ms for a real
+ * account with a wrong password — so anyone could list the firm's
+ * usernames by timing `/api/login`, whatever the message said. Hashing
+ * the attempt anyway, against a value no password produces, makes both
+ * take the same time.
+ */
+const ABSENT_ACCOUNT_SALT = randomBytes(16).toString("hex");
+const ABSENT_ACCOUNT_HASH = randomBytes(SCRYPT_KEYLEN).toString("hex");
+
+/**
+ * Live, unused reset links one account can have at a time. Each request
+ * mails the account holder, so without a cap anyone who knew a username
+ * could fill that inbox — and the snapshot — with reset links. Three
+ * covers a mistyped address or a lost email; past that the request is
+ * answered exactly like any other (nothing tells the requester), and
+ * nothing is sent until one is used or expires.
+ */
+export const MAX_LIVE_PASSWORD_RESETS_PER_ACCOUNT = 3;
 
 /** How many recovery codes are issued at once. Ten is enough to lose a few and still have some. */
 const RECOVERY_CODE_COUNT = 10;
@@ -403,16 +428,28 @@ export class AuthService {
   }
 
   /**
+   * The account a username and password sign in as, or `undefined`. The
+   * password is hashed whether or not the account exists or may sign in,
+   * so the time taken says nothing about which (see `ABSENT_ACCOUNT_HASH`).
+   */
+  #checkPassword(username: string, password: string): User | undefined {
+    const user = this.#usersByUsername.get(username.trim().toLowerCase());
+    const matches = timingSafeStringEqual(
+      hashSecret(password, user?.salt ?? ABSENT_ACCOUNT_SALT),
+      user?.passwordHash ?? ABSENT_ACCOUNT_HASH,
+    );
+    return user && matches && this.#canSignIn(user) ? user : undefined;
+  }
+
+  /**
    * Verifies credentials and issues a new session. Throws AuthError on any
    * mismatch — a disabled account fails with the exact same message as a
    * wrong password, so probing a username never reveals whether it exists
    * or has been disabled.
    */
   login(username: string, password: string, remember: boolean, mfaCode?: string): Session {
-    const user = this.#usersByUsername.get(username.trim().toLowerCase());
-    if (!user || !this.#canSignIn(user) || !timingSafeStringEqual(hashSecret(password, user.salt), user.passwordHash)) {
-      throw new AuthError("invalid username or password");
-    }
+    const user = this.#checkPassword(username, password);
+    if (!user) throw new AuthError("invalid username or password");
     if (user.mfa) {
       const supplied = mfaCode?.trim() ?? "";
       if (!supplied) throw new MfaRequiredError(user.passkeys.length > 0);
@@ -580,13 +617,14 @@ export class AuthService {
 
     const user = this.#usersByUsername.get(username.trim().toLowerCase());
     if (!user || !this.#canSignIn(user)) return undefined;
+    const live = this.#passwordResetRequests.filter((r) => r.userId === user.id && !r.usedAt).length;
+    if (live >= MAX_LIVE_PASSWORD_RESETS_PER_ACCOUNT) return undefined;
 
     const token = randomBytes(24).toString("hex");
-    const salt = randomBytes(16).toString("hex");
     this.#passwordResetRequests.push({
       userId: user.id,
-      hash: hashSecret(token, salt),
-      salt,
+      hash: bearerTokenDigest(token),
+      salt: "",
       expiresAt: new Date(now + ttlMinutes * 60_000).toISOString(),
     });
     return { user, token };
@@ -602,9 +640,18 @@ export class AuthService {
    */
   resetPasswordWithToken(token: string, newPassword: string): User {
     const now = Date.now();
-    const request = this.#passwordResetRequests.find(
-      (r) => !r.usedAt && Date.parse(r.expiresAt) >= now && timingSafeStringEqual(hashSecret(token, r.salt), r.hash),
-    );
+    // Hashed once, not once per outstanding link: this route needs no
+    // sign-in, and a scrypt per stored request blocked the server for as
+    // long as anyone cared to keep asking.
+    const digest = looksLikeBearerToken(token) ? bearerTokenDigest(token) : undefined;
+    const request = digest
+      ? this.#passwordResetRequests.find(
+          (r) =>
+            !r.usedAt &&
+            Date.parse(r.expiresAt) >= now &&
+            (r.salt ? timingSafeStringEqual(hashSecret(token, r.salt), r.hash) : sameDigest(digest, r.hash)),
+        )
+      : undefined;
     if (!request) {
       throw new AuthError("this password reset link is invalid or has expired — request a new one");
     }
@@ -913,10 +960,8 @@ export class AuthService {
    * TOTP code instead.
    */
   async beginPasskeyLogin(username: string, password: string): Promise<unknown> {
-    const user = this.#usersByUsername.get(username.trim().toLowerCase());
-    if (!user || !this.#canSignIn(user) || !timingSafeStringEqual(hashSecret(password, user.salt), user.passwordHash)) {
-      throw new AuthError("invalid username or password");
-    }
+    const user = this.#checkPassword(username, password);
+    if (!user) throw new AuthError("invalid username or password");
     if (user.passkeys.length === 0) {
       throw new AuthError("this account has no passkey registered");
     }

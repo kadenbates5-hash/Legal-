@@ -1,4 +1,5 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { bearerTokenDigest, looksLikeBearerToken, sameDigest } from "./token-hash.js";
 
 /**
  * Electronic signature envelopes — getting an already-attorney-approved
@@ -84,13 +85,18 @@ function timingSafeStringEqual(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
+/**
+ * A signer's link token, stored as a SHA-256 digest (see `token-hash.ts`
+ * for why not scrypt). An empty `tokenSalt` marks this scheme; a salted
+ * record is one issued before it, still checked the old way until its 14
+ * days run out.
+ */
 function issueToken(now: number): { tokenHash: string; tokenSalt: string; tokenExpiresAt: string; plaintext: string } {
   const plaintext = randomBytes(24).toString("hex");
-  const salt = randomBytes(16).toString("hex");
   return {
     plaintext,
-    tokenHash: hashToken(plaintext, salt),
-    tokenSalt: salt,
+    tokenHash: bearerTokenDigest(plaintext),
+    tokenSalt: "",
     tokenExpiresAt: new Date(now + TOKEN_TTL_MS).toISOString(),
   };
 }
@@ -175,15 +181,18 @@ export class ESignatureStore {
    * never be usable as a lookup key in storage.
    */
   findSignerByToken(token: string): { envelope: SignatureEnvelope; signer: Signer } | undefined {
+    if (!looksLikeBearerToken(token)) return undefined;
     const now = Date.now();
+    const digest = bearerTokenDigest(token);
     for (const envelope of this.#byId.values()) {
       if (envelope.status !== "sent") continue;
       for (const signer of envelope.signers) {
         if (signer.status !== "pending") continue;
         if (Date.parse(signer.tokenExpiresAt) < now) continue;
-        if (timingSafeStringEqual(hashToken(token, signer.tokenSalt), signer.tokenHash)) {
-          return { envelope, signer };
-        }
+        const matches = signer.tokenSalt
+          ? timingSafeStringEqual(hashToken(token, signer.tokenSalt), signer.tokenHash) // issued before SHA-256
+          : sameDigest(digest, signer.tokenHash);
+        if (matches) return { envelope, signer };
       }
     }
     return undefined;
