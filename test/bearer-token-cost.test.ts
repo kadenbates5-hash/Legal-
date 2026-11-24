@@ -5,6 +5,7 @@ import type { Server } from "node:http";
 import { ESignatureStore } from "../src/core/esignature.js";
 import { AuthService, AuthError, MAX_LIVE_PASSWORD_RESETS_PER_ACCOUNT } from "../src/core/auth.js";
 import { createReviewServer } from "../src/review-ui/server.js";
+import { LoginThrottle } from "../src/core/login-throttle.js";
 import { ReviewGateService } from "../src/review-ui/review-service.js";
 import { WorkProductStore } from "../src/core/work-product-store.js";
 import type { EmailMessage, EmailResult, EmailSender } from "../src/integrations/email-sender.js";
@@ -240,5 +241,81 @@ describe("POST /api/forgot-password", () => {
     expect(await ask("alice")).toEqual(await ask("nobody"));
     // And the server is still up after the failed send.
     expect((await fetch(`${base}/api/me`)).status).toBe(401);
+  });
+});
+
+describe("the system API key", () => {
+  it("is scrypt-checked once, then recognised cheaply", () => {
+    const auth = new AuthService();
+    const key = randomBytes(24).toString("hex");
+    auth.setSystemApiKey(key);
+    expect(auth.isRememberedSystemApiKey(key)).toBe(false);
+    expect(auth.verifySystemApiKey(key)).toBe(true);
+    expect(auth.isRememberedSystemApiKey(key)).toBe(true);
+    const again = timeOf(() => auth.verifySystemApiKey(key));
+    expect(again).toBeLessThan(10); // a scrypt is ~50 ms
+    expect(auth.verifySystemApiKey(`${key}x`)).toBe(false);
+    expect(auth.isRememberedSystemApiKey(`${key}x`)).toBe(false);
+  });
+
+  it("forgets the old key the moment a new one is set", () => {
+    const auth = new AuthService();
+    const oldKey = randomBytes(24).toString("hex");
+    auth.setSystemApiKey(oldKey);
+    expect(auth.verifySystemApiKey(oldKey)).toBe(true);
+    auth.setSystemApiKey(randomBytes(24).toString("hex"));
+    expect(auth.isRememberedSystemApiKey(oldKey)).toBe(false);
+    expect(auth.verifySystemApiKey(oldKey)).toBe(false);
+  });
+
+  it("never puts the remembered digest in the snapshot", () => {
+    const auth = new AuthService();
+    const key = randomBytes(24).toString("hex");
+    auth.setSystemApiKey(key);
+    auth.verifySystemApiKey(key);
+    const restored = AuthService.fromSnapshot(auth.toSnapshot());
+    expect(restored.isRememberedSystemApiKey(key)).toBe(false);
+    expect(restored.verifySystemApiKey(key)).toBe(true);
+  });
+
+  describe("over HTTP", () => {
+    let server: Server | undefined;
+    afterEach(async () => {
+      if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+      server = undefined;
+    });
+
+    async function boot() {
+      const auth = new AuthService();
+      auth.createUser({ username: "alice", password: "correct-horse", role: "attorney" });
+      const key = randomBytes(24).toString("hex");
+      auth.setSystemApiKey(key);
+      server = createReviewServer(new ReviewGateService(new WorkProductStore()), auth, { loginThrottle: new LoginThrottle() });
+      await new Promise<void>((resolve) => server!.listen(0, resolve));
+      return { key, base: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+    }
+    const me = (base: string, key: string) => fetch(`${base}/api/me`, { headers: { "x-system-api-key": key } });
+
+    it("refuses wrong keys from one address before hashing them, once there have been five", async () => {
+      const { key, base } = await boot();
+      expect((await me(base, key)).status).toBe(200); // the real integration, seen to work
+      for (let i = 0; i < 5; i++) expect((await me(base, randomBytes(24).toString("hex"))).status).toBe(401);
+
+      const start = performance.now();
+      const refused = await me(base, randomBytes(24).toString("hex"));
+      expect(refused.status).toBe(429);
+      expect(performance.now() - start).toBeLessThan(40);
+      expect((await refused.json()).error).toMatch(/too many wrong system API keys/);
+
+      // The integration, already recognised, isn't locked out by the stranger.
+      expect((await me(base, key)).status).toBe(200);
+      // And people at the same address can still sign in.
+      const login = await fetch(`${base}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: "alice", password: "correct-horse" }),
+      });
+      expect(login.status).toBe(200);
+    });
   });
 });

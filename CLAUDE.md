@@ -2790,6 +2790,24 @@ Hardening that applies to every route, independent of any one panel.
   on a running server: 56.4 ms unknown vs 56.8 ms wrong password). The
   forgot-password route had the same leak through its email; see
   "Self-service password reset".
+- **The system API key can't be used to make the server hash.** Any
+  request carrying `x-system-api-key` cost one blocking scrypt (~45 ms),
+  with no session needed and no limit, so the same few-requests-a-second
+  trick worked here too — and the integrations themselves paid it on
+  every call. The key stays scrypt-hashed at rest, since an operator may
+  choose it (`CALENDAR_SYSTEM_API_KEY`) and a chosen key can be
+  guessable. But once a key has passed, a SHA-256 of it is remembered
+  **in memory only** (never in the snapshot, cleared by
+  `setSystemApiKey`), so the integration's later calls cost about a
+  millisecond. Any other value is counted per address under its own
+  `LoginThrottle.systemKeyKey` — not `ipKey`, so a misconfigured cron job
+  can't lock the office out of signing in — and after five wrong keys
+  the address gets a 429 before anything is hashed. The remembered key
+  is checked *before* the throttle, so a stranger at a shared address
+  can't lock the real integration out; the one gap is a restart, until
+  the integration's first successful call. Measured on a running server:
+  first good call 50 ms, then 1 ms; wrong keys 42 ms each, then 429 in
+  under 1 ms.
 
 ## Real authentication (§5/§6 — resolved)
 

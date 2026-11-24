@@ -72,6 +72,15 @@ export class LoginThrottle {
   }
 
   /**
+   * Wrong `x-system-api-key` values from one address. Counted apart from
+   * `ipKey`, so a misconfigured sync job can't lock the people in the
+   * same office out of signing in, and the reverse.
+   */
+  static systemKeyKey(ip: string): string {
+    return `system-key:${ip}`;
+  }
+
+  /**
    * Whether an attempt may proceed. Checked *before* the password is
    * verified, so a locked-out key never reaches `scrypt` — that's what
    * makes this a defense against the CPU cost and not just the guessing.

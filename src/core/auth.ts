@@ -326,6 +326,8 @@ export class AuthService {
   #usersByUsername = new Map<string, User>();
   #sessions = new Map<string, Session>();
   #passwordResetRequests: PasswordResetRequest[] = [];
+  /** In memory only — see `verifySystemApiKey`. */
+  #verifiedSystemKeyDigest: string | undefined;
   #systemApiKey: SystemApiKeyRecord | undefined;
   #webauthn: WebAuthnProvider | undefined;
   #pendingPasskeyRegistration = new Map<string, { challenge: string; expiresAt: number }>();
@@ -1065,15 +1067,35 @@ export class AuthService {
     if (rawKey.length < 16) throw new AuthError("system API key must be at least 16 characters", "invalid");
     const salt = randomBytes(16).toString("hex");
     this.#systemApiKey = { hash: hashSecret(rawKey, salt), salt };
+    this.#verifiedSystemKeyDigest = undefined;
   }
 
   hasSystemApiKey(): boolean {
     return this.#systemApiKey !== undefined;
   }
 
+  /**
+   * The stored key is scrypt-hashed, because an operator may choose it
+   * (`CALENDAR_SYSTEM_API_KEY`) and a chosen key can be guessable. But
+   * scrypt blocks the process, and the integrations present the key on
+   * every request — a sync run makes dozens. So once a key has passed
+   * the slow check, a SHA-256 of it is remembered in memory (never in
+   * the snapshot) and later requests carrying it cost a microsecond.
+   * Only a key that hasn't been seen to work pays for scrypt, and
+   * `server.ts` throttles those per address (`LoginThrottle.systemKeyKey`)
+   * so nobody can make the server hash on demand.
+   */
   verifySystemApiKey(rawKey: string | undefined): boolean {
     if (!rawKey || !this.#systemApiKey) return false;
-    return timingSafeStringEqual(hashSecret(rawKey, this.#systemApiKey.salt), this.#systemApiKey.hash);
+    if (this.isRememberedSystemApiKey(rawKey)) return true;
+    const ok = timingSafeStringEqual(hashSecret(rawKey, this.#systemApiKey.salt), this.#systemApiKey.hash);
+    if (ok) this.#verifiedSystemKeyDigest = bearerTokenDigest(rawKey);
+    return ok;
+  }
+
+  /** True when this exact key has already passed `verifySystemApiKey` since the key was last set. Cheap. */
+  isRememberedSystemApiKey(rawKey: string): boolean {
+    return this.#verifiedSystemKeyDigest !== undefined && sameDigest(bearerTokenDigest(rawKey), this.#verifiedSystemKeyDigest);
   }
 
   #sessionForToken(token: string | undefined): Session | undefined {

@@ -155,11 +155,30 @@ function clearSessionCookieHeader(): string {
  * session), then falls back to the session cookie. Throws AuthError if
  * neither is present/valid — callers must catch this and respond 401.
  */
-function resolveActor(req: IncomingMessage, auth: AuthService): Actor {
+function resolveActor(req: IncomingMessage, auth: AuthService, guard: SystemKeyGuard): Actor {
   const apiKey = firstHeader(req.headers["x-system-api-key"]);
   if (apiKey) {
-    if (!auth.verifySystemApiKey(apiKey)) {
-      throw new AuthError("invalid system API key");
+    // A key already seen to work is a cheap check (see
+    // `AuthService.verifySystemApiKey`). Any other value costs a blocking
+    // scrypt, and this header needs no session to send, so wrong keys
+    // are counted per address and refused before hashing once there
+    // have been too many — the same treatment `/api/login` gives a
+    // password. Checked after the cheap path, so a stranger hammering
+    // from a shared address can't lock out the real integration.
+    if (!auth.isRememberedSystemApiKey(apiKey)) {
+      const keys = [LoginThrottle.systemKeyKey(guard.ip)];
+      const decision = guard.throttle?.check(keys) ?? { allowed: true, retryAfterSeconds: 0 };
+      if (!decision.allowed) {
+        throw new TooManyAttemptsError(
+          `too many wrong system API keys from this address — try again in ${decision.retryAfterSeconds} seconds`,
+          decision.retryAfterSeconds,
+        );
+      }
+      if (!auth.verifySystemApiKey(apiKey)) {
+        guard.throttle?.recordFailure(keys);
+        throw new AuthError("invalid system API key");
+      }
+      guard.throttle?.recordSuccess(keys);
     }
     return { id: "calendar-integration", role: "system" };
   }
@@ -170,6 +189,22 @@ function resolveActor(req: IncomingMessage, auth: AuthService): Actor {
     throw new AuthError("authentication required");
   }
   return actor as Actor;
+}
+
+interface SystemKeyGuard {
+  throttle: LoginThrottle | undefined;
+  ip: string;
+}
+
+/** Refused before any check was made, because this address has failed too often. 429. */
+export class TooManyAttemptsError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterSeconds: number,
+  ) {
+    super(message);
+    this.name = "TooManyAttemptsError";
+  }
 }
 
 export class RequestBodyTooLargeError extends Error {
@@ -341,6 +376,7 @@ function decodeSegment(segment: string): string {
 
 function errorStatus(err: unknown): number {
   if (err instanceof RequestBodyTooLargeError) return 413;
+  if (err instanceof TooManyAttemptsError) return 429;
   if (err instanceof AuthError) {
     // The error says what kind it is. Only a real sign-in failure is a
     // 401, because the dashboard answers every 401 by sending the browser
@@ -695,6 +731,7 @@ async function handleRequest(
   // UNAUTHENTICATED_BODY_LIMIT_BYTES); raised once `resolveActor` succeeds.
   requestBodyLimits.set(req, Math.min(maxRequestBodyBytes, UNAUTHENTICATED_BODY_LIMIT_BYTES));
   const url = new URL(req.url ?? "/", "http://localhost");
+  const systemKeyGuard: SystemKeyGuard = { throttle: loginThrottle, ip: clientIpFor(req, trustProxy) };
 
   if (url.pathname.startsWith("/api/voice/")) {
     await handleVoiceRequest({ voiceCalls, audioClips, twilio }, req, res, url);
@@ -1030,7 +1067,7 @@ async function handleRequest(
 
   if (url.pathname === "/api/me" && req.method === "GET") {
     try {
-      const actor = resolveActor(req, auth);
+      const actor = resolveActor(req, auth, systemKeyGuard);
       const user = auth.userForToken(parseCookies(req)[SESSION_COOKIE_NAME]);
       sendJson(res, 200, {
         id: actor.id,
@@ -1056,7 +1093,7 @@ async function handleRequest(
    */
   if (url.pathname === "/api/capabilities" && req.method === "GET") {
     try {
-      const actor = resolveActor(req, auth);
+      const actor = resolveActor(req, auth, systemKeyGuard);
       if (actor.role !== "attorney" && actor.role !== "paralegal" && actor.role !== "receptionist") {
         throw new AccessDeniedError(`capabilities are for staff (got role '${actor.role}')`);
       }
@@ -1291,7 +1328,7 @@ async function handleRequest(
   }
 
   try {
-    const actor = resolveActor(req, auth);
+    const actor = resolveActor(req, auth, systemKeyGuard);
     // Signed in (or the system key): a document upload may now arrive.
     requestBodyLimits.set(req, maxRequestBodyBytes);
 
