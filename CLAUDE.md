@@ -2023,7 +2023,13 @@ deliberately no default: retention periods differ substantially by
 jurisdiction and matter type, so absent config a matter closes with no
 retention date rather than one this software invented. Reopening clears
 both the closed date and the retention date, so a live matter can never
-surface as "due for review".
+surface as "due for review". The period must be whole years from 0 to
+100 (`checkedRetentionYears()`), checked once at boot for the config file
+— which stops the server with a plain message — and on the close route's
+override. Neither was checked: `"fileRetentionYears": "7"` in the JSON
+made `addYears` concatenate and stamp a retention date in the year
+20267, and 2.5 stored "2028.5-11-25", which no review list ever finds. A
+numeric string is now read as its number.
 
 `listRetentionDue()` lists closed matters past their date — and is *only*
 a list. Nothing here deletes anything, and a test asserts there is no
@@ -2130,7 +2136,11 @@ payroll to trust.
   payments exist (that's a refund, not a disappearance), payment is
   refused before sending and after voiding, and **overpayment is
   refused** rather than absorbed into a negative balance, since it's
-  money the firm would then owe back. A payment's method must be one the
+  money the firm would then owe back. A draft's due date must be a real
+  day and its note at most 2,000 characters — both are printed on the
+  client's bill, and a due date of "garbage" or "2026-13-45" used to be
+  printed there and counted from by the overdue and aging reports. A
+  payment's method must be one the
   client's copy can name (`card`/`ach`/`check`/`cash`/`other`, plus the
   internal `trust_application`).
 - `integrations/payment-processor.ts` — vendor-agnostic
