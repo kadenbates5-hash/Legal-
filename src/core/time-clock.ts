@@ -25,6 +25,8 @@
  * Durations are always derived from the two timestamps, never stored, so
  * a corrected punch can't leave a stale total behind.
  */
+import { parseZonedInstant, zonedInstantProblem } from "./instant.js";
+
 /**
  * Why a punch was refused. Carried explicitly rather than left for a
  * caller to infer from the message text — an HTTP layer matching status
@@ -132,9 +134,6 @@ function isoWeekOf(localDate: string): { key: string; startDate: string } {
   };
 }
 
-/** An instant with its zone written down: `2026-07-20T09:00:00Z` or `…T09:00-04:00`. */
-const ZONED_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/i;
-
 /**
  * A corrected punch, as an instant. Two ways a correction used to record
  * the wrong hours: a time written without its zone ("2026-07-20T09:00")
@@ -144,18 +143,12 @@ const ZONED_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?
  * covers two clocks that disagree slightly.
  */
 function checkedPunch(value: unknown, label: string, now: Date): string {
-  const text = typeof value === "string" ? value.trim() : "";
-  if (!ZONED_INSTANT.test(text) || Number.isNaN(Date.parse(text))) {
-    throw new TimeClockError(
-      `the ${label} time must be a date and time with its zone, like 2026-07-20T09:00:00-04:00 (got ${JSON.stringify(value ?? null)}) — without one it would be read in the server's zone`,
-      "invalid",
-    );
-  }
-  const ms = Date.parse(text);
-  if (ms > now.getTime() + 60_000) {
+  const instant = parseZonedInstant(value);
+  if (!instant) throw new TimeClockError(`the ${zonedInstantProblem(`${label} time`, value)}`, "invalid");
+  if (instant.getTime() > now.getTime() + 60_000) {
     throw new TimeClockError(`the ${label} time is in the future — a punch records time already worked`, "invalid");
   }
-  return new Date(ms).toISOString();
+  return instant.toISOString();
 }
 
 export class TimeClock {

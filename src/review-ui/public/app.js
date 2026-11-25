@@ -185,9 +185,12 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
       loadDueReminders();
       loadBookingRequests();
     }
-    if (panel === "signatures" && signaturesMatterId().trim() && capabilities?.esignature !== false) {
-      loadSignatureSources();
-      loadSignatures();
+    if (panel === "signatures" && signaturesMatterId().trim()) {
+      capabilitiesReady.then(() => {
+        if (capabilities?.esignature === false) return;
+        loadSignatureSources();
+        loadSignatures();
+      });
     }
   });
 }
@@ -374,6 +377,14 @@ let speechAvailable = false;
  * refuses anything it isn't configured for.
  */
 let capabilities = null;
+/**
+ * Settles once the probe has answered (or been skipped). A panel opened
+ * in the first moment after sign-in used to find `capabilities` still
+ * null, read that as "available", and ask for a feature the server
+ * doesn't have — a 404 in the console on every quick click to Scheduling.
+ */
+let resolveCapabilities;
+const capabilitiesReady = new Promise((resolve) => { resolveCapabilities = resolve; });
 
 /**
  * What each optional feature needs, written for whoever reads it: the
@@ -407,11 +418,15 @@ function markUnconfigured(feature) {
 }
 
 async function loadCapabilities() {
-  if (currentRole !== "attorney" && currentRole !== "paralegal" && currentRole !== "receptionist") return;
-  capabilities = await tryApi("/api/capabilities");
-  if (!capabilities) return;
-  for (const feature of Object.keys(UNCONFIGURED)) {
-    if (capabilities[feature] === false) markUnconfigured(feature);
+  try {
+    if (currentRole !== "attorney" && currentRole !== "paralegal" && currentRole !== "receptionist") return;
+    capabilities = await tryApi("/api/capabilities");
+    if (!capabilities) return;
+    for (const feature of Object.keys(UNCONFIGURED)) {
+      if (capabilities[feature] === false) markUnconfigured(feature);
+    }
+  } finally {
+    resolveCapabilities();
   }
 }
 
@@ -509,7 +524,9 @@ async function loadWhoami() {
       document.querySelector('nav.nav button[data-panel="security"]')?.click();
     }
   } catch (err) {
-    // api() already redirects to /login.html on 401.
+    // api() already redirects to /login.html on 401. Anything else: don't
+    // leave panels waiting on a probe that will never run.
+    resolveCapabilities();
   }
 }
 
@@ -752,6 +769,7 @@ document.getElementById("passkeyAddBtn").addEventListener("click", async () => {
  */
 async function loadCalendarConnectionStatus() {
   const card = document.getElementById("calendarConnectionCard");
+  await capabilitiesReady;
   if (capabilities && capabilities.calendarConnection === false) {
     card.hidden = true;
     return;
@@ -1755,6 +1773,7 @@ async function loadBookingRequests() {
   const card = document.getElementById("bookingRequestsCard");
   const list = document.getElementById("bookingRequestList");
   // Known to be off: don't ask, and don't leave a 404 in the console.
+  await capabilitiesReady;
   if (capabilities && capabilities.publicBooking === false) {
     card.hidden = true;
     return;

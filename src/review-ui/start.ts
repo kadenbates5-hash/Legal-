@@ -735,6 +735,8 @@ const assistant = ANTHROPIC_API_KEY
       }),
       auditLog: state.auditLog,
       toolDeps: { drafting, documents, cases, research, scheduling: state.scheduling, reviewGate: service },
+      // Business hours are judged in the firm config's zone, so "10am" should mean the same.
+      timeZone: firmConfig?.businessHours?.timezone ?? FIRM_TIME_ZONE,
     })
   : undefined;
 

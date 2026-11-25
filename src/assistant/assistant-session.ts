@@ -1,3 +1,4 @@
+import { utcOffsetLabel } from "../core/instant.js";
 import type { Actor } from "../core/types.js";
 import type { AuditLog } from "../core/audit.js";
 import type { ClaudeClient, ClaudeContentBlock, ClaudeMessage } from "../integrations/anthropic.js";
@@ -15,28 +16,77 @@ Hard limits, not suggestions:
 - A case-law search result is not a verified citation, and a drafted research summary is not verified legal analysis — say so when it's relevant, and never present either as ready to send to a client or file with a court.
 - If something you're asked to do isn't covered by your tools, say so plainly instead of improvising around the restriction.`;
 
+/**
+ * What "today" and "10am" mean at this firm, for the system prompt. The
+ * model has no clock: asked to book "tomorrow at 10", it guessed the date
+ * from its training and wrote the time with no zone, which the server
+ * read as UTC. This tells it the date, the time and the firm's offset,
+ * and how to write a time so it lands where it was meant.
+ */
+export function firmClockContext(timeZone: string, now: Date): string {
+  let zone = timeZone;
+  let when: string;
+  try {
+    when = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(now);
+  } catch {
+    zone = "UTC";
+    when = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", dateStyle: "full", timeStyle: "short" }).format(now);
+  }
+  const offset = utcOffsetLabel(zone, now) ?? "+00:00";
+  return [
+    `Right now it is ${when} in the firm's time zone, ${zone} (UTC${offset}).`,
+    `Read "today", "tomorrow" and weekday names from that date. When a tool takes a date and time, write it in the firm's zone with its offset — for example ${exampleTime(zone, now, offset)} — unless the user names another zone. Daylight saving can change the offset between now and the date meant; use the offset in force on that date.`,
+  ].join(" ");
+}
+
+function exampleTime(timeZone: string, now: Date, offset: string): string {
+  // Tomorrow's date in the firm's zone, at 10:00.
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(tomorrow);
+  return `${day}T10:00:00${offset}`;
+}
+
 export class AssistantSession {
   #client: ClaudeClient;
   #tools: AssistantTool[];
   #actor: Actor;
   #auditLog: AuditLog;
   #systemPrompt: string;
+  #context: (() => string) | undefined;
   #messages: ClaudeMessage[] = [];
 
-  constructor(params: { client: ClaudeClient; tools: AssistantTool[]; actor: Actor; auditLog: AuditLog; systemPrompt?: string }) {
+  constructor(params: {
+    client: ClaudeClient;
+    tools: AssistantTool[];
+    actor: Actor;
+    auditLog: AuditLog;
+    systemPrompt?: string;
+    /** Facts that change while a conversation runs (today's date), worked out afresh for every request. */
+    context?: () => string;
+  }) {
     this.#client = params.client;
     this.#tools = params.tools;
     this.#actor = params.actor;
     this.#auditLog = params.auditLog;
     this.#systemPrompt = params.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+    this.#context = params.context;
   }
 
   async sendMessage(text: string): Promise<string> {
     this.#messages.push({ role: "user", content: text });
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      const context = this.#context?.();
       const response = await this.#client.createMessage({
-        system: this.#systemPrompt,
+        system: context ? `${this.#systemPrompt}\n\n${context}` : this.#systemPrompt,
         messages: this.#messages,
         tools: this.#tools.map((t) => t.definition),
       });

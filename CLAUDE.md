@@ -382,6 +382,15 @@ the rest of core:
   receptionist could make. An appointment is now 1 to 1,440 minutes and
   its start a real time; either mistake is a 400 (`SchedulingError`
   gained a `kind`), not a 409 or "Invalid time value".
+- **A booking time says which moment it means.** The routes read
+  `startTime`/`newStartTime` with `new Date(text)`, which takes a time
+  without a zone in the *server's* zone: "2026-12-01T10:00" from an API
+  caller or the assistant booked 10am UTC, 5am in New York. Every time
+  that becomes a record now goes through `core/instant.ts`'s
+  `parseZonedInstant()` — a date and time with `Z` or an offset, or a
+  400 saying so. The dashboard was never affected (it converts the
+  local picker to an instant before sending); the time clock's punch
+  corrections use the same check.
 - The Scheduling panel's booking form gained an **Attorney** picker. It
   had none, so a firm whose firm config lists no attorneys couldn't book
   a consultation from the panel at all — every attempt ended in "no
@@ -1337,6 +1346,17 @@ acting for, and it can never be the human checkpoint itself.**
   otherwise. `ANTHROPIC_MODEL`/`ANTHROPIC_BASE_URL` are optional
   overrides (the latter used to verify this against a fake local
   Claude-compatible server during development).
+- **It knows what day it is, and where.** The model has no clock, so
+  "book a consultation tomorrow at 10" was a guess at the date from its
+  training, written as a time with no zone that the server read as UTC.
+  Every request now ends the system prompt with `firmClockContext()`:
+  today's date and time in the firm's zone (the firm config's
+  business-hours zone, else `FIRM_TIME_ZONE`), its UTC offset, and an
+  example of a time written with it. The booking tools' times must carry
+  a zone, and one without comes back to the model as a tool error it can
+  correct — verified against a fake Claude server, which asked for
+  "2026-11-30T10:00", got the error, retried with `-05:00` and booked
+  15:00Z, 10am in New York. `test/zoned-times.test.ts` pins it.
 
 What this doesn't do: give the assistant any tool a logged-in user
 couldn't already reach themselves, let it act without the same
@@ -4066,7 +4086,9 @@ primary button. What it found:
 - **Requests made only to be refused.** Scheduling asked for booking
   requests and Security for the calendar connection on every visit,
   logging a 404 each time; both now skip the request when the probe
-  says the feature is off. A receptionist's matter autocomplete asked
+  says the feature is off — and wait for the probe to answer, since a
+  panel opened in the first moment after sign-in found it still unread,
+  took that as "available" and asked anyway. A receptionist's matter autocomplete asked
   for the attorney/paralegal-only matter list on nearly every panel
   and got a 403 each time; it no longer asks.
 - **"Draft" with no matter chosen** posted to `/api/drafting/matters//…`

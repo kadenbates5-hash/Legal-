@@ -7,6 +7,7 @@ import type { ReviewGateService } from "../review-ui/review-service.js";
 import type { SchedulingService, AppointmentType } from "../core/scheduling.js";
 import type { DeadlineType } from "../core/deadline.js";
 import type { ClaudeToolDefinition } from "../integrations/anthropic.js";
+import { parseZonedInstant, zonedInstantProblem } from "../core/instant.js";
 
 /**
  * The assistant's entire capability surface is this list of tools — every
@@ -46,6 +47,21 @@ export interface AssistantToolDependencies {
 function str(input: Record<string, unknown>, key: string): string {
   return String(input[key] ?? "");
 }
+
+/**
+ * An appointment time the model wrote. Without a zone it would be read in
+ * the server's zone (10am meant in New York booked as 5am), so it's
+ * refused, and the error goes back to the model as a tool result it can
+ * correct from — the system prompt gives it the firm's offset.
+ */
+function zonedTime(input: Record<string, unknown>, key: string): Date {
+  const instant = parseZonedInstant(input[key]);
+  if (!instant) throw new Error(zonedInstantProblem(key, input[key]));
+  return instant;
+}
+
+const ZONED_TIME_DESCRIPTION =
+  "Date and time with its UTC offset, in the firm's time zone unless the user named another — e.g. 2026-11-26T10:00:00-05:00. The system prompt says today's date and the firm's offset.";
 
 export function createAssistantTools(deps: AssistantToolDependencies): AssistantTool[] {
   return [
@@ -267,7 +283,7 @@ export function createAssistantTools(deps: AssistantToolDependencies): Assistant
           type: "object",
           properties: {
             matterId: { type: "string" },
-            startTime: { type: "string", description: "ISO 8601 datetime" },
+            startTime: { type: "string", description: ZONED_TIME_DESCRIPTION },
             type: { type: "string", enum: ["consultation", "follow_up"] },
             practiceAreaId: { type: "string" },
             attorneyId: { type: "string" },
@@ -279,7 +295,7 @@ export function createAssistantTools(deps: AssistantToolDependencies): Assistant
       execute: async (actor, input) =>
         deps.scheduling.scheduleConsultation(actor, {
           matterId: str(input, "matterId"),
-          startTime: new Date(str(input, "startTime")),
+          startTime: zonedTime(input, "startTime"),
           ...(typeof input["type"] === "string" ? { type: input["type"] as AppointmentType } : {}),
           ...(typeof input["practiceAreaId"] === "string" ? { practiceAreaId: input["practiceAreaId"] } : {}),
           ...(typeof input["attorneyId"] === "string" ? { attorneyId: input["attorneyId"] } : {}),
@@ -292,12 +308,12 @@ export function createAssistantTools(deps: AssistantToolDependencies): Assistant
         description: "Move an existing appointment to a new time.",
         input_schema: {
           type: "object",
-          properties: { id: { type: "string" }, newStartTime: { type: "string", description: "ISO 8601 datetime" } },
+          properties: { id: { type: "string" }, newStartTime: { type: "string", description: ZONED_TIME_DESCRIPTION } },
           required: ["id", "newStartTime"],
         },
       },
       execute: async (actor, input) =>
-        deps.scheduling.reschedule(actor, str(input, "id"), { newStartTime: new Date(str(input, "newStartTime")) }),
+        deps.scheduling.reschedule(actor, str(input, "id"), { newStartTime: zonedTime(input, "newStartTime") }),
     },
     {
       definition: {

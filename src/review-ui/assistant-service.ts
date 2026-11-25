@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AuditLog } from "../core/audit.js";
 import type { ClaudeClient } from "../integrations/anthropic.js";
-import { AssistantSession } from "../assistant/assistant-session.js";
+import { AssistantSession, firmClockContext } from "../assistant/assistant-session.js";
 import { createAssistantTools, type AssistantToolDependencies } from "../assistant/tools.js";
 
 /**
@@ -34,11 +34,22 @@ export class AssistantService {
   #client: ClaudeClient;
   #auditLog: AuditLog;
   #toolDeps: AssistantToolDependencies;
+  #timeZone: string;
+  #now: () => Date;
 
-  constructor(params: { client: ClaudeClient; auditLog: AuditLog; toolDeps: AssistantToolDependencies }) {
+  constructor(params: {
+    client: ClaudeClient;
+    auditLog: AuditLog;
+    toolDeps: AssistantToolDependencies;
+    /** The firm's IANA zone, so "tomorrow at 10" means the firm's tomorrow and 10am. */
+    timeZone?: string;
+    now?: () => Date;
+  }) {
     this.#client = params.client;
     this.#auditLog = params.auditLog;
     this.#toolDeps = params.toolDeps;
+    this.#timeZone = params.timeZone ?? "UTC";
+    this.#now = params.now ?? (() => new Date());
   }
 
   start(actor: Actor): { sessionId: string } {
@@ -49,6 +60,7 @@ export class AssistantService {
       tools: createAssistantTools(this.#toolDeps),
       actor,
       auditLog: this.#auditLog,
+      context: () => firmClockContext(this.#timeZone, this.#now()),
     });
     this.#sessions.set(sessionId, { actorId: actor.id, session });
     return { sessionId };

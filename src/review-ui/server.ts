@@ -8,6 +8,7 @@ import { LoginThrottle } from "../core/login-throttle.js";
 import type { AuditLog } from "../core/audit.js";
 import type { DeadlineType } from "../core/deadline.js";
 import { SchedulingError, type AppointmentType, type SchedulingService } from "../core/scheduling.js";
+import { parseZonedInstant, zonedInstantProblem } from "../core/instant.js";
 import { BookingRequestError } from "../core/booking-requests.js";
 import type { BookingService } from "./booking-service.js";
 import type { ImportService } from "./import-service.js";
@@ -372,6 +373,18 @@ function decodeSegment(segment: string): string {
   } catch {
     return segment;
   }
+}
+
+/**
+ * An appointment time from a request body. `new Date(text)` read a time
+ * without a zone in the server's own zone, so an API caller or the
+ * assistant asking for "2026-11-26T10:00" booked 10am UTC — 5am in New
+ * York. The dashboard always sends a zoned instant.
+ */
+function appointmentInstant(value: unknown, field: string): Date {
+  const instant = parseZonedInstant(value);
+  if (!instant) throw new SchedulingError(zonedInstantProblem(field, value), "invalid");
+  return instant;
 }
 
 function errorStatus(err: unknown): number {
@@ -1389,7 +1402,7 @@ async function handleRequest(
               res,
               200,
               booking.accept(actor, id, {
-                startTime: new Date(String(body["startTime"] ?? "")),
+                startTime: appointmentInstant(body["startTime"], "startTime"),
                 ...(Number.isFinite(duration) && duration > 0 ? { durationMinutes: duration } : {}),
                 ...(typeof body["attorneyId"] === "string" && body["attorneyId"] ? { attorneyId: body["attorneyId"] as string } : {}),
               }),
@@ -3472,7 +3485,7 @@ async function handleAppointmentsRequest(
     const body = await readJsonBody(req);
     const appointment = scheduling.scheduleConsultation(actor, {
       matterId: String(body["matterId"] ?? ""),
-      startTime: new Date(String(body["startTime"] ?? "")),
+      startTime: appointmentInstant(body["startTime"], "startTime"),
       ...(typeof body["durationMinutes"] === "number" ? { durationMinutes: body["durationMinutes"] } : {}),
       ...(typeof body["type"] === "string" ? { type: body["type"] as AppointmentType } : {}),
       ...(typeof body["attorneyId"] === "string" ? { attorneyId: body["attorneyId"] } : {}),
@@ -3507,7 +3520,7 @@ async function handleAppointmentsRequest(
     switch (action) {
       case "reschedule":
         result = scheduling.reschedule(actor, id, {
-          newStartTime: new Date(String(body["newStartTime"] ?? "")),
+          newStartTime: appointmentInstant(body["newStartTime"], "newStartTime"),
           allowOutsideBusinessHours: body["allowOutsideBusinessHours"] === true,
         });
         break;
