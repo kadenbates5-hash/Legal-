@@ -148,8 +148,9 @@ export class ClientPortalService {
    * `authorize()` per matter — `AccessControl.getClientMatterIds` *is*
    * the authorization here, the same relationship `CasesService.listCases`
    * has to `getCase`'s per-matter check. A grant naming a matterId with
-   * no `Matter` record yet (an attorney granted access before filling
-   * in the record) is silently omitted rather than shown half-blank.
+   * no `Matter` record is silently omitted rather than shown half-blank;
+   * `AccountsService.grantMatterAccess` now refuses to make one, so these
+   * are grants saved before it did.
    */
   listMyMatters(actor: Actor): ClientMatterSummary[] {
     requireClient(actor);

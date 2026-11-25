@@ -55,6 +55,30 @@ function directConversationKey(a: string, b: string): string {
   return [a, b].sort().join("::");
 }
 
+/**
+ * The longest message, staff or client, in characters. Messages had no
+ * limit, and a signed-in request may carry ~34 MB (sized for document
+ * uploads), so one message could be most of that. Every message lives in
+ * the single state document that is rewritten on every save, and Postgres
+ * caps that document at 1 GB: about thirty such posts — from a client
+ * portal account, someone outside the firm — and nothing the firm does is
+ * saved any more. Ten thousand characters is several pages; anything
+ * longer is a document, and the portal takes uploads.
+ */
+export const MAX_MESSAGE_LENGTH = 10_000;
+
+/** A message body as stored: trimmed, not empty, not over the limit. */
+export function checkedMessageBody(body: string): string {
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error("message body must not be empty");
+  if (trimmed.length > MAX_MESSAGE_LENGTH) {
+    throw new Error(
+      `a message can be at most ${MAX_MESSAGE_LENGTH.toLocaleString("en-US")} characters — for anything longer, upload it as a document`,
+    );
+  }
+  return trimmed;
+}
+
 export class MessagingStore {
   #conversationsById = new Map<string, Conversation>();
   #directByKey = new Map<string, string>();
@@ -152,8 +176,7 @@ export class MessagingStore {
   }
 
   postMessage(conversationId: string, senderId: string, body: string): Message {
-    const trimmed = body.trim();
-    if (!trimmed) throw new Error("message body must not be empty");
+    const trimmed = checkedMessageBody(body);
     const conversation = this.getConversation(conversationId);
     if (!conversation) throw new Error(`no conversation '${conversationId}'`);
     const message: Message = {

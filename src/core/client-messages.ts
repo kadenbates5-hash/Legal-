@@ -1,3 +1,4 @@
+import { checkedMessageBody } from "./messaging.js";
 /**
  * A message thread between a firm and a client, one per matter.
  *
@@ -32,8 +33,7 @@ export class ClientMessageStore {
   #nextId = 1;
 
   post(params: { matterId: string; authorId: string; authorRole: ClientMessage["authorRole"]; body: string }): ClientMessage {
-    const body = params.body.trim();
-    if (!body) throw new Error("message body must not be empty");
+    const body = checkedMessageBody(params.body);
     const message: ClientMessage = {
       id: `cmsg_${this.#nextId++}`,
       matterId: params.matterId,

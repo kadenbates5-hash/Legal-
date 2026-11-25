@@ -165,3 +165,27 @@ describe("accounts HTTP API: the holes as they were reached", () => {
     expect((await fetch(`${baseUrl}/api/accounts`, { headers: { Cookie: cookie } })).status).toBe(200);
   });
 });
+
+describe("granting a client a matter", () => {
+  it("is refused for a matter with no record, which would hand them whatever is opened under that number later", () => {
+    const auth = new AuthService();
+    auth.createUser({ username: "atty", password: "correct-horse", role: "attorney", actorId: "a1" });
+    const carla = auth.createUser({ username: "carla", password: "correct-horse", role: "client", actorId: "c1" });
+    const accessControl = new AccessControl(new AuditLog());
+    const onRecord = new Set(["2026-0142"]);
+    const accounts = new AccountsService(auth, accessControl, undefined, undefined, (id) => onRecord.has(id));
+    const attorney = { id: "a1", role: "attorney" as const };
+
+    expect(() => accounts.grantMatterAccess(attorney, carla.id, "2026-0143")).toThrow(
+      /no matter '2026-0143' on record — create it on the Conflicts panel first/,
+    );
+    expect(accessControl.getClientMatterIds("c1")).toEqual([]);
+
+    accounts.grantMatterAccess(attorney, carla.id, "2026-0142");
+    expect(accessControl.getClientMatterIds("c1")).toEqual(["2026-0142"]);
+    // Revoking never needs a record: a stale grant must always be removable.
+    onRecord.clear();
+    accounts.revokeMatterAccess(attorney, carla.id, "2026-0142");
+    expect(accessControl.getClientMatterIds("c1")).toEqual([]);
+  });
+});

@@ -1230,6 +1230,11 @@ to mean:
   Deliberately manual only (no auto-suggested "relevant cases" from
   search text): saving is always a human action, consistent with this
   project not inferring which case matters to which matter on its own.
+  Its fields are a bookmark's size — citation and title at most 1,000
+  characters (room for every parallel citation "Save to matter" joins),
+  a note at most 5,000 — and a link must be an http(s) address. The
+  panel already refused to render any other link, but the client file
+  export hands the record out with no such filter.
   A saved reference is a bookmark, not agent-generated text, so it never
   touches the review-gate — it's a research aid, not something delivered
   to a client. Persisted like every other stateful core object.
@@ -3338,7 +3343,12 @@ narrower view than staff, not the same data with a different login:**
   access to a matter in the first place, exposed as
   `POST /api/accounts/:id/grant-matter-access` /
   `.../revoke-matter-access` and a chip-list-plus-input control in the
-  Accounts panel next to a client account.
+  Accounts panel next to a client account. A grant is refused unless the
+  matter has a record: one naming any other id used to be accepted and
+  wait, invisible to the client, until a matter was opened under that
+  id — and since matter numbers are the firm's own, a typo ("2026-0143"
+  for "2026-0142") gave the client whichever matter the firm opened next
+  under that number, for someone else. Revoking needs no record.
 - The dashboard gives a client account a different shell, not a
   trimmed staff one: every nav item is hidden except **My Matters** and
   **Security** (a client still manages its own password/MFA), and login
@@ -3511,7 +3521,13 @@ runs. Every post is audited (`client_message_posted`) — a client-facing
 exchange about a matter is exactly the sort of thing an attorney
 reviewing an incident, or a bar complaint, needs a record of. There is
 no edit or delete, same reasoning as the audit log and the internal
-`MessagingStore`.
+`MessagingStore`. A message is at most 10,000 characters
+(`MAX_MESSAGE_LENGTH`, shared with staff messages): there was no limit,
+a signed-in request may be ~34 MB, and every message lives in the one
+state document Postgres caps at 1 GB — so about thirty posts from a
+client account, someone outside the firm, would have stopped anything
+the firm does from being saved. The refusal says to upload anything
+longer as a document; the message boxes carry the same `maxlength`.
 
 Discoverability needed one small fix elsewhere: `CasesService`'s Cases
 panel list was derived only from work product, documents, and paralegal

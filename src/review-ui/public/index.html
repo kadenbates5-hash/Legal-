@@ -794,7 +794,7 @@
         <div class="chat-window">
           <div class="chat-log" id="announcementsLog" role="log" aria-live="polite" aria-label="Announcements"></div>
           <div class="chat-input">
-            <input id="announcementText" type="text" placeholder="Post an announcement to everyone…" />
+            <input id="announcementText" type="text" maxlength="10000" placeholder="Post an announcement to everyone…" />
             <button class="btn primary" id="announcementSend">Post</button>
           </div>
         </div>
@@ -820,7 +820,7 @@
         <div class="chat-window" id="conversationWindow" class="hidden">
           <div class="chat-log" id="conversationLog" role="log" aria-live="polite" aria-label="Conversation"></div>
           <div class="chat-input">
-            <input id="conversationText" type="text" placeholder="Message…" />
+            <input id="conversationText" type="text" maxlength="10000" placeholder="Message…" />
             <button class="btn primary" id="conversationSend">Send</button>
           </div>
         </div>

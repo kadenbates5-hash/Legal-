@@ -9,7 +9,9 @@ import { isCalendarDate } from "../src/core/calendar-date.js";
 import { DocumentStore, normalizedBase64, normalizedContentType, normalizedFileName } from "../src/core/document-store.js";
 import { StaffScheduleService, MAX_SCHEDULE_NOTE_LENGTH } from "../src/review-ui/staff-schedule-service.js";
 import { MessagingService } from "../src/review-ui/messaging-service.js";
-import { MessagingStore } from "../src/core/messaging.js";
+import { MessagingStore, MAX_MESSAGE_LENGTH, ANNOUNCEMENTS_CONVERSATION_ID } from "../src/core/messaging.js";
+import { ClientMessageStore } from "../src/core/client-messages.js";
+import { ResearchLibrary } from "../src/core/research-library.js";
 import { AuthService } from "../src/core/auth.js";
 import { AuditLog } from "../src/core/audit.js";
 import type { Actor } from "../src/core/types.js";
@@ -271,6 +273,53 @@ describe("uploaded documents: what goes back out in a header", () => {
     expect(() => store.upload({ matterId: "m1", fileName: "\r\n", contentType: "", content: "aGk=", uploadedBy: "a1" })).toThrow(
       /fileName is required/,
     );
+  });
+});
+
+describe("messages: a size a message can be", () => {
+  // Every message lives in the one state document rewritten on each save,
+  // which Postgres caps at 1 GB — and a client account can post to its thread.
+  const long = "x".repeat(MAX_MESSAGE_LENGTH + 1);
+
+  it("refuses a client message too long to be one, pointing at an upload instead", () => {
+    const store = new ClientMessageStore();
+    const post = (body: string) => store.post({ matterId: "m1", authorId: "c1", authorRole: "client", body });
+    expect(() => post(long)).toThrow(/at most 10,000 characters — for anything longer, upload it as a document/);
+    expect(store.listForMatter("m1")).toHaveLength(0);
+    expect(post(`  ${"y".repeat(MAX_MESSAGE_LENGTH)}  `).body).toHaveLength(MAX_MESSAGE_LENGTH); // trimmed first
+  });
+
+  it("refuses the same in staff conversations and announcements", () => {
+    const store = new MessagingStore();
+    expect(() => store.postMessage(ANNOUNCEMENTS_CONVERSATION_ID, "a1", long)).toThrow(/at most 10,000 characters/);
+    expect(() => store.postMessage(ANNOUNCEMENTS_CONVERSATION_ID, "a1", "   ")).toThrow(/must not be empty/);
+    expect(store.postMessage(ANNOUNCEMENTS_CONVERSATION_ID, "a1", "Office closes at 3 on Friday.").body).toBe(
+      "Office closes at 3 on Friday.",
+    );
+  });
+});
+
+describe("saved research references: a bookmark's size, and only a web link", () => {
+  const save = (over: Partial<{ citation: string; title: string; url: string; note: string }>) =>
+    new ResearchLibrary().save({ matterId: "m1", citation: "Miranda v. Arizona, 384 U.S. 436", title: "Miranda", savedBy: "p1", ...over });
+
+  it("keeps only http and https links", () => {
+    for (const bad of ["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd", "courtlistener.com/opinion/1"]) {
+      expect(() => save({ url: bad }), bad).toThrow(/web address/);
+    }
+    expect(save({ url: " https://www.courtlistener.com/opinion/107252/miranda-v-arizona/ " }).url).toBe(
+      "https://www.courtlistener.com/opinion/107252/miranda-v-arizona/",
+    );
+    expect(save({ url: "  " }).url).toBeUndefined();
+  });
+
+  it("refuses fields far past what a citation, title or note is", () => {
+    expect(() => save({ citation: "c".repeat(1_001) })).toThrow(/a citation can be at most 1,000/);
+    expect(() => save({ title: "t".repeat(1_001) })).toThrow(/a title can be at most 1,000/);
+    expect(save({ citation: Array.from({ length: 20 }, (_, i) => `${100 + i} U.S. ${400 + i}`).join(", ") }).citation).toContain("119 U.S.");
+    expect(() => save({ note: "n".repeat(5_001) })).toThrow(/a note can be at most 5,000/);
+    expect(() => save({ url: `https://x.example/${"p".repeat(2_000)}` })).toThrow(/at most 2,000/);
+    expect(save({ note: "  key holding on page 444  " }).note).toBe("key holding on page 444");
   });
 });
 

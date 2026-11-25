@@ -1055,7 +1055,7 @@ async function openMyMatter(matterId) {
         <p class="subtitle-inline">A message thread with the firm about this matter — not a substitute for calling about anything urgent.</p>
         <ul id="clientMessageThread" class="list"></ul>
         <div class="field-row mt-sm">
-          <label class="field grow">Send a message <input id="clientMessageBody" type="text" placeholder="Type a message…" /></label>
+          <label class="field grow">Send a message <input id="clientMessageBody" type="text" maxlength="10000" placeholder="Type a message…" /></label>
           <button class="btn primary" id="clientMessageSend">Send</button>
         </div>
       </div>`;
@@ -2612,7 +2612,7 @@ async function loadCaseDetail(matterId) {
         <p class="subtitle-inline">A thread with whichever client accounts are granted this matter's portal access — not privileged the way a note to file is, since the client reads it too.</p>
         <ul id="caseMessageThread" class="list"></ul>
         <div class="field-row mt-sm">
-          <label class="field grow">Reply <input id="caseMessageBody" type="text" placeholder="Type a message…" /></label>
+          <label class="field grow">Reply <input id="caseMessageBody" type="text" maxlength="10000" placeholder="Type a message…" /></label>
           <button class="btn primary" id="caseMessageSend">Send</button>
         </div>
       </div>

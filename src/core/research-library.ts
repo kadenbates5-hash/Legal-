@@ -23,6 +23,39 @@ export interface SavedReference {
   savedAt: string;
 }
 
+/**
+ * A saved reference is a bookmark, so its fields are a bookmark's size.
+ * They had no limit at all, and each one is stored in the state document
+ * and listed on the Research panel and in the client file export.
+ */
+function boundedText(value: string, max: number, label: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length > max) throw new Error(`${label} can be at most ${max.toLocaleString("en-US")} characters`);
+  return trimmed;
+}
+
+/**
+ * A reference's link is opened from the panel, so only a web address is
+ * kept. The panel already refuses to render anything else as a link, but
+ * the record is also handed out in the client file export, which has no
+ * such filter.
+ */
+function checkedUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > 2_000) throw new Error("a link can be at most 2,000 characters");
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("a link must be a full web address, starting with https://");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("a link must be a web address (http or https)");
+  }
+  return trimmed;
+}
+
 export class ResearchLibrary {
   #byId = new Map<string, SavedReference>();
   #nextId = 1;
@@ -31,10 +64,12 @@ export class ResearchLibrary {
     const reference: SavedReference = {
       id: `ref_${this.#nextId++}`,
       matterId: params.matterId,
-      citation: params.citation,
-      title: params.title,
-      url: params.url,
-      note: params.note,
+      // Room for every parallel citation a much-reported case carries —
+      // "Save to matter" joins them all.
+      citation: boundedText(params.citation, 1_000, "a citation"),
+      title: boundedText(params.title, 1_000, "a title"),
+      url: checkedUrl(params.url),
+      note: params.note?.trim() ? boundedText(params.note, 5_000, "a note") : undefined,
       savedBy: params.savedBy,
       savedAt: new Date().toISOString(),
     };

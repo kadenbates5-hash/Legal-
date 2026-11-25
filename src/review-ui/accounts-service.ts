@@ -66,6 +66,7 @@ export class AccountsService {
   #accessControl: AccessControl;
   #loginThrottle: LoginThrottle | undefined;
   #auditLog: AuditLog | undefined;
+  #matterExists: ((matterId: string) => boolean) | undefined;
 
   constructor(
     auth: AuthService,
@@ -73,11 +74,17 @@ export class AccountsService {
     loginThrottle?: LoginThrottle,
     /** Optional so existing call sites keep working; wired in production. */
     auditLog?: AuditLog,
+    /**
+     * Whether a matter has a record. Wired in production so a client is
+     * only ever granted a matter that exists — see `grantMatterAccess`.
+     */
+    matterExists?: (matterId: string) => boolean,
   ) {
     this.#auth = auth;
     this.#accessControl = accessControl;
     this.#loginThrottle = loginThrottle;
     this.#auditLog = auditLog;
+    this.#matterExists = matterExists;
   }
 
   /**
@@ -272,6 +279,14 @@ export class AccountsService {
   grantMatterAccess(actor: Actor, userId: string, matterId: string): AccountSummary {
     requireAttorney(actor);
     const user = this.#requireClient(userId);
+    // A grant used to be accepted for any id, and one naming a matter with
+    // no record simply waited, invisible to the client — until a matter
+    // was opened under that id. Matter numbers are the firm's own, so a
+    // typo ("2026-0143" for "2026-0142") handed this client whichever
+    // matter the firm opened next under that number, for someone else.
+    if (this.#matterExists && !this.#matterExists(matterId)) {
+      throw new Error(`no matter '${matterId}' on record — create it on the Conflicts panel first, then grant access`);
+    }
     this.#accessControl.grantClientAccess(user.actorId, matterId);
     this.#audit(actor, "client_portal_access_granted", `user=${user.id} username=${user.username}`, matterId);
     return this.#summarize(user);
