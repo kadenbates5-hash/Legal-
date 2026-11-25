@@ -3,7 +3,12 @@ import { renderRiskMemo, type RiskAssessmentInput } from "../core/risk-assessmen
 import type { AuditLog } from "../core/audit.js";
 import { WorkProduct } from "../core/review-gate.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
-import { DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG, type DeadlineTracker, type DeadlineType } from "../core/deadline.js";
+import {
+  DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG,
+  checkDeadlineInput,
+  type DeadlineTracker,
+  type DeadlineType,
+} from "../core/deadline.js";
 import type { PracticeAreaModule } from "../config/practice-area.js";
 import type { Actor } from "../core/types.js";
 import type { UtilizationTracker } from "../core/utilization.js";
@@ -121,6 +126,11 @@ export class ParalegalDraftingSession {
     const template = this.#module.templates.find((t) => t.id === request.templateId);
     if (!template) {
       throw new Error(`unknown document template '${request.templateId}' for module '${this.#module.id}'`);
+    }
+    // Checked before the draft exists: refusing the date afterwards would
+    // leave a draft flagged for a deadline nobody recorded.
+    if (request.deadlineDate !== undefined) {
+      checkDeadlineInput({ matterId: this.#matterId, type: request.deadlineType ?? "other", date: request.deadlineDate });
     }
 
     const workProduct = this.#startDraft(request.templateId, request.content, `draft ${template.name}`);

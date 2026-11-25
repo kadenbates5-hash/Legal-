@@ -10,17 +10,60 @@
  * deadline type. If two sources disagree, that's a conflict — surfaced
  * immediately, never silently resolved by picking one.
  */
+import { isCalendarDate } from "./calendar-date.js";
+
 /** The flag a WorkProduct carries when it references an agent-calculated deadline. */
 export const DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG = "deadline_requires_redundant_verification";
 
-export type DeadlineType =
-  | "speedy_trial"
-  | "arraignment"
-  | "bail_hearing"
-  | "discovery_response"
-  | "other";
+export const DEADLINE_TYPES = ["speedy_trial", "arraignment", "bail_hearing", "discovery_response", "other"] as const;
+
+export type DeadlineType = (typeof DEADLINE_TYPES)[number];
+
+export function isDeadlineType(value: unknown): value is DeadlineType {
+  return typeof value === "string" && (DEADLINE_TYPES as readonly string[]).includes(value);
+}
 
 export type DeadlineSource = "agent" | "human" | "calendar_system";
+
+const DEADLINE_SOURCES: readonly DeadlineSource[] = ["agent", "human", "calendar_system"];
+
+/** How far ahead "coming due" can look: ten years is past any deadline a firm tracks. */
+export const MAX_UPCOMING_HORIZON_DAYS = 3660;
+
+/** A calculation that can't be recorded as given. Always the caller's input, so a 400. */
+export class DeadlineError extends Error {
+  override name = "DeadlineError";
+}
+
+/**
+ * The checks every calculation passes before it is kept, exported so a
+ * caller that does other work first (creating a draft) can refuse before
+ * doing it rather than leave half a job behind.
+ *
+ * The date is the one that matters. "Coming due", the deadline digest
+ * and the calendar export all find a deadline by comparing its date with
+ * today, so a date that isn't one — an empty box, "07/29/2026", "next
+ * Friday" — didn't just read oddly, it took the deadline off every one
+ * of them. An empty confirmation sent beside the agent's date did the
+ * same to the agent's date, since the empty one sorted first.
+ */
+export function checkDeadlineInput(params: { matterId: string; type: unknown; date: unknown; source?: unknown }): void {
+  if (typeof params.matterId !== "string" || params.matterId.trim() === "") {
+    throw new DeadlineError("a deadline needs the matter it belongs to");
+  }
+  if (!isDeadlineType(params.type)) {
+    throw new DeadlineError(`deadline type must be one of ${DEADLINE_TYPES.join(", ")} (got ${JSON.stringify(params.type ?? null)})`);
+  }
+  if (params.date === undefined || params.date === null || params.date === "") {
+    throw new DeadlineError("a deadline needs a date — choose the day it falls on");
+  }
+  if (!isCalendarDate(params.date)) {
+    throw new DeadlineError(`a deadline's date must be a real day in YYYY-MM-DD form (got ${JSON.stringify(params.date)})`);
+  }
+  if (params.source !== undefined && !(DEADLINE_SOURCES as readonly unknown[]).includes(params.source)) {
+    throw new DeadlineError(`deadline source must be one of ${DEADLINE_SOURCES.join(", ")}`);
+  }
+}
 
 export interface DeadlineCalculation {
   readonly matterId: string;
@@ -122,6 +165,7 @@ export class DeadlineTracker {
     /** Required in practice for `human` — without it, two people can't be told apart. */
     recordedBy?: string;
   }): DeadlineStatus {
+    checkDeadlineInput(params);
     const k = key(params.matterId, params.type);
     const existing = this.#calculationsByKey.get(k) ?? [];
     const calculation: DeadlineCalculation = {
@@ -192,17 +236,32 @@ export class DeadlineTracker {
    * reasoning as `time-clock.ts` refusing to bucket by UTC.
    */
   listUpcoming(params: { today: string; withinDays: number }): UpcomingDeadline[] {
-    const horizon = addDays(params.today, params.withinDays);
+    // Both reach here from a query string. Anything else ended in
+    // "Invalid time value" from deep inside the date arithmetic.
+    if (!isCalendarDate(params.today)) {
+      throw new DeadlineError(`today must be a real day in YYYY-MM-DD form (got ${JSON.stringify(params.today)})`);
+    }
+    const withinDays = Math.floor(params.withinDays);
+    if (!Number.isFinite(withinDays) || withinDays < 0 || withinDays > MAX_UPCOMING_HORIZON_DAYS) {
+      throw new DeadlineError(`withinDays must be a number of days from 0 to ${MAX_UPCOMING_HORIZON_DAYS}`);
+    }
+    const horizon = addDays(params.today, withinDays);
     const upcoming: UpcomingDeadline[] = [];
 
-    for (const [k] of this.#calculationsByKey) {
-      const [matterId, type] = k.split("::") as [string, DeadlineType];
+    for (const calculations of this.#calculationsByKey.values()) {
+      // Matter and type come from the records themselves. Splitting the
+      // map key on "::" lost any matter whose id contained "::" — it
+      // looked up a different, empty key and was skipped.
+      const { matterId, type } = calculations[0]!;
       const status = this.status(matterId, type);
       // The earliest date any source proposed. For a conflict that is
       // deliberately the *soonest* of the disagreeing dates: if one
       // source says Friday and another says next Tuesday, the firm has
-      // until Friday to find out which is right.
-      const dates = status.calculations.map((c) => c.date).sort();
+      // until Friday to find out which is right. Only real days count
+      // here: `record()` refuses anything else now, but a state file
+      // written before it did can hold an empty or free-text date, which
+      // sorted ahead of every real one and hid the deadline entirely.
+      const dates = status.calculations.map((c) => c.date).filter(isCalendarDate).sort();
       const date = dates[0];
       if (!date) continue;
       if (date > horizon) continue;
@@ -228,8 +287,8 @@ export class DeadlineTracker {
   /** Every matter/type pair currently in a conflicting state — for a dashboard to surface immediately. */
   listConflicts(): DeadlineConflict[] {
     const conflicts: DeadlineConflict[] = [];
-    for (const [k, calculations] of this.#calculationsByKey) {
-      const [matterId, type] = k.split("::") as [string, DeadlineType];
+    for (const calculations of this.#calculationsByKey.values()) {
+      const { matterId, type } = calculations[0]!;
       const status = this.status(matterId, type);
       if (status.state === "conflict") {
         conflicts.push({ matterId, type, calculations });

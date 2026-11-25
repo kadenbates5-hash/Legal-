@@ -1,5 +1,5 @@
 import { createSign } from "node:crypto";
-import type { DeadlineType } from "../core/deadline.js";
+import { isDeadlineType } from "../core/deadline.js";
 import type { CalendarDeadlineEvent, CalendarEventsSource } from "./calendar-events-source.js";
 import type { CalendarEventDraft, CalendarEventPublisher } from "./calendar-event-publisher.js";
 
@@ -28,12 +28,6 @@ import type { CalendarEventDraft, CalendarEventPublisher } from "./calendar-even
  * go on the shared calendar — this class doesn't complete that review,
  * it's the technical integration once the vendor is chosen.
  */
-const DEADLINE_TYPES: readonly DeadlineType[] = ["speedy_trial", "arraignment", "bail_hearing", "discovery_response", "other"];
-
-function isDeadlineType(value: unknown): value is DeadlineType {
-  return typeof value === "string" && (DEADLINE_TYPES as readonly string[]).includes(value);
-}
-
 function base64url(input: Buffer | string): string {
   return (typeof input === "string" ? Buffer.from(input) : input)
     .toString("base64")

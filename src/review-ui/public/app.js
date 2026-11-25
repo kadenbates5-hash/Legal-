@@ -1646,13 +1646,19 @@ async function confirmDeadline() {
   if (currentRole && currentRole !== "attorney") {
     return;
   }
+  const matterId = document.getElementById("deadlineMatterId").value.trim();
+  const date = document.getElementById("deadlineDate").value;
+  if (!matterId || !date) {
+    showError(!matterId ? "Pick the matter this deadline belongs to first." : "Choose the date you checked first.");
+    return;
+  }
   try {
     await api("/api/deadlines/confirm", {
       method: "POST",
       body: JSON.stringify({
-        matterId: document.getElementById("deadlineMatterId").value,
+        matterId,
         type: document.getElementById("deadlineType").value,
-        date: document.getElementById("deadlineDate").value,
+        date,
         source: document.getElementById("deadlineSource").value,
       }),
     });

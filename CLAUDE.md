@@ -752,6 +752,26 @@ credential for `calendar_system`) plus agent calculations that
 `agent`-sourced date over HTTP, since that source exists to be the one
 that needs checking.
 
+**A deadline's date must be a real day.** Coming due, the deadline
+digest and the calendar export all find a deadline by comparing its
+date with today, and `DeadlineTracker.record()` used to keep whatever it
+was sent. So pressing the Deadlines panel's "Confirm" with the date box
+empty took an arraignment two days away off all three (the empty date
+sorted ahead of the agent's real one), and a draft's deadline written
+"next Friday" or "07/29/2026" never appeared at all. A matter id
+containing `::` was lost the same way, because the list split its map
+key to recover it. `checkDeadlineInput()` now refuses an empty or
+unreal date, an unknown type and a blank matter (a 400), and the
+drafting session runs it *before* creating the draft, so a refusal
+can't leave a draft flagged for a deadline nobody recorded. The panel
+also asks for the date before posting. A state file written before
+this can still hold an empty date: the list ignores it when choosing a
+deadline's date, so the deadline shows on its real date as disputed
+(two sources that don't agree) rather than vanishing. `today` and
+`withinDays` on `/api/deadlines/upcoming` are checked too — a bad one
+used to end in "Invalid time value". `test/deadline-input.test.ts` pins
+all of it.
+
 ### Calendar file export (.ics)
 
 `core/ics.ts` / `review-ui/calendar-export-service.ts` — a "Download
