@@ -61,7 +61,29 @@ export interface MatterParty {
  * the firm's retention period; February 29 lands on the 28th in a
  * non-leap year rather than silently rolling into March.
  */
+/**
+ * How long a closed file is kept, in whole years (0 means no retention
+ * date). The value comes from the firm's config file and, for one close,
+ * the API — and neither was checked: a config file saying
+ * `"fileRetentionYears": "7"` made `addYears` concatenate, stamping a
+ * retention date in the year 20267, and 2.5 stored the date "2028.5-11-25",
+ * which no review list ever finds. A numeric string is read as its
+ * number, since what was meant is clear; anything else is refused, at
+ * boot for the config file.
+ */
+export const MAX_RETENTION_YEARS = 100;
+
+export function checkedRetentionYears(value: unknown, source: string): number {
+  if (value === undefined || value === null) return 0;
+  const n = typeof value === "string" && /^\s*\d+\s*$/.test(value) ? Number(value) : value;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > MAX_RETENTION_YEARS) {
+    throw new Error(`${source} must be a whole number of years from 0 to ${MAX_RETENTION_YEARS} (got ${JSON.stringify(value)})`);
+  }
+  return n;
+}
+
 export function addYears(isoDate: string, years: number): string {
+  if (!Number.isInteger(years)) throw new Error(`years must be a whole number (got ${String(years)})`);
   const [y, m, d] = isoDate.slice(0, 10).split("-").map(Number) as [number, number, number];
   const targetYear = y + years;
   const daysInMonth = new Date(Date.UTC(targetYear, m, 0)).getUTCDate();

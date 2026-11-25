@@ -1,7 +1,7 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AccessControl } from "../core/access-control.js";
 import { diffFields, type AuditLog } from "../core/audit.js";
-import { addYears, billingEmailFor, clientPhoneFor as clientPhoneForMatter, type Matter, type MatterInput, type MatterStore } from "../core/matters.js";
+import { addYears, checkedRetentionYears, billingEmailFor, clientPhoneFor as clientPhoneForMatter, type Matter, type MatterInput, type MatterStore } from "../core/matters.js";
 import type { TrustLedger } from "../core/trust-ledger.js";
 import type { InvoiceStore } from "../core/invoicing.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
@@ -122,7 +122,7 @@ export class MattersService {
     this.#trust = params.trust;
     this.#invoices = params.invoices;
     this.#workProducts = params.workProducts;
-    this.#retentionYears = params.retentionYears ?? 0;
+    this.#retentionYears = checkedRetentionYears(params.retentionYears, "retentionYears");
   }
 
   /** Matter records the caller can actually open, so a paralegal sees only their own. */
@@ -270,7 +270,8 @@ export class MattersService {
     }
 
     const warnings = this.#closingWarnings(matterId);
-    const years = params.retentionYears ?? this.#retentionYears;
+    const years =
+      params.retentionYears === undefined ? this.#retentionYears : checkedRetentionYears(params.retentionYears, "retentionYears");
     const closedOn = new Date().toISOString().slice(0, 10);
     const matter = this.#store.upsert(matterId, {
       status: "closed",

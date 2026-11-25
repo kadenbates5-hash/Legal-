@@ -89,6 +89,16 @@ describe("invoice lines: everything the total adds up is printed, exactly", () =
     expect(store.addLineItem(invoice.id, line).amountCents).toBe(50000);
   });
 
+  it("refuses a due date that isn't a real day, which was printed on the bill and counted from", () => {
+    const store = new InvoiceStore();
+    for (const bad of ["garbage", "2026-13-45", "2026-02-30", "12/01/2026"]) {
+      expect(() => store.createDraft({ matterId: "m1", issuedBy: "a1", dueDate: bad }), bad).toThrow(InvoicingError);
+    }
+    expect(store.createDraft({ matterId: "m1", issuedBy: "a1", dueDate: " 2026-12-31 " }).dueDate).toBe("2026-12-31");
+    expect(store.createDraft({ matterId: "m1", issuedBy: "a1", dueDate: "" }).dueDate).toBeUndefined();
+    expect(() => store.createDraft({ matterId: "m1", issuedBy: "a1", note: "n".repeat(2_001) })).toThrow(/at most 2,000/);
+  });
+
   it("refuses a 'date worked' that isn't a date", () => {
     const { store, invoice } = draft();
     expect(() => store.addLineItem(invoice.id, { ...line, source: "time", workedOn: "whenever" })).toThrow(/YYYY-MM-DD/);

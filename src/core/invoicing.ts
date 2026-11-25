@@ -156,6 +156,15 @@ export class InvoiceStore {
   createDraft(params: { matterId: string; issuedBy: string; dueDate?: string; note?: string }): Invoice {
     const matterId = params.matterId.trim();
     if (!matterId) throw new InvoicingError("matterId is required");
+    // Both are printed on the client's bill. A due date was stored as sent,
+    // so "garbage" or "2026-13-45" went on the invoice, and the overdue
+    // and aging reports compared it as a string and counted days from it.
+    const dueDate = params.dueDate?.trim() || undefined;
+    if (dueDate && !isCalendarDate(dueDate)) {
+      throw new InvoicingError(`dueDate must be a real date in YYYY-MM-DD form (got '${dueDate}')`);
+    }
+    const note = params.note?.trim() || undefined;
+    if (note && note.length > 2_000) throw new InvoicingError("an invoice note must be at most 2,000 characters");
     const invoice: Invoice = {
       id: `inv_${this.#nextId++}`,
       number: `INV-${String(this.#nextInvoiceNumber++).padStart(5, "0")}`,
@@ -165,10 +174,10 @@ export class InvoiceStore {
       issuedBy: params.issuedBy,
       createdAt: new Date().toISOString(),
       sentAt: undefined,
-      dueDate: params.dueDate,
+      dueDate,
       voidedAt: undefined,
       voidReason: undefined,
-      note: params.note,
+      note,
       deliveries: [],
     };
     this.#invoices.set(invoice.id, invoice);

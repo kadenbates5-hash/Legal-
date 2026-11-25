@@ -13,6 +13,7 @@ import { ResearchService } from "./research-service.js";
 import { CourtListenerClient } from "../integrations/courtlistener.js";
 import { loadSystemState, saveSystemState, type SystemState } from "../persistence/system-state.js";
 import { WorkProduct } from "../core/review-gate.js";
+import { checkedRetentionYears } from "../core/matters.js";
 import type { Actor } from "../core/types.js";
 import { readJsonFile } from "../persistence/json-file-store.js";
 import { createPostgresStateStore } from "../persistence/postgres-store.js";
@@ -73,6 +74,10 @@ const FIRM_CONFIG_FILE = process.env["FIRM_CONFIG_FILE"];
 const DATABASE_URL = process.env["DATABASE_URL"];
 
 const firmConfig = FIRM_CONFIG_FILE ? await readJsonFile<FirmConfig | null>(FIRM_CONFIG_FILE, null) : null;
+// Checked once, here, so a bad value stops the server with a plain
+// message instead of stamping impossible retention dates on every matter
+// it closes (see checkedRetentionYears).
+const fileRetentionYears = checkedRetentionYears(firmConfig?.fileRetentionYears, "fileRetentionYears in FIRM_CONFIG_FILE");
 
 /**
  * `store` is either the Postgres adapter (when DATABASE_URL is set) or a
@@ -356,7 +361,7 @@ const matters = new MattersService({
   trust: state.trustLedger,
   invoices: state.invoices,
   workProducts: state.workProductStore,
-  ...(firmConfig?.fileRetentionYears ? { retentionYears: firmConfig.fileRetentionYears } : {}),
+  ...(fileRetentionYears > 0 ? { retentionYears: fileRetentionYears } : {}),
 });
 
 /**
@@ -629,7 +634,7 @@ const dataImport = new ImportService({
     ...state.billingHours.listAll().map((e) => e.matterId),
     ...state.trustLedger.matterIds(),
   ],
-  ...(firmConfig?.fileRetentionYears ? { retentionYears: firmConfig.fileRetentionYears } : {}),
+  ...(fileRetentionYears > 0 ? { retentionYears: fileRetentionYears } : {}),
 });
 
 /**

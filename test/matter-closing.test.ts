@@ -3,7 +3,7 @@ import { AccessControl } from "../src/core/access-control.js";
 import { AuditLog } from "../src/core/audit.js";
 import { ConflictChecker } from "../src/core/conflicts.js";
 import { InvoiceStore } from "../src/core/invoicing.js";
-import { MatterStore, addYears } from "../src/core/matters.js";
+import { MatterStore, addYears, checkedRetentionYears } from "../src/core/matters.js";
 import { TrustLedger } from "../src/core/trust-ledger.js";
 import { WorkProduct } from "../src/core/review-gate.js";
 import { WorkProductStore } from "../src/core/work-product-store.js";
@@ -13,7 +13,7 @@ import { AccessDeniedError, type Actor } from "../src/core/types.js";
 const attorney: Actor = { id: "a1", role: "attorney" };
 const paralegal: Actor = { id: "p1", role: "paralegal" };
 
-function setup(options: { retentionYears?: number } = {}) {
+function setup(options: { retentionYears?: unknown } = {}) {
   const auditLog = new AuditLog();
   const accessControl = new AccessControl(auditLog);
   accessControl.assignParalegal("p1", "m-1");
@@ -30,7 +30,7 @@ function setup(options: { retentionYears?: number } = {}) {
     trust,
     invoices,
     workProducts,
-    ...(options.retentionYears !== undefined ? { retentionYears: options.retentionYears } : {}),
+    ...(options.retentionYears !== undefined ? { retentionYears: options.retentionYears as number } : {}),
   });
   return { auditLog, store, trust, invoices, workProducts, service };
 }
@@ -293,5 +293,32 @@ describe("MattersService.clientPhoneFor", () => {
     const { service } = setup();
     expect(() => service.clientPhoneFor(attorney, "m-1")).toThrow(AccessDeniedError);
     expect(() => service.clientPhoneFor(paralegal, "m-1")).toThrow(AccessDeniedError);
+  });
+});
+
+describe("retention periods that aren't a number of years", () => {
+  it("reads a numeric string as its number — it used to concatenate, giving year 20267", () => {
+    expect(checkedRetentionYears("7", "fileRetentionYears")).toBe(7);
+    expect(checkedRetentionYears(undefined, "fileRetentionYears")).toBe(0);
+    const { service } = setup({ retentionYears: "7" });
+    const closed = service.close(attorney, "m-1", { closingNote: "Case dismissed." }).matter;
+    expect(closed.retentionUntil).toBe(addYears(new Date().toISOString().slice(0, 10), 7));
+    expect(closed.retentionUntil!.slice(0, 4)).toBe(String(new Date().getUTCFullYear() + 7));
+  });
+
+  it("refuses anything else, so a bad config stops the server rather than stamping impossible dates", () => {
+    for (const bad of [2.5, -1, 101, 1e9, "seven", "7 years", true, {}]) {
+      expect(() => checkedRetentionYears(bad, "fileRetentionYears in FIRM_CONFIG_FILE"), JSON.stringify(bad)).toThrow(
+        /must be a whole number of years from 0 to 100/,
+      );
+    }
+    expect(() => setup({ retentionYears: 2.5 })).toThrow(/whole number of years/);
+  });
+
+  it("refuses a bad override on a single close, leaving the matter open", () => {
+    const { service, store } = setup({ retentionYears: 7 });
+    expect(() => service.close(attorney, "m-1", { closingNote: "Settled.", retentionYears: 2.5 })).toThrow(/whole number of years/);
+    expect(store.get("m-1")!.status).not.toBe("closed");
+    expect(() => addYears("2026-11-25", 2.5)).toThrow(/whole number/);
   });
 });
