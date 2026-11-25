@@ -90,6 +90,19 @@ export class MessagingService {
     };
   }
 
+  /**
+   * Someone a conversation can be started with or joined to: an existing
+   * staff account, by its exact actor id. Any string used to be accepted,
+   * and because a conversation belongs to the ids in it, a message to an
+   * id nobody had yet was waiting for whoever was later given that id —
+   * history and all. A client account can never read staff messages, so
+   * a message to one went nowhere.
+   */
+  #requireStaffMember(actorId: string): void {
+    const user = this.#auth.listUsers().find((u) => u.actorId === actorId);
+    if (!user || user.role === "client") throw new Error(`no user on staff with id '${actorId}'`);
+  }
+
   #requireMembership(actor: Actor, conversation: Conversation): void {
     if (conversation.kind === "announcement") return;
     if (!conversation.participantIds.includes(actor.id)) {
@@ -105,17 +118,20 @@ export class MessagingService {
 
   startDirectConversation(actor: Actor, otherActorId: string): ConversationView {
     requireHuman(actor);
+    this.#requireStaffMember(otherActorId);
     return this.#toConversationView(this.#store.getOrCreateDirectConversation(actor.id, otherActorId), this.#displayNames());
   }
 
   createGroup(actor: Actor, name: string, memberActorIds: string[]): ConversationView {
     requireHuman(actor);
+    for (const id of memberActorIds) if (id !== actor.id) this.#requireStaffMember(id);
     return this.#toConversationView(this.#store.createGroup(name, actor.id, memberActorIds), this.#displayNames());
   }
 
   addMember(actor: Actor, conversationId: string, memberActorId: string): ConversationView {
     requireHuman(actor);
     const conversation = this.#requireGroupMembership(actor, conversationId);
+    this.#requireStaffMember(memberActorId);
     return this.#toConversationView(this.#store.addMember(conversation.id, memberActorId), this.#displayNames());
   }
 

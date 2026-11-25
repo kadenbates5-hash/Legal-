@@ -6,7 +6,12 @@ import { MatterStore, type Matter, type PartyRole } from "../src/core/matters.js
 import { ConflictChecker } from "../src/core/conflicts.js";
 import { StaffScheduleStore, type StaffScheduleStatus } from "../src/core/staff-schedule.js";
 import { isCalendarDate } from "../src/core/calendar-date.js";
-import { DocumentStore, normalizedContentType, normalizedFileName } from "../src/core/document-store.js";
+import { DocumentStore, normalizedBase64, normalizedContentType, normalizedFileName } from "../src/core/document-store.js";
+import { StaffScheduleService, MAX_SCHEDULE_NOTE_LENGTH } from "../src/review-ui/staff-schedule-service.js";
+import { MessagingService } from "../src/review-ui/messaging-service.js";
+import { MessagingStore } from "../src/core/messaging.js";
+import { AuthService } from "../src/core/auth.js";
+import { AuditLog } from "../src/core/audit.js";
 import type { Actor } from "../src/core/types.js";
 
 /**
@@ -174,6 +179,78 @@ describe("the staff schedule", () => {
     expect(() => store.setEntry("a1", "garbage", "remote")).toThrow(/YYYY-MM-DD/);
     expect(store.setEntry("a1", "2026-11-30", "remote").status).toBe("remote");
   });
+
+  function scheduleService() {
+    const auth = new AuthService();
+    auth.createUser({ username: "atty", password: "correct-horse", role: "attorney", actorId: "a1" });
+    auth.createUser({ username: "para", password: "correct-horse", role: "paralegal", actorId: "p1" });
+    auth.createUser({ username: "cli", password: "correct-horse", role: "client", actorId: "c1" });
+    const auditLog = new AuditLog();
+    const isStaffMember = (id: string) => auth.listUsers().some((u) => u.actorId === id && u.role !== "client");
+    return { service: new StaffScheduleService(new StaffScheduleStore(), { isStaffMember, auditLog }), auditLog };
+  }
+
+  it("won't put someone who isn't on staff on the day's list", () => {
+    const { service } = scheduleService();
+    expect(() => service.setEntry(attorney, "ghost", "2026-11-30", "in_office")).toThrow(/no user on staff with id 'ghost'/);
+    expect(() => service.setEntry(attorney, "c1", "2026-11-30", "in_office")).toThrow(/no user on staff/);
+    expect(() => service.setEntry(attorney, "P1", "2026-11-30", "in_office")).toThrow(/no user on staff/); // ids are exact
+    expect(service.setEntry(attorney, "p1", "2026-11-30", "out").status).toBe("out");
+    expect(service.listForDate(attorney, "2026-11-30").map((e) => e.actorId)).toEqual(["p1"]);
+  });
+
+  it("keeps a note to a note, trimmed", () => {
+    const { service } = scheduleService();
+    expect(() => service.setEntry(attorney, "a1", "2026-11-30", "out", "x".repeat(MAX_SCHEDULE_NOTE_LENGTH + 1))).toThrow(
+      /at most 200 characters/,
+    );
+    expect(service.setEntry(attorney, "a1", "2026-11-30", "out", "  in court until 2  ").note).toBe("in court until 2");
+    expect(service.setEntry(attorney, "a1", "2026-12-01", "out", "   ").note).toBeUndefined();
+  });
+
+  it("records an attorney changing a colleague's day, but not anyone's own", () => {
+    const { service, auditLog } = scheduleService();
+    const paralegal: Actor = { id: "p1", role: "paralegal" };
+    service.setEntry(paralegal, "p1", "2026-11-30", "remote");
+    service.setEntry(attorney, "a1", "2026-11-30", "in_office");
+    expect(auditLog.read("attorney")).toHaveLength(0);
+
+    service.setEntry(attorney, "p1", "2026-11-30", "out");
+    service.removeEntry(attorney, "p1", "2026-11-30");
+    service.removeEntry(attorney, "p1", "2026-11-30"); // nothing left to remove: no entry for it
+    expect(auditLog.read("attorney").map((e) => [e.action, e.detail])).toEqual([
+      ["staff_schedule_set_for_colleague", "actor=p1 date=2026-11-30 status=out"],
+      ["staff_schedule_removed_for_colleague", "actor=p1 date=2026-11-30"],
+    ]);
+  });
+});
+
+describe("staff messages: who a conversation can include", () => {
+  function messaging() {
+    const auth = new AuthService();
+    auth.createUser({ username: "atty", password: "correct-horse", role: "attorney", actorId: "a1" });
+    auth.createUser({ username: "para", password: "correct-horse", role: "paralegal", actorId: "p1" });
+    auth.createUser({ username: "cli", password: "correct-horse", role: "client", actorId: "c1" });
+    return { auth, service: new MessagingService(new MessagingStore(), auth) };
+  }
+
+  it("won't start a conversation with an id nobody holds yet, which its future holder would inherit", () => {
+    const { auth, service } = messaging();
+    expect(() => service.startDirectConversation(attorney, "p2")).toThrow(/no user on staff with id 'p2'/);
+    // Had it been allowed, the account created later with that id would read it.
+    auth.createUser({ username: "newhire", password: "correct-horse", role: "paralegal", actorId: "p2" });
+    expect(service.listConversations({ id: "p2", role: "paralegal" }).filter((c) => c.kind !== "announcement")).toHaveLength(0);
+    expect(service.startDirectConversation(attorney, "p2").participants.map((p) => p.actorId)).toEqual(["a1", "p2"]);
+  });
+
+  it("won't address a client account, which can never read staff messages", () => {
+    const { service } = messaging();
+    expect(() => service.startDirectConversation(attorney, "c1")).toThrow(/no user on staff/);
+    expect(() => service.createGroup(attorney, "Team", ["p1", "c1"])).toThrow(/no user on staff with id 'c1'/);
+    const group = service.createGroup(attorney, "Team", ["p1"]);
+    expect(() => service.addMember(attorney, group.id, "ghost")).toThrow(/no user on staff/);
+    expect(service.addMember(attorney, group.id, "a1").participants.length).toBeGreaterThan(0);
+  });
 });
 
 describe("uploaded documents: what goes back out in a header", () => {
@@ -194,6 +271,29 @@ describe("uploaded documents: what goes back out in a header", () => {
     expect(() => store.upload({ matterId: "m1", fileName: "\r\n", contentType: "", content: "aGk=", uploadedBy: "a1" })).toThrow(
       /fileName is required/,
     );
+  });
+});
+
+describe("uploaded documents: the bytes themselves", () => {
+  const upload = (content: string) =>
+    new DocumentStore().upload({ matterId: "m1", fileName: "x.pdf", contentType: "application/pdf", content, uploadedBy: "a1" });
+
+  it("refuses content that isn't base64, which used to download as a quietly corrupt file", () => {
+    for (const bad of ["not base64 at all!", "aGk", "aGk==x", "<script>", "aG=k"]) {
+      expect(() => upload(bad), JSON.stringify(bad)).toThrow(/encoded as base64/);
+    }
+  });
+
+  it("takes off a data-URL prefix and line breaks, which say plainly what was meant", () => {
+    const bytes = Buffer.from("%PDF-1.4 a real file");
+    const b64 = bytes.toString("base64");
+    const wrapped = b64.replace(/(.{8})/g, "$1\r\n");
+    for (const sent of [`data:application/pdf;base64,${b64}`, wrapped, ` ${b64}\n`]) {
+      const doc = upload(sent);
+      expect(Buffer.from(doc.content, "base64").equals(bytes)).toBe(true);
+      expect(doc.size).toBe(bytes.length);
+    }
+    expect(normalizedBase64("")).toBe(""); // an empty file is still a file
   });
 });
 

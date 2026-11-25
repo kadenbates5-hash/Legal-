@@ -738,7 +738,12 @@ const staff = new StaffService(state.auth, state.accessControl);
 const messaging = new MessagingService(state.messaging, state.auth);
 
 /** Backs the "Schedule" panel: who's in the office/remote/out, per day. */
-const staffSchedule = new StaffScheduleService(state.staffSchedule);
+const staffSchedule = new StaffScheduleService(state.staffSchedule, {
+  // Exact match: entries are keyed by the id as given, so "P1" for "p1"
+  // would be an entry nobody's view ever finds.
+  isStaffMember: (actorId) => state.auth.listUsers().some((u) => u.actorId === actorId && u.role !== "client"),
+  auditLog: state.auditLog,
+});
 
 /** Backs the "Billing" panel: billable hours logged by lawyers/paralegals against a matter. */
 const billingHours = new BillingHoursService({ accessControl: state.accessControl, store: state.billingHours });

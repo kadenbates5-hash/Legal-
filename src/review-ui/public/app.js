@@ -1158,6 +1158,10 @@ function fillPeopleSelect(el, { includeSelf = true, selfActorId = null } = {}) {
   el.innerHTML = "";
   for (const m of knownStaff) {
     if (!includeSelf && m.actorId === selfActorId) continue;
+    // The directory lists client portal accounts too (the audit log's
+    // filter needs them); messaging, the staff schedule and "responsible
+    // attorney" are for staff, and the server refuses a client there.
+    if (m.role === "client") continue;
     const opt = document.createElement("option");
     opt.value = m.actorId;
     opt.textContent = `${m.displayName} (${m.role})`;

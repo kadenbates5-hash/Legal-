@@ -69,6 +69,26 @@ export function normalizedFileName(value: string): string {
     .slice(0, 255);
 }
 
+/**
+ * A document's bytes, as the base64 the browser sends. Anything else used
+ * to be stored as given and only went wrong at download: Node's decoder
+ * skips characters it doesn't know and decodes the rest, so a typo, a
+ * value that was never base64, or one still wearing its
+ * `data:application/pdf;base64,` prefix came back as a corrupt file with
+ * no error anywhere — the prefix's own letters being valid base64. Line
+ * breaks (some encoders wrap at 76 columns) are dropped and a data-URL
+ * prefix is taken off, since what was meant is clear; anything else that
+ * isn't standard, padded base64 is refused.
+ */
+export function normalizedBase64(content: string): string {
+  const withoutPrefix = content.replace(/^data:[^,]*;base64,/i, "");
+  const compact = withoutPrefix.replace(/\s+/g, "");
+  if (compact.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(compact)) {
+    throw new Error("content must be the file's bytes encoded as base64");
+  }
+  return compact;
+}
+
 export class DocumentStore {
   #byId = new Map<string, CaseDocument>();
   #nextId = 1;
@@ -83,13 +103,14 @@ export class DocumentStore {
   }): CaseDocument {
     const fileName = normalizedFileName(params.fileName);
     if (!fileName) throw new Error("fileName is required");
+    const content = normalizedBase64(params.content);
     const document: CaseDocument = {
       id: `doc_${this.#nextId++}`,
       matterId: params.matterId,
       fileName,
       contentType: normalizedContentType(params.contentType),
-      content: params.content,
-      size: Buffer.byteLength(params.content, "base64"),
+      content,
+      size: Buffer.byteLength(content, "base64"),
       uploadedBy: params.uploadedBy,
       uploadedAt: new Date().toISOString(),
       visibleToClient: params.uploadedByClient ?? false,

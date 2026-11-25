@@ -314,7 +314,14 @@ keeps the name on one line (control characters dropped, at most 255
 characters) and stores the type as a bare `type/subtype`, or as
 `application/octet-stream` when it isn't one. A type with a line break
 in it made the file impossible to download, since Node refuses the
-header.
+header. The content itself must be base64 (`normalizedBase64()`):
+anything else used to be stored as sent and only went wrong at
+download, because Node's decoder skips characters it doesn't know and
+decodes the rest — so a value that was never base64, or one still
+carrying its `data:application/pdf;base64,` prefix (whose letters are
+valid base64), came back as a quietly corrupt file. Line breaks and a
+data-URL prefix are taken off, since what was meant is clear; anything
+else is a 400.
 
 `src/review-ui/documents-service.ts` — `DocumentsService`, the paralegal/
 attorney-facing surface backing the Cases panel's upload/download. Same
@@ -1368,7 +1375,12 @@ each other, when they're in the office, and how they log billable time.
   role, unlike the review-gate's attorney-only checkpoint. `Messaging
   Service` is the actual access gate (direct/group conversations require
   participancy; announcements don't) plus display-name enrichment via
-  `AuthService`, since a raw `actorId` means nothing in the UI.
+  `AuthService`, since a raw `actorId` means nothing in the UI. Everyone
+  a direct or group conversation is started with, or a group gains, must
+  be an existing staff account by exact actor id: a conversation belongs
+  to the ids in it, so one started with an id nobody held yet was waiting
+  for whoever was later given that id, history and all, and one with a
+  client went nowhere, since clients can't read staff messages.
   `ConversationView` carries `lastMessageAt` (undefined until the first
   message, then whatever the newest one's `sentAt` is), which the
   Messages panel compares against a per-conversation "last opened"
@@ -1388,7 +1400,15 @@ each other, when they're in the office, and how they log billable time.
   day, but only an attorney can set someone else's, the same
   self-service-vs-attorney-gated split as password change vs. password
   reset. An entry's day must be a real date and its status one the panel
-  can show; "garbage" and "office" used to be stored as sent.
+  can show; "garbage" and "office" used to be stored as sent. The person
+  must be on staff too — an existing account, by its exact actor id, and
+  not a client (`isStaffMember`, answered from `AuthService` in
+  `start.ts`): a typo put someone who doesn't exist on the day's "who's
+  in" list, and a client's id put a client on it. A note is at most 200
+  characters, trimmed. An attorney changing or removing a *colleague's*
+  day is audited (`staff_schedule_set_for_colleague` /
+  `_removed_for_colleague`) — the service's own comment said that case
+  "needs accountability", and nothing recorded it; your own day isn't.
   `core/calendar-date.ts`'s `isCalendarDate()` is the one date check the
   billing, invoice, matter and schedule stores now share.
 - `core/billing-hours.ts` / `review-ui/billing-hours-service.ts` —
@@ -3807,7 +3827,9 @@ nav item is hidden except **My Matters** and **Security** — see below.
   Any `401` from the API redirects the browser back to `/login.html`.
   Every field that names a person is a `<select>` populated from
   `GET /api/staff` (showing display names, defaulting to you, and
-  excluding you from "message someone"), and every matter field offers
+  excluding you from "message someone"; the directory lists client
+  portal accounts too, for the audit log's filter, but the staff pickers
+  leave them out), and every matter field offers
   autocomplete from `GET /api/cases` via a shared `<datalist>` — matter
   fields stay free-text on purpose, since a matter comes into existence
   the first time someone uses its id, so the list is a convenience and

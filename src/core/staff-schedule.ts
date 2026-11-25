@@ -54,13 +54,14 @@ export class StaffScheduleStore {
     return entry;
   }
 
-  removeEntry(actorId: string, date: string): void {
+  /** True when there was an entry to remove. */
+  removeEntry(actorId: string, date: string): boolean {
     const key = this.#key(actorId, date);
     const existingId = this.#idByActorAndDate.get(key);
-    if (existingId) {
-      this.#byId.delete(existingId);
-      this.#idByActorAndDate.delete(key);
-    }
+    if (!existingId) return false;
+    this.#byId.delete(existingId);
+    this.#idByActorAndDate.delete(key);
+    return true;
   }
 
   listForActor(actorId: string): StaffScheduleEntry[] {
