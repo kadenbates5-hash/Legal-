@@ -132,6 +132,32 @@ function isoWeekOf(localDate: string): { key: string; startDate: string } {
   };
 }
 
+/** An instant with its zone written down: `2026-07-20T09:00:00Z` or `…T09:00-04:00`. */
+const ZONED_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/i;
+
+/**
+ * A corrected punch, as an instant. Two ways a correction used to record
+ * the wrong hours: a time written without its zone ("2026-07-20T09:00")
+ * was read in the *server's* zone, so an attorney in New York fixing a
+ * 9am start on a UTC host recorded 4am or 5am; and a time in the future
+ * was kept, paying for hours nobody had worked yet. A minute of slack
+ * covers two clocks that disagree slightly.
+ */
+function checkedPunch(value: unknown, label: string, now: Date): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!ZONED_INSTANT.test(text) || Number.isNaN(Date.parse(text))) {
+    throw new TimeClockError(
+      `the ${label} time must be a date and time with its zone, like 2026-07-20T09:00:00-04:00 (got ${JSON.stringify(value ?? null)}) — without one it would be read in the server's zone`,
+      "invalid",
+    );
+  }
+  const ms = Date.parse(text);
+  if (ms > now.getTime() + 60_000) {
+    throw new TimeClockError(`the ${label} time is in the future — a punch records time already worked`, "invalid");
+  }
+  return new Date(ms).toISOString();
+}
+
 export class TimeClock {
   #shifts: Shift[] = [];
   #nextId = 1;
@@ -204,8 +230,9 @@ export class TimeClock {
       );
     }
 
-    const nextIn = params.clockInAt ?? shift.clockInAt;
-    const nextOut = params.clockOutAt ?? shift.clockOutAt;
+    const now = this.#now();
+    const nextIn = params.clockInAt === undefined ? shift.clockInAt : checkedPunch(params.clockInAt, "clock-in", now);
+    const nextOut = params.clockOutAt === undefined ? shift.clockOutAt : checkedPunch(params.clockOutAt, "clock-out", now);
     if (Number.isNaN(Date.parse(nextIn))) throw new TimeClockError("clockInAt is not a valid timestamp", "invalid");
     if (nextOut !== undefined && Number.isNaN(Date.parse(nextOut))) {
       throw new TimeClockError("clockOutAt is not a valid timestamp", "invalid");
@@ -213,9 +240,25 @@ export class TimeClock {
     if (nextOut !== undefined && Date.parse(nextOut) <= Date.parse(nextIn)) {
       throw new TimeClockError("a shift must end after it starts", "invalid");
     }
+    // Two shifts of one person covering the same minutes are those
+    // minutes paid twice — the usual way is a forgotten clock-out
+    // "corrected" to the next morning, after the next shift began.
+    const startMs = Date.parse(nextIn);
+    const endMs = nextOut === undefined ? now.getTime() : Date.parse(nextOut);
+    for (const other of this.#shifts) {
+      if (other.id === shift.id || other.actorId !== shift.actorId) continue;
+      const otherStart = Date.parse(other.clockInAt);
+      const otherEnd = other.clockOutAt ? Date.parse(other.clockOutAt) : now.getTime();
+      if (startMs < otherEnd && otherStart < endMs) {
+        throw new TimeClockError(
+          `that would overlap the shift from ${other.clockInAt} to ${other.clockOutAt ?? "now (still open)"} — the same hours would be counted twice`,
+          "conflict",
+        );
+      }
+    }
 
     shift.corrections.push({
-      at: this.#now().toISOString(),
+      at: now.toISOString(),
       by: params.by,
       reason: params.reason.trim(),
       previousClockInAt: shift.clockInAt,

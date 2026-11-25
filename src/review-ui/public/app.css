@@ -859,6 +859,9 @@ ol.timeline::before { content: ""; position: absolute; top: 0.4rem; bottom: 0.4r
 .stat.ok::before { background: var(--ok); border-color: var(--ok); }
 .stat .n { font-family: var(--font-serif); font-size: 2.1rem; font-weight: 650; line-height: 1; letter-spacing: -0.03em; }
 .stat .k { margin-top: 0.4rem; color: var(--text-muted); font-size: 0.78rem; line-height: 1.35; }
+/* A tile never widens the grid: a long figure or label wraps inside it. */
+.stat { min-width: 0; }
+.stat .n, .stat .k { overflow-wrap: anywhere; }
 .stat.alert .n { color: var(--danger); }
 .stat.ok .n { color: var(--ok); }
 .stat.clickable { cursor: pointer; }

@@ -5968,7 +5968,11 @@ async function loadClockSummary() {
     totals.appendChild(statTile(formatMs(s.today ? s.today.totalMs : 0), "today"));
     totals.appendChild(statTile(formatMs(s.thisWeek ? s.thisWeek.totalMs : 0), "this week"));
     totals.appendChild(statTile(formatMs(s.thisMonth ? s.thisMonth.totalMs : 0), "this month"));
-    totals.appendChild(statTile(s.timeZone, "firm timezone"));
+    // "America/New_York" in the tile's display figure can't wrap, and
+    // pushed the whole page sideways; the city reads better anyway.
+    const zone = String(s.timeZone || "");
+    const city = zone.includes("/") ? zone.slice(zone.lastIndexOf("/") + 1).replace(/_/g, " ") : zone;
+    totals.appendChild(statTile(city, zone === city ? "firm time zone" : `firm time zone · ${zone}`));
   } catch (err) {
     showError(err.message);
   }
@@ -6039,7 +6043,7 @@ function shiftRow(s) {
   if (currentRole === "attorney" && !posted) {
     const actions = document.createElement("div");
     actions.className = "mt-md";
-    actions.appendChild(mkButton("Correct punch", () => correctShift(s)));
+    actions.appendChild(mkButton("Correct punch", () => toggleShiftCorrection(s, li)));
     if (!s.open) {
       const post = mkButton("Post to payroll", () => postShiftToPayroll(s));
       post.classList.add("primary");
@@ -6050,29 +6054,92 @@ function shiftRow(s) {
   return li;
 }
 
+/** An ISO instant as a datetime-local value in this browser's own zone. */
+function toLocalInputValue(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /**
- * Corrections take full ISO timestamps because a punch is an instant,
- * not a date — and the firm's day boundary is a timezone away from UTC.
- * Prefilling with the current values means the common case (fixing only
- * the clock-out) is a single edit.
+ * Correcting a punch, in the corrector's own local time. This used to be
+ * two prompt boxes asking for "ISO 8601, e.g. 2026-07-26T09:00:00Z" —
+ * so an attorney fixing a 9am start typed 09:00Z, which is UTC, and the
+ * shift moved by however far they are from Greenwich. The pickers here
+ * are local, prefilled with the current punches, and converted to an
+ * instant before they're sent; the server refuses a time without a zone.
  */
-async function correctShift(s) {
+function toggleShiftCorrection(s, li) {
   showError("");
-  const clockInAt = prompt("Clock-in time (ISO 8601, e.g. 2026-07-26T09:00:00Z):", s.clockInAt);
-  if (clockInAt === null) return;
-  const clockOutAt = prompt("Clock-out time (ISO 8601), or leave blank to keep it open:", s.clockOutAt || "");
-  if (clockOutAt === null) return;
-  const reason = prompt("Why is this being corrected? (kept on the record)");
-  if (!reason) return;
-  try {
-    await api(`/api/time-clock/shifts/${encodeURIComponent(s.id)}/adjust`, {
-      method: "POST",
-      body: JSON.stringify({ clockInAt, ...(clockOutAt.trim() ? { clockOutAt: clockOutAt.trim() } : {}), reason }),
-    });
-    await loadTimesheet();
-    await loadClockSummary();
-    showToast("Punch corrected.", "success");
-  } catch (err) { showError(err.message); }
+  const existing = li.querySelector(".shift-correction");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+  const form = document.createElement("div");
+  form.className = "shift-correction mt-xs";
+  const row = document.createElement("div");
+  row.className = "field-row";
+  const field = (label, input) => {
+    const el = document.createElement("label");
+    el.className = "field";
+    el.append(label, input);
+    row.appendChild(el);
+    return input;
+  };
+  const clockIn = document.createElement("input");
+  clockIn.type = "datetime-local";
+  clockIn.value = toLocalInputValue(s.clockInAt);
+  clockIn.max = toLocalInputValue(new Date().toISOString());
+  field("Clock in", clockIn);
+  const clockOut = document.createElement("input");
+  clockOut.type = "datetime-local";
+  clockOut.value = s.clockOutAt ? toLocalInputValue(s.clockOutAt) : "";
+  clockOut.max = clockIn.max;
+  field("Clock out", clockOut);
+  const reason = document.createElement("input");
+  reason.type = "text";
+  reason.maxLength = 500;
+  reason.placeholder = "e.g. forgot to clock out";
+  field("Why (kept on the record)", reason);
+  form.appendChild(row);
+
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "this device's time zone";
+  const note = document.createElement("p");
+  note.className = "meta-xs";
+  note.textContent = `Times are in your time zone (${zone}).${s.open ? " Leave clock-out empty to keep the shift open." : ""}`;
+  form.appendChild(note);
+
+  const save = mkButton("Save correction", async () => {
+    showError("");
+    if (!clockIn.value) return showError("Choose the clock-in time.");
+    if (!reason.value.trim()) return showError("Say why the punch is being corrected — it's kept on the shift's record.");
+    if (!s.open && !clockOut.value) return showError("Choose the clock-out time.");
+    const body = { reason: reason.value.trim() };
+    const nextIn = new Date(clockIn.value).toISOString();
+    // Only what moved is sent; seconds the picker can't show aren't "changes".
+    if (toLocalInputValue(s.clockInAt) !== clockIn.value) body.clockInAt = nextIn;
+    if (clockOut.value && (!s.clockOutAt || toLocalInputValue(s.clockOutAt) !== clockOut.value)) {
+      body.clockOutAt = new Date(clockOut.value).toISOString();
+    }
+    if (!body.clockInAt && !body.clockOutAt) return showError("Nothing changed — move the clock-in or clock-out first.");
+    try {
+      await api(`/api/time-clock/shifts/${encodeURIComponent(s.id)}/adjust`, { method: "POST", body: JSON.stringify(body) });
+      await loadTimesheet();
+      await loadClockSummary();
+      showToast("Punch corrected.", "success");
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+  save.classList.add("primary");
+  const actions = document.createElement("div");
+  actions.className = "mt-xs";
+  actions.append(save, mkButton("Cancel", () => form.remove()));
+  form.appendChild(actions);
+  li.appendChild(form);
+  clockIn.focus();
 }
 
 async function postShiftToPayroll(s) {

@@ -147,8 +147,10 @@ describe("TimeClockService — corrections", () => {
   });
 
   it("lets an attorney fix a forgotten clock-out, keeping the original on the record", () => {
-    const { service, auditLog } = makeService("2026-07-20T13:00:00Z");
-    const shift = service.clockIn(paralegal);
+    let ctx = makeService("2026-07-20T13:00:00Z");
+    const shift = ctx.service.clockIn(paralegal);
+    ctx = advanceTo(ctx, "2026-07-21T09:00:00Z");
+    const { service, auditLog } = ctx;
     const fixed = service.adjust(attorney, shift.id, {
       clockOutAt: "2026-07-20T21:00:00Z",
       reason: "forgot to clock out",

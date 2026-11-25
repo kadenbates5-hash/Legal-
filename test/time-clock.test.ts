@@ -153,8 +153,9 @@ describe("TimeClock — forgotten clock-outs", () => {
   });
 
   it("corrects a forgotten punch, keeping the original values on the record", () => {
-    const clock = new TimeClock(at("2026-07-20T09:00:00Z"));
-    const shift = clock.clockIn("p1");
+    const shift = new TimeClock(at("2026-07-20T09:00:00Z")).clockIn("p1");
+    // Corrected the next morning, as a forgotten clock-out is.
+    const clock = TimeClock.fromSnapshot({ shifts: [shift], nextId: 2 }, at("2026-07-21T09:00:00Z"));
     const fixed = clock.adjust(shift.id, {
       clockOutAt: "2026-07-20T17:00:00Z",
       by: "a1",

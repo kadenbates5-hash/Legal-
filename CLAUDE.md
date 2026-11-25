@@ -2433,6 +2433,26 @@ and only then marks the shift posted, so a failure can't mark hours paid
 that aren't; once posted the shift locks against correction, so the two
 records can't disagree.
 
+**A correction is an instant, in the past, that no other shift
+covers.** The panel used to correct a punch through two prompt boxes
+asking for "ISO 8601, e.g. 2026-07-26T09:00:00Z" — so an attorney fixing
+a 9am start typed 09:00Z, which is UTC, and moved someone's paid hours
+by their distance from Greenwich; a time typed without a zone was read
+in the *server's* zone, with the same result on a UTC host. It is now an
+inline form of local date-time pickers, prefilled with the current
+punches and labelled with the browser's zone, converted to an instant
+before sending. `TimeClock.adjust()` itself refuses a time without a
+zone or offset, stores it normalised, refuses one more than a minute in
+the future (hours not yet worked), and refuses a correction that makes
+two of one person's shifts cover the same minutes — the usual shape is a
+forgotten clock-out "fixed" to the next morning, after the next shift
+began — as a 409 naming the shift it would overlap.
+`test/punch-corrections.test.ts` pins these. The panel's "firm time
+zone" tile used to print "America/New_York" in the stat figure's
+display type, which can't wrap and pushed the whole page sideways (46px
+on a desktop, 133px on a phone); it shows the city, with the full zone
+underneath, and no stat tile can widen its grid any more.
+
 `TimeClockError` carries an explicit `kind`
 (`invalid`/`not_found`/`conflict`) rather than leaving `server.ts` to
 match HTTP status codes against error prose — that approach broke the

@@ -342,7 +342,11 @@ describe("system-state persistence integration", () => {
     const state = await loadSystemState(filePath);
     const closed = state.timeClock.clockIn("p1");
     state.timeClock.clockOut("p1");
-    state.timeClock.adjust(closed.id, { clockOutAt: "2030-01-01T17:00:00Z", by: "a1", reason: "forgot" });
+    state.timeClock.adjust(closed.id, {
+      clockOutAt: new Date(Date.parse(closed.clockInAt) + 30_000).toISOString(),
+      by: "a1",
+      reason: "forgot",
+    });
     state.timeClock.clockIn("p2");
 
     await saveSystemState(filePath, state);
