@@ -14,6 +14,7 @@ import { CourtListenerClient } from "../integrations/courtlistener.js";
 import { loadSystemState, saveSystemState, type SystemState } from "../persistence/system-state.js";
 import { WorkProduct } from "../core/review-gate.js";
 import { checkedRetentionYears } from "../core/matters.js";
+import { addDaysToCalendarDate, checkedTimeZone, todayIn } from "../core/calendar-date.js";
 import type { Actor } from "../core/types.js";
 import { readJsonFile } from "../persistence/json-file-store.js";
 import { createPostgresStateStore } from "../persistence/postgres-store.js";
@@ -80,6 +81,38 @@ const firmConfig = FIRM_CONFIG_FILE ? await readJsonFile<FirmConfig | null>(FIRM
 const fileRetentionYears = checkedRetentionYears(firmConfig?.fileRetentionYears, "fileRetentionYears in FIRM_CONFIG_FILE");
 
 /**
+ * The firm's zone — where its days start. Every check that compares a
+ * date with "today" asks it here: a court date the receptionist hears, a
+ * deadline coming due, an invoice going overdue, the day a file closed,
+ * the dates printed on a bill, where a time-clock day starts. Asked in the
+ * host's zone instead, a server in UTC is on tomorrow from 7pm in New York
+ * and on yesterday until 11am in Sydney.
+ *
+ * FIRM_TIME_ZONE if set, else the firm config's business-hours zone, else
+ * this machine's. Checked once here, so a zone the runtime doesn't know
+ * stops the server with a plain message rather than failing every request
+ * that asks what day it is.
+ */
+const FIRM_TIME_ZONE = checkedTimeZone(
+  process.env["FIRM_TIME_ZONE"] ??
+    firmConfig?.businessHours?.timezone ??
+    Intl.DateTimeFormat().resolvedOptions().timeZone ??
+    "UTC",
+  process.env["FIRM_TIME_ZONE"] ? "FIRM_TIME_ZONE" : "businessHours.timezone in FIRM_CONFIG_FILE",
+);
+// Business hours are checked in the config's own zone (the greeting's
+// after-hours notice, scheduling), so a bad one there is refused too.
+if (firmConfig?.businessHours?.timezone !== undefined) {
+  checkedTimeZone(firmConfig.businessHours.timezone, "businessHours.timezone in FIRM_CONFIG_FILE");
+}
+if (process.env["FIRM_TIME_ZONE"] && firmConfig?.businessHours?.timezone && firmConfig.businessHours.timezone !== FIRM_TIME_ZONE) {
+  console.warn(
+    `FIRM_TIME_ZONE (${FIRM_TIME_ZONE}) differs from the firm config's business-hours zone (${firmConfig.businessHours.timezone}); ` +
+      "days are counted in FIRM_TIME_ZONE, business hours in the config's zone.",
+  );
+}
+
+/**
  * `store` is either the Postgres adapter (when DATABASE_URL is set) or a
  * plain file path string — `loadSystemState`/`saveSystemState` accept
  * either. Computed once here and reused for every save, so a Postgres
@@ -106,7 +139,11 @@ const state = await loadSystemState(store, firmConfig ? { firmConfig } : {});
  */
 function seedDemoData(state: SystemState, attorneyUsername: string): void {
   const attorney: Actor = { id: attorneyUsername, role: "attorney" };
-  const inTwoWeeks = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+  // The firm's day, so the deadline lands inside Coming due's two-week
+  // window wherever the server is — fourteen days from UTC's date was
+  // fifteen from Honolulu's, and the sample deadline never showed.
+  const today = todayIn(FIRM_TIME_ZONE);
+  const inTenDays = addDaysToCalendarDate(today, 10);
   const inThreeDays = new Date(Date.now() + 3 * 86_400_000);
   inThreeDays.setUTCHours(15, 0, 0, 0);
 
@@ -138,7 +175,7 @@ function seedDemoData(state: SystemState, attorneyUsername: string): void {
   state.deadlineTracker.record({
     matterId: "demo-criminal-1",
     type: "arraignment",
-    date: inTwoWeeks,
+    date: inTenDays,
     source: "agent",
   });
 
@@ -159,7 +196,7 @@ function seedDemoData(state: SystemState, attorneyUsername: string): void {
   state.billingHours.log({
     matterId: "demo-contract-1",
     actorId: attorneyUsername,
-    date: new Date().toISOString().slice(0, 10),
+    date: today,
     hours: 1.5,
     description: "Sample entry — initial client consultation.",
   });
@@ -234,7 +271,7 @@ if (seeded) {
   await saveSystemState(store, state);
 }
 
-const service = new ReviewGateService(state.workProductStore, state.deadlineTracker);
+const service = new ReviewGateService(state.workProductStore, state.deadlineTracker, { timeZone: FIRM_TIME_ZONE });
 
 /**
  * Backs the dashboard's "Live Intake Demo" panel — see intake-demo.ts.
@@ -275,6 +312,7 @@ const intake = new IntakeDemoSessions({
   module: criminalLawModule,
   utilization: state.utilization,
   ...(firmConfig ? { firmConfig } : {}),
+  timeZone: FIRM_TIME_ZONE,
   // Live intake screens against the firm's real matter records, not a
   // hardcoded name list — see core/conflicts.ts.
   conflictChecker,
@@ -362,6 +400,7 @@ const matters = new MattersService({
   invoices: state.invoices,
   workProducts: state.workProductStore,
   ...(fileRetentionYears > 0 ? { retentionYears: fileRetentionYears } : {}),
+  timeZone: FIRM_TIME_ZONE,
 });
 
 /**
@@ -499,6 +538,7 @@ const invoicing = new InvoicingService({
   // replying to the bill would reach that mailbox anyway.
   firm: {
     name: firmConfig?.firmName ?? "This Firm",
+    timeZone: FIRM_TIME_ZONE,
     ...(firmConfig?.letterhead?.addressLines?.length
       ? { addressLines: firmConfig.letterhead.addressLines }
       : {}),
@@ -583,6 +623,7 @@ const analytics = new AnalyticsService({
   billingHours: state.billingHours,
   utilization: state.utilization,
   auth: state.auth,
+  timeZone: FIRM_TIME_ZONE,
 });
 
 /**
@@ -596,6 +637,7 @@ const calendarExport = new CalendarExportService({
   auditLog: state.auditLog,
   nameFor: (actorId) => state.auth.listUsers().find((u) => u.actorId === actorId)?.displayName,
   ...(firmConfig?.firmName ? { firmName: firmConfig.firmName } : {}),
+  timeZone: FIRM_TIME_ZONE,
 });
 
 /**
@@ -635,15 +677,15 @@ const dataImport = new ImportService({
     ...state.trustLedger.matterIds(),
   ],
   ...(fileRetentionYears > 0 ? { retentionYears: fileRetentionYears } : {}),
+  timeZone: FIRM_TIME_ZONE,
 });
 
 /**
  * Backs the "Time Clock" panel — the capture side of payroll.
- * `FIRM_TIME_ZONE` decides where a day starts: bucketing punches by UTC
- * would put an evening shift on the wrong day, and therefore in the
- * wrong week and pay period. Defaults to the host's own zone.
+ * `FIRM_TIME_ZONE` (above) decides where a day starts: bucketing punches
+ * by UTC would put an evening shift on the wrong day, and therefore in the
+ * wrong week and pay period.
  */
-const FIRM_TIME_ZONE = process.env["FIRM_TIME_ZONE"] ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
 const timeClock = new TimeClockService({
   clock: state.timeClock,
   payroll: state.payroll,
@@ -736,7 +778,7 @@ const assistant = ANTHROPIC_API_KEY
       auditLog: state.auditLog,
       toolDeps: { drafting, documents, cases, research, scheduling: state.scheduling, reviewGate: service },
       // Business hours are judged in the firm config's zone, so "10am" should mean the same.
-      timeZone: firmConfig?.businessHours?.timezone ?? FIRM_TIME_ZONE,
+      timeZone: FIRM_TIME_ZONE,
     })
   : undefined;
 
@@ -812,6 +854,7 @@ const voiceOptions: Pick<ReviewServerOptions, "voiceCalls" | "audioClips" | "twi
           }),
           utilization: state.utilization,
           ...(firmConfig ? { firmConfig } : {}),
+          timeZone: FIRM_TIME_ZONE,
         }),
         audioClips: new AudioClipStore(),
         twilio: { accountSid: TWILIO_ACCOUNT_SID, authToken: TWILIO_AUTH_TOKEN, publicBaseUrl: PUBLIC_BASE_URL.replace(/\/+$/, "") },
@@ -904,6 +947,7 @@ const bookingOptions: Pick<ReviewServerOptions, "booking"> =
           auditLog: state.auditLog,
           conflictChecker,
           ...(firmConfig ? { firmConfig } : {}),
+          timeZone: FIRM_TIME_ZONE,
         }),
       }
     : {};
@@ -1017,6 +1061,6 @@ server.listen(port, () => {
     console.log(`Telephony integration active — point a Twilio phone number's voice webhook at ${PUBLIC_BASE_URL}/api/voice/twilio/incoming`);
   }
   if (assistant) console.log("Assistant panel active (ANTHROPIC_API_KEY set).");
-  console.log(`Time clock day boundary: ${FIRM_TIME_ZONE} (set FIRM_TIME_ZONE to change).`);
+  console.log(`The firm's days are counted in ${FIRM_TIME_ZONE} (set FIRM_TIME_ZONE to change).`);
   if (bookingOptions.booking) console.log(`Public booking page live at /book.html (PUBLIC_BOOKING=true).`);
 });

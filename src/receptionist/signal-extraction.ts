@@ -1,4 +1,5 @@
 import type { EscalationSignals } from "../core/escalation.js";
+import { calendarDayIn, type CalendarDay } from "../core/calendar-date.js";
 
 /**
  * Rule-based extraction of escalation-relevant signals from a caller's free
@@ -277,13 +278,15 @@ const DAY_OF_MONTH_RE = /\b(\d{1,2})(?:st|nd|rd|th)\s+of\s+(jan|feb|mar|apr|may|
 const BARE_DAY_RE = /\bthe\s+(\d{1,2})(?:st|nd|rd|th)\b(?!\s+of\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))/i;
 const NUMERIC_DATE_RE = /\b(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\b/;
 
-function hoursUntilDate(month: number, day: number, now: Date): number | undefined {
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  let target = new Date(now.getFullYear(), month, day);
-  if (target.getMonth() !== month) return undefined; // e.g. Feb 31
+function hoursUntilDate(month: number, day: number, today: CalendarDay): number | undefined {
+  // Calendar arithmetic only, in UTC so no daylight-saving hour creeps in —
+  // `today` is already the caller's day, wherever the server is.
+  const todayMs = Date.UTC(today.year, today.month, today.day);
+  let target = new Date(Date.UTC(today.year, month, day));
+  if (target.getUTCMonth() !== month) return undefined; // e.g. Feb 31
   // A date more than a month in the past is next year's; a recent past date is just in the past.
-  if (target.getTime() < today.getTime() - 31 * 86_400_000) target = new Date(now.getFullYear() + 1, month, day);
-  const days = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  if (target.getTime() < todayMs - 31 * 86_400_000) target = new Date(Date.UTC(today.year + 1, month, day));
+  const days = Math.round((target.getTime() - todayMs) / 86_400_000);
   return days < 0 ? undefined : Math.max(days * 24, 12);
 }
 
@@ -297,8 +300,15 @@ function hoursUntilDate(month: number, day: number, now: Date): number | undefin
  * Errs early: a weekday is read as its *next* occurrence, never the one
  * after, and anything today counts as 24 hours or less. Returns undefined
  * if no recognizable timing phrase is present.
+ *
+ * `timeZone` is the firm's: weekdays and dates are counted from the day it
+ * is *there*. Counted from the server's day instead, a UTC host put a New
+ * York caller on tomorrow from 7pm — "my hearing is the 27th", said on the
+ * evening of the 27th, read as next month's — and a Sydney caller on
+ * yesterday until 11am, so "court on Monday" early on Saturday read as 72
+ * hours away and never escalated. Without a zone, this machine's day.
  */
-export function parseHoursUntil(rawText: string, now?: Date): number | undefined {
+export function parseHoursUntil(rawText: string, now?: Date, timeZone?: string): number | undefined {
   const text = ordinalsToDigits(expandShorthand(normalizeCallerText(rawText)));
   const found: number[] = [];
   for (const match of text.matchAll(RELATIVE_RE)) {
@@ -311,24 +321,25 @@ export function parseHoursUntil(rawText: string, now?: Date): number | undefined
   if (TOMORROW_RE.test(text)) found.push(24);
   if (THIS_WEEK_RE.test(text)) found.push(48);
   if (now) {
+    const today = calendarDayIn(now, timeZone);
     const weekday = text.match(WEEKDAY_RE);
     if (weekday) {
-      const days = (WEEKDAYS.indexOf(weekday[1]!.toLowerCase()) - now.getDay() + 7) % 7;
+      const days = (WEEKDAYS.indexOf(weekday[1]!.toLowerCase()) - today.weekday + 7) % 7;
       found.push(days === 0 ? 12 : days * 24);
     }
     const monthDay = text.match(MONTH_DAY_RE);
     if (monthDay) {
-      const hours = hoursUntilDate(MONTHS.indexOf(monthDay[1]!.toLowerCase().slice(0, 3)), Number(monthDay[2]), now);
+      const hours = hoursUntilDate(MONTHS.indexOf(monthDay[1]!.toLowerCase().slice(0, 3)), Number(monthDay[2]), today);
       if (hours !== undefined) found.push(hours);
     }
     const numeric = text.match(NUMERIC_DATE_RE);
     if (numeric) {
-      const hours = hoursUntilDate(Number(numeric[1]) - 1, Number(numeric[2]), now);
+      const hours = hoursUntilDate(Number(numeric[1]) - 1, Number(numeric[2]), today);
       if (hours !== undefined) found.push(hours);
     }
     const dayOfMonth = text.match(DAY_OF_MONTH_RE);
     if (dayOfMonth) {
-      const hours = hoursUntilDate(MONTHS.indexOf(dayOfMonth[2]!.toLowerCase().slice(0, 3)), Number(dayOfMonth[1]), now);
+      const hours = hoursUntilDate(MONTHS.indexOf(dayOfMonth[2]!.toLowerCase().slice(0, 3)), Number(dayOfMonth[1]), today);
       if (hours !== undefined) found.push(hours);
     }
     const bareDay = text.match(BARE_DAY_RE);
@@ -336,15 +347,15 @@ export function parseHoursUntil(rawText: string, now?: Date): number | undefined
       const day = Number(bareDay[1]);
       // Still to come this month, or else next month's — December's
       // "the 5th" being January's, which hoursUntilDate rolls into next year.
-      const month = day >= now.getDate() ? now.getMonth() : (now.getMonth() + 1) % 12;
-      const hours = hoursUntilDate(month, day, now);
+      const month = day >= today.day ? today.month : (today.month + 1) % 12;
+      const hours = hoursUntilDate(month, day, today);
       if (hours !== undefined) found.push(hours);
     }
   }
   return found.length ? Math.min(...found) : undefined;
 }
 
-export function extractSignalsFromText(rawText: string, now?: Date): Partial<EscalationSignals> {
+export function extractSignalsFromText(rawText: string, now?: Date, timeZone?: string): Partial<EscalationSignals> {
   const text = expandShorthand(normalizeCallerText(rawText));
   const signals: Partial<EscalationSignals> = {};
 
@@ -360,7 +371,7 @@ export function extractSignalsFromText(rawText: string, now?: Date): Partial<Esc
   }
 
   if (COURT_MENTION_RE.test(text)) {
-    const hours = parseHoursUntil(text, now);
+    const hours = parseHoursUntil(text, now, timeZone);
     if (hours !== undefined) signals.courtAppearanceWithinHours = hours;
   }
 

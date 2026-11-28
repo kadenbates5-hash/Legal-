@@ -63,6 +63,7 @@ export class IntakeDemoSessions {
   #module: PracticeAreaModule;
   #utilization: UtilizationTracker | undefined;
   #firmConfig: FirmConfig | undefined;
+  #timeZone: string | undefined;
   /** Firm-wide conflicts screen. Optional so a firm with no matter records yet still runs intake. */
   #conflictChecker: ConflictChecker | undefined;
   /** Optional natural phrasing — see `receptionist/acknowledgements.ts`. Absent, every reply is the script. */
@@ -74,6 +75,8 @@ export class IntakeDemoSessions {
     module: PracticeAreaModule;
     utilization?: UtilizationTracker;
     firmConfig?: FirmConfig;
+    /** The firm's zone, for counting a court date the caller names from the firm's day. */
+    timeZone?: string;
     conflictChecker?: ConflictChecker;
     acknowledgements?: AcknowledgementSource;
   }) {
@@ -81,6 +84,7 @@ export class IntakeDemoSessions {
     this.#module = params.module;
     this.#utilization = params.utilization;
     this.#firmConfig = params.firmConfig;
+    this.#timeZone = params.timeZone;
     this.#conflictChecker = params.conflictChecker;
     this.#acknowledgements = params.acknowledgements;
   }
@@ -102,6 +106,7 @@ export class IntakeDemoSessions {
       actor,
       ...(this.#utilization ? { utilization: this.#utilization } : {}),
       ...(this.#firmConfig ? { firmConfig: this.#firmConfig } : {}),
+      ...(this.#timeZone ? { timeZone: this.#timeZone } : {}),
       ...(this.#conflictChecker ? { conflictChecker: this.#conflictChecker } : {}),
     });
     this.#sessions.set(sessionId, {

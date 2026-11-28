@@ -46,10 +46,14 @@
       select.appendChild(option);
     }
 
-    const today = new Date();
-    const latest = new Date(today.getFullYear(), today.getMonth(), today.getDate() + config.maxDaysAhead);
-    $("preferredDate").min = localDate(today);
-    $("preferredDate").max = localDate(latest);
+    // The firm's today, from the server, so the picker opens on the same
+    // window the server checks — a visitor in another zone, or a device
+    // with its clock wrong, otherwise picks a day that's then refused.
+    const [y, m, d] = /^\d{4}-\d{2}-\d{2}$/.test(config.today || "")
+      ? config.today.split("-").map(Number)
+      : [new Date().getFullYear(), new Date().getMonth() + 1, new Date().getDate()];
+    $("preferredDate").min = localDate(new Date(y, m - 1, d));
+    $("preferredDate").max = localDate(new Date(y, m - 1, d + config.maxDaysAhead));
 
     $("isUrgent").addEventListener("change", (e) => {
       const urgent = e.target.checked;

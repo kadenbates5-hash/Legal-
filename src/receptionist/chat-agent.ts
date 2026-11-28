@@ -2,6 +2,7 @@ import { Router, newIntakeState, type IntakeState } from "../core/router.js";
 import type { EscalationSignals, RouteDirective } from "../core/escalation.js";
 import { disclosurePolicyFor } from "../core/confidentiality.js";
 import { extractSignalsFromText, extractCandidatePartyNames, normalizeCallerText, parseHoursUntil } from "./signal-extraction.js";
+import { isTimeZone } from "../core/calendar-date.js";
 import {
   BILLING_HANDOFF_SCRIPT,
   CALLER_TYPE_CLARIFY_QUESTION,
@@ -146,6 +147,8 @@ export class ReceptionistChatSession {
   #reaskCallerType = false;
   #firmConfig: FirmConfig | undefined;
   #now: () => Date;
+  /** The firm's zone: which day "Monday" and "the 27th" are counted from. */
+  #timeZone: string | undefined;
   /** The question the caller was last asked, repeated verbatim after a side answer. */
   #lastQuestion = CALLER_TYPE_QUESTION;
   #sideQuestionsInARow = 0;
@@ -166,6 +169,14 @@ export class ReceptionistChatSession {
     firmConfig?: FirmConfig;
     /** Injectable clock for testing the after-hours notice deterministically. */
     now?: () => Date;
+    /**
+     * The firm's IANA zone, for counting a court date the caller names
+     * ("Monday", "the 27th") from the firm's day rather than the server's.
+     * Defaults to the firm config's business-hours zone, then this
+     * machine's. Only ever makes an escalation *correct* — see
+     * `parseHoursUntil`.
+     */
+    timeZone?: string;
   }) {
     this.#router = params.router;
     this.#module = params.module;
@@ -177,6 +188,11 @@ export class ReceptionistChatSession {
     this.#state = newIntakeState({ matterId: params.matterId, callerType: "unknown" });
     this.#firmConfig = params.firmConfig;
     this.#now = params.now ?? (() => new Date());
+    // A zone Intl doesn't know would make every turn throw; this machine's
+    // day is the better failure for a live call. Boot refuses a bad
+    // FIRM_TIME_ZONE before it gets here.
+    const zone = params.timeZone ?? params.firmConfig?.businessHours?.timezone;
+    this.#timeZone = isTimeZone(zone) ? zone : undefined;
 
     if (this.#utilization) {
       this.#utilizationEntryId = this.#utilization.start({
@@ -201,7 +217,7 @@ export class ReceptionistChatSession {
       return { reply: WRAP_UP, done: true, trace: { label: "conversation already ended", triggers: [], state: { ...this.#state } } };
     }
 
-    let turnSignals: Partial<EscalationSignals> = extractSignalsFromText(text, this.#now());
+    let turnSignals: Partial<EscalationSignals> = extractSignalsFromText(text, this.#now(), this.#timeZone);
 
     // Once a caller's free text signals they need an interpreter, that has
     // to become sticky state, not just this turn's raw signal — §2's
@@ -452,7 +468,7 @@ export class ReceptionistChatSession {
       return NEGATION_RE.test(answerText) && !CUSTODY_WORDS_RE.test(answerText) ? { inCustody: false } : {};
     }
     if (questionId === "court_date") {
-      const hours = parseHoursUntil(answerText, this.#now());
+      const hours = parseHoursUntil(answerText, this.#now(), this.#timeZone);
       return hours !== undefined ? { courtAppearanceWithinHours: hours } : {};
     }
     if (questionId === "protective_order_active") {

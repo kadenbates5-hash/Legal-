@@ -57,6 +57,7 @@ export class ImportService {
   #matterIdsInUse: () => Iterable<string>;
   #retentionYears: number;
   #now: () => Date;
+  #timeZone: string | undefined;
 
   constructor(params: {
     matters: MatterStore;
@@ -68,7 +69,10 @@ export class ImportService {
     matterIdsInUse?: () => Iterable<string>;
     retentionYears?: number;
     now?: () => Date;
+    /** The firm's zone — see `ImportContext.timeZone`. */
+    timeZone?: string;
   }) {
+    this.#timeZone = params.timeZone;
     this.#matters = params.matters;
     this.#billingHours = params.billingHours;
     this.#auth = params.auth;
@@ -201,6 +205,7 @@ export class ImportService {
         matterIdsInUse: new Set(this.#matterIdsInUse()),
         retentionYears: this.#retentionYears,
         now: this.#now(),
+        ...(this.#timeZone ? { timeZone: this.#timeZone } : {}),
       },
       { mapping },
     );

@@ -1,4 +1,5 @@
 import type { AuditLog } from "../core/audit.js";
+import { todayIn } from "../core/calendar-date.js";
 import type { ConflictChecker } from "../core/conflicts.js";
 import type { SchedulingService } from "../core/scheduling.js";
 import type { FirmConfig } from "../config/firm-config.js";
@@ -41,6 +42,7 @@ export class BookingService {
   #limiter: SubmissionLimiter;
   #firmConfig: FirmConfig | undefined;
   #now: () => Date;
+  #timeZone: string | undefined;
 
   constructor(params: {
     store: BookingRequestStore;
@@ -50,6 +52,8 @@ export class BookingService {
     limiter?: SubmissionLimiter;
     firmConfig?: FirmConfig;
     now?: () => Date;
+    /** The firm's zone — which day "today" is for the form's window. Defaults to the firm config's business-hours zone. */
+    timeZone?: string;
   }) {
     this.#store = params.store;
     this.#scheduling = params.scheduling;
@@ -58,6 +62,7 @@ export class BookingService {
     this.#limiter = params.limiter ?? new SubmissionLimiter();
     this.#firmConfig = params.firmConfig;
     this.#now = params.now ?? (() => new Date());
+    this.#timeZone = params.timeZone ?? params.firmConfig?.businessHours?.timezone;
   }
 
   /** What the public page needs to draw itself. Nothing about attorneys, calendars or matters. */
@@ -67,8 +72,11 @@ export class BookingService {
     matterTypes: Array<{ id: string; label: string }>;
     maxDaysAhead: number;
     officeDays: number[] | undefined;
+    /** The firm's today, so the page's date picker starts where the server's check does. */
+    today: string;
   } {
     return {
+      today: todayIn(this.#timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, this.#now()),
       firmName: this.#firmConfig?.firmName,
       phone: this.#firmConfig?.letterhead?.phone,
       matterTypes: Object.entries(BOOKING_MATTER_TYPES).map(([id, label]) => ({ id, label })),
@@ -87,7 +95,7 @@ export class BookingService {
     if (!this.#limiter.allow(context.ip)) {
       throw new BookingRequestError("Too many requests from this connection. Please try again later, or call the office.", "busy");
     }
-    const request = this.#store.submit(input, { ...(this.#conflictChecker ? { conflictChecker: this.#conflictChecker } : {}), now: this.#now() });
+    const request = this.#store.submit(input, { ...(this.#conflictChecker ? { conflictChecker: this.#conflictChecker } : {}), now: this.#now(), ...(this.#timeZone ? { timeZone: this.#timeZone } : {}) });
     this.#auditLog.append({
       actor: PUBLIC_FORM_ACTOR,
       matterId: undefined,

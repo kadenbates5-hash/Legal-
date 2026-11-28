@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { ConflictChecker } from "./conflicts.js";
-import { isCalendarDate } from "./calendar-date.js";
+import { addDaysToCalendarDate, isCalendarDate, todayIn } from "./calendar-date.js";
 
 /**
  * Self-service booking requests: what a prospective client submits from
@@ -99,14 +99,17 @@ function clean(value: string | undefined, max: number, label: string): string | 
   return trimmed;
 }
 
-function localDateString(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 /** Validates and normalizes a public submission. Throws `BookingRequestError` ("invalid") with a reason the form can show. */
 export function validateBookingSubmission(
   input: BookingSubmission,
   now: Date = new Date(),
+  /**
+   * The firm's zone. "Today" is the firm's day: on a server in UTC, a New
+   * York visitor choosing today after 7pm was told to "choose a day within
+   * the next 60 days", because the server was already on tomorrow.
+   * Absent, this machine's day, as before.
+   */
+  timeZone?: string,
 ): Omit<BookingRequest, "id" | "createdAt" | "status" | "conflict" | "decidedBy" | "decidedAt" | "appointmentId" | "declineReason"> {
   const name = clean(input.name, 100, "Your name");
   if (!name || !NAME_RE.test(name)) throw new BookingRequestError("Please enter your name.", "invalid");
@@ -128,8 +131,8 @@ export function validateBookingSubmission(
   if (!DATE_RE.test(input.preferredDate) || !isCalendarDate(input.preferredDate)) {
     throw new BookingRequestError("Please choose a day.", "invalid");
   }
-  const today = localDateString(now);
-  const latest = localDateString(new Date(now.getFullYear(), now.getMonth(), now.getDate() + BOOKING_MAX_DAYS_AHEAD));
+  const today = todayIn(timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, now);
+  const latest = addDaysToCalendarDate(today, BOOKING_MAX_DAYS_AHEAD);
   if (input.preferredDate < today || input.preferredDate > latest) {
     throw new BookingRequestError(`Please choose a day within the next ${BOOKING_MAX_DAYS_AHEAD} days.`, "invalid");
   }
@@ -157,9 +160,9 @@ export class BookingRequestStore {
    * the would-be client and the other party as adverse — the reading that
    * surfaces a Rule 1.7 conflict in either direction.
    */
-  submit(input: BookingSubmission, options: { conflictChecker?: ConflictChecker; now?: Date } = {}): BookingRequest {
+  submit(input: BookingSubmission, options: { conflictChecker?: ConflictChecker; now?: Date; timeZone?: string } = {}): BookingRequest {
     const now = options.now ?? new Date();
-    const valid = validateBookingSubmission(input, now);
+    const valid = validateBookingSubmission(input, now, options.timeZone);
     if (this.list().filter((r) => r.status === "pending").length >= BOOKING_MAX_PENDING) {
       throw new BookingRequestError("We can't take more requests online right now. Please call the office.", "busy");
     }

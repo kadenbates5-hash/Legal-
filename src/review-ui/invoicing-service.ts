@@ -1,4 +1,5 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
+import { todayIn } from "../core/calendar-date.js";
 import type { AccessControl } from "../core/access-control.js";
 import type { AuditLog } from "../core/audit.js";
 import type { BillingHoursStore } from "../core/billing-hours.js";
@@ -152,7 +153,7 @@ export class InvoicingService {
    */
   listOutstanding(actor: Actor, asOf: Date = new Date()): OutstandingInvoice[] {
     requireLegalStaff(actor);
-    const today = asOf.toISOString().slice(0, 10);
+    const today = todayIn(this.#firm.timeZone, asOf);
     const rows: OutstandingInvoice[] = [];
 
     for (const invoice of this.#store.listAll()) {
@@ -618,7 +619,7 @@ export class InvoicingService {
 
   #daysOverdue(dueDate: string | undefined, asOf: Date = new Date()): number {
     if (!dueDate) return 0;
-    const today = asOf.toISOString().slice(0, 10);
+    const today = todayIn(this.#firm.timeZone, asOf);
     return dueDate < today ? daysBetween(dueDate, today) : 0;
   }
 

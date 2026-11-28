@@ -269,6 +269,20 @@ A benign set of transcribed answers — denials with stutters, court dates
 three days or more out, "my second hearing", "bail out of this
 contract", a past "he used to hit me" — is pinned not to end the call.
 
+**Weekdays and dates are the firm's.** `parseHoursUntil()` counted "on
+Monday" and "the 27th" from the *server's* day. Most hosts run in UTC,
+which is already tomorrow from 7pm in New York and still yesterday
+until 11am in Sydney. So "court on Monday", said early on a Saturday in
+Sydney, came out as 72 hours away and never escalated, and in New York
+"my hearing is the 27th", said on the evening of the 27th, read as next
+month. It now counts from the firm's calendar day (`calendarDayIn()`,
+`timeZone` on `ReceptionistChatSession`, from `FIRM_TIME_ZONE` or the
+firm config's business-hours zone). It still errs early as before. A
+zone the runtime doesn't recognise falls back to the server's day rather
+than failing the call. Verified live on a UTC host with the firm set to
+Honolulu: "my court date is the 27th" escalated on the 27th there. See
+"The firm's day" below.
+
 - `voice-agent.ts` — `VoiceReceptionistSession`, the voice channel (§8
   build order step 6). Wraps the exact same `ReceptionistChatSession`
   behind vendor-agnostic `SpeechToText`/`TextToSpeech` interfaces — no
@@ -1350,8 +1364,8 @@ acting for, and it can never be the human checkpoint itself.**
   "book a consultation tomorrow at 10" was a guess at the date from its
   training, written as a time with no zone that the server read as UTC.
   Every request now ends the system prompt with `firmClockContext()`:
-  today's date and time in the firm's zone (the firm config's
-  business-hours zone, else `FIRM_TIME_ZONE`), its UTC offset, and an
+  today's date and time in the firm's zone (see "The firm's day"), its
+  UTC offset, and an
   example of a time written with it. The booking tools' times must carry
   a zone, and one without comes back to the model as a tool error it can
   correct — verified against a fake Claude server, which asked for
@@ -2430,7 +2444,8 @@ Two things real timeclocks routinely get wrong, both handled here:
   is already "tomorrow" in UTC, so UTC bucketing puts those hours in the
   wrong day — and therefore the wrong week and the wrong pay period.
   Every aggregation takes an IANA timezone and derives the local date
-  through `Intl`; the firm's zone comes from `FIRM_TIME_ZONE`.
+  through `Intl`; the firm's zone is the one described in "The firm's
+  day" below.
   `TimeClock.today()` exists so nothing computes "which bucket is
   today's" from a second, different notion of now.
 - **People forget to clock out.** Open shifts are never counted in a
@@ -2761,6 +2776,58 @@ Four reports:
 `AnalyticsService`. Nav item hidden unless role is `attorney`, same
 client-side-convenience-only caveat as Accounts/Audit Log — the real
 gate is server-side in `AnalyticsService` itself.
+
+## The firm's day
+
+Every check that compares a date with "today" now asks it in the firm's
+zone. Before, each one took UTC's date (`toISOString().slice(0, 10)`) or
+the host's, and a UTC host is a day ahead of the Americas every evening
+and a day behind Asia and Australia every morning. `core/calendar-date.ts`
+holds the helpers: `calendarDayIn()`, `todayIn()`, `dayOf()` (the
+firm-local day of an instant) and `checkedTimeZone()`. What it fixed:
+
+- **The receptionist's court dates**: see "Weekdays and dates are the
+  firm's" above. This was the one that mattered, because it under-
+  escalated.
+- **Coming due** (and so the deadline digest and the calendar file): a
+  deadline due today in New York showed as a day overdue after 7pm.
+- **The dates on a bill**: "Issued" and each payment line, in the text,
+  HTML and PDF copies, printed the UTC day, so a bill sent at 8pm showed
+  tomorrow's date. `RenderableFirm.timeZone`. Days overdue (the
+  receivables list, the reminder's "due on … N days ago") use the firm's
+  day too.
+- **Closing a file**: the closing day, and the retention date counted
+  from it, were UTC's. A New York file closed at 8pm on New Year's Eve
+  was kept until 1 January seven years on, not 31 December.
+  `listRetentionDue()` uses the same day.
+- **The public booking form** used the host's day. On a UTC host, a New
+  York visitor choosing today after 7pm was told to pick a day within the
+  next 60 days. The window is now the firm's, and `/api/public/booking/
+  config` returns the firm's `today`, so the page's date picker opens on
+  the same window the server checks, wherever the visitor is.
+- **Analytics** (aging, the daily trends), **the calendar file's**
+  "from the start of today" (UTC's midnight is 11am in Sydney, which
+  dropped that morning's appointments), the **CSV import's** "today", and
+  the **demo seed** (whose sample deadline, fourteen days on by UTC, was
+  fifteen days on in Honolulu and missed Coming due; it's now ten days
+  from the firm's day).
+
+**One zone, checked at boot.** `start.ts` resolves `FIRM_TIME_ZONE` if
+set, else the firm config's `businessHours.timezone`, else the host's,
+and passes it everywhere: the time clock, the assistant's clock and
+everything above. The time clock used to ignore the config's zone and
+the assistant preferred it, so the two could disagree. A zone the
+runtime doesn't recognise ("Eastern") now stops the server with a plain
+message, as does a bad business-hours zone. A server that started anyway
+would have failed every request that asked what day it is. If both
+settings are given and differ, the server warns at boot. Absent any zone
+(tests, a service built without one), each service keeps what it did
+before: UTC, or the host's day for the booking form and the receptionist.
+`test/firm-days.test.ts` pins each case at 8pm in New York and 1am in
+Sydney.
+
+What it doesn't do: let a single firm work in several zones. One firm,
+one day.
 
 ## Transport & session security
 
@@ -4229,7 +4296,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # AUDIT_ANCHOR_FILE=/mnt/append-only/anchors.jsonl AUDIT_ANCHOR_EMAILS=partner@firm.example npm run start:review-ui  # publish the audit head hash outside this database (see "Anchoring")
 # ... && npm run anchor:audit                                             # one-shot anchor, meant for cron — refuses if the chain is already broken
 # fileRetentionYears in FIRM_CONFIG_FILE                                  # optional — how long a closed file is kept; absent, matters close with no retention date
-# FIRM_TIME_ZONE=America/New_York npm run start:review-ui                 # optional — where the Time Clock's day starts; defaults to the host's zone
+# FIRM_TIME_ZONE=America/New_York npm run start:review-ui                 # optional — the firm's zone, where every "today" is counted (court dates the receptionist hears, Coming due, overdue invoices, closing dates, the Time Clock); defaults to the firm config's business-hours zone, then the host's
 # SMTP_HOST=smtp.example.com SMTP_FROM=billing@firm.example SMTP_USER=... SMTP_PASSWORD=... npm run start:review-ui  # enable emailing invoices (SMTP_PORT defaults to 587/STARTTLS; SMTP_ALLOW_INSECURE=true only for a loopback relay)
 # FIRM_PAYMENT_INSTRUCTIONS="Payable within 30 days."                     # optional — printed under the invoice total
 # MAX_DOCUMENT_UPLOAD_BYTES=52428800 npm run start:review-ui               # optional — override the 25 MB default per-file cap on Cases-panel uploads (see "PDF intake..." above for why this cap exists)

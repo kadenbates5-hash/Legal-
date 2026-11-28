@@ -1,4 +1,5 @@
 import type { Invoice, InvoiceLineItem, InvoiceTotals, Payment } from "./invoicing.js";
+import { dayOf } from "./calendar-date.js";
 
 /**
  * Renders an invoice as the document a client actually receives.
@@ -29,6 +30,12 @@ export interface RenderableFirm {
   phone?: string;
   /** Free text under the totals — "Payable within 30 days", trust-account notices, and so on. */
   paymentInstructions?: string;
+  /**
+   * The firm's IANA zone. The dates on a bill — issued, each payment —
+   * are the firm's days: a bill sent at 8pm in New York was printed as
+   * issued the next day when this was the UTC date. Absent, UTC.
+   */
+  timeZone?: string;
 }
 
 export interface RenderInvoiceParams {
@@ -116,7 +123,7 @@ export function renderInvoice(params: RenderInvoiceParams): RenderedInvoice {
   t.push(`INVOICE ${invoice.number}`);
   if (params.clientName) t.push(`To:      ${params.clientName}`);
   t.push(`Matter:  ${matterTitle} (${invoice.matterId})`);
-  t.push(`Issued:  ${invoice.sentAt ? invoice.sentAt.slice(0, 10) : "draft — not yet issued"}`);
+  t.push(`Issued:  ${invoice.sentAt ? dayOf(invoice.sentAt, firm.timeZone) : "draft — not yet issued"}`);
   if (invoice.dueDate) t.push(`Due:     ${invoice.dueDate}`);
   if (invoice.status === "void") t.push(`VOID — ${invoice.voidReason ?? "no reason recorded"}`);
   t.push("");
@@ -146,7 +153,7 @@ export function renderInvoice(params: RenderInvoiceParams): RenderedInvoice {
     t.push("PAYMENTS RECEIVED");
     for (const p of payments) {
       t.push(
-        `  ${p.recordedAt.slice(0, 10)}  ${PAYMENT_METHOD_LABEL[p.method]}${
+        `  ${dayOf(p.recordedAt, firm.timeZone)}  ${PAYMENT_METHOD_LABEL[p.method]}${
           p.reference ? ` (${p.reference})` : ""
         }  -${formatCents(p.amountCents)}`,
       );
@@ -180,7 +187,7 @@ export function renderInvoice(params: RenderInvoiceParams): RenderedInvoice {
   h.push(`<table style="font-size:13px;border-collapse:collapse;margin-bottom:20px"><tbody>`);
   if (params.clientName) h.push(labelRow("To", params.clientName));
   h.push(labelRow("Matter", `${matterTitle} (${invoice.matterId})`));
-  h.push(labelRow("Issued", invoice.sentAt ? invoice.sentAt.slice(0, 10) : "draft — not yet issued"));
+  h.push(labelRow("Issued", invoice.sentAt ? dayOf(invoice.sentAt, firm.timeZone) : "draft — not yet issued"));
   if (invoice.dueDate) h.push(labelRow("Due", invoice.dueDate));
   h.push(`</tbody></table>`);
   if (invoice.status === "void") {
@@ -233,7 +240,7 @@ export function renderInvoice(params: RenderInvoiceParams): RenderedInvoice {
     for (const p of payments) {
       h.push(
         totalRow(
-          `${p.recordedAt.slice(0, 10)} — ${PAYMENT_METHOD_LABEL[p.method]}${p.reference ? ` (${p.reference})` : ""}`,
+          `${dayOf(p.recordedAt, firm.timeZone)} — ${PAYMENT_METHOD_LABEL[p.method]}${p.reference ? ` (${p.reference})` : ""}`,
           `-${formatCents(p.amountCents)}`,
         ),
       );

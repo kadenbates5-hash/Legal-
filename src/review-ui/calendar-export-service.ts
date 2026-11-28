@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { dayOf, todayIn } from "../core/calendar-date.js";
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AuditLog } from "../core/audit.js";
 import type { SchedulingService } from "../core/scheduling.js";
@@ -80,6 +81,8 @@ export class CalendarExportService {
   #nameFor: (actorId: string) => string | undefined;
   #calendarName: string;
 
+  #timeZone: string | undefined;
+
   constructor(params: {
     reviewGate?: ReviewGateService;
     scheduling?: SchedulingService;
@@ -87,7 +90,10 @@ export class CalendarExportService {
     /** An attorney's display name for an appointment title; absent, the title just omits it. */
     nameFor?: (actorId: string) => string | undefined;
     firmName?: string;
+    /** The firm's zone: which day "today" is, for the window and for this morning's appointments. Absent, UTC. */
+    timeZone?: string;
   }) {
+    this.#timeZone = params.timeZone;
     this.#reviewGate = params.reviewGate;
     this.#scheduling = params.scheduling;
     this.#auditLog = params.auditLog;
@@ -102,7 +108,7 @@ export class CalendarExportService {
       throw new AccessDeniedError(`calendar export is for staff (got role '${actor.role}')`);
     }
     const now = options.now ?? new Date();
-    const today = now.toISOString().slice(0, 10);
+    const today = todayIn(this.#timeZone, now);
     const events: IcsEvent[] = [];
 
     let deadlineCount = 0;
@@ -149,11 +155,11 @@ export class CalendarExportService {
 
     let appointmentCount = 0;
     if (this.#scheduling) {
-      // From the start of today, so this morning's consultation is still in it.
-      const fromToday = Date.parse(`${today}T00:00:00Z`);
+      // From the start of the firm's today, so this morning's consultation
+      // is still in it — UTC's midnight is 11am in Sydney, which dropped it.
       const appointments = this.#scheduling
         .listAll(actor)
-        .filter((a) => a.status !== "completed" && Date.parse(a.startTime) >= fromToday)
+        .filter((a) => a.status !== "completed" && dayOf(a.startTime, this.#timeZone) >= today)
         .sort((a, b) => a.startTime.localeCompare(b.startTime));
       for (const a of appointments) {
         const kind = a.type === "consultation" ? "Consultation" : "Follow-up";

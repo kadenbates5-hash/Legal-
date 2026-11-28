@@ -30,6 +30,7 @@ export class VoiceCallSessions {
   #tts: TextToSpeech;
   #utilization: UtilizationTracker | undefined;
   #firmConfig: FirmConfig | undefined;
+  #timeZone: string | undefined;
 
   constructor(params: {
     accessControl: AccessControl;
@@ -39,6 +40,8 @@ export class VoiceCallSessions {
     tts: TextToSpeech;
     utilization?: UtilizationTracker;
     firmConfig?: FirmConfig;
+    /** The firm's zone, for counting a court date the caller names from the firm's day. */
+    timeZone?: string;
   }) {
     this.#router = new Router(params.accessControl, params.auditLog);
     this.#module = params.module;
@@ -46,6 +49,7 @@ export class VoiceCallSessions {
     this.#tts = params.tts;
     this.#utilization = params.utilization;
     this.#firmConfig = params.firmConfig;
+    this.#timeZone = params.timeZone;
   }
 
   /** Starts a new call session and returns the synthesized greeting audio to play. */
@@ -57,6 +61,7 @@ export class VoiceCallSessions {
       actor: VOICE_LINE_ACTOR,
       ...(this.#utilization ? { utilization: this.#utilization } : {}),
       ...(this.#firmConfig ? { firmConfig: this.#firmConfig } : {}),
+      ...(this.#timeZone ? { timeZone: this.#timeZone } : {}),
     });
     const voiceSession = new VoiceReceptionistSession({ chatSession, stt: this.#stt, tts: this.#tts });
     this.#sessions.set(callId, voiceSession);

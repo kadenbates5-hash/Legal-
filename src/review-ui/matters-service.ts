@@ -1,4 +1,5 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
+import { todayIn } from "../core/calendar-date.js";
 import type { AccessControl } from "../core/access-control.js";
 import { diffFields, type AuditLog } from "../core/audit.js";
 import { addYears, checkedRetentionYears, billingEmailFor, clientPhoneFor as clientPhoneForMatter, type Matter, type MatterInput, type MatterStore } from "../core/matters.js";
@@ -101,6 +102,7 @@ export class MattersService {
   #invoices: InvoiceStore | undefined;
   #workProducts: WorkProductStore | undefined;
   #retentionYears: number;
+  #timeZone: string | undefined;
 
   constructor(params: {
     store: MatterStore;
@@ -114,6 +116,12 @@ export class MattersService {
     workProducts?: WorkProductStore;
     /** How long a closed file is kept. 0 records no retention date at all. */
     retentionYears?: number;
+    /**
+     * The firm's zone, for the day a file closes and the day retention
+     * runs out. Absent, UTC — which closed a New York file at 8pm on the
+     * next day, and so kept it a day longer than the period said.
+     */
+    timeZone?: string;
   }) {
     this.#store = params.store;
     this.#checker = params.checker;
@@ -123,6 +131,7 @@ export class MattersService {
     this.#invoices = params.invoices;
     this.#workProducts = params.workProducts;
     this.#retentionYears = checkedRetentionYears(params.retentionYears, "retentionYears");
+    this.#timeZone = params.timeZone;
   }
 
   /** Matter records the caller can actually open, so a paralegal sees only their own. */
@@ -272,7 +281,7 @@ export class MattersService {
     const warnings = this.#closingWarnings(matterId);
     const years =
       params.retentionYears === undefined ? this.#retentionYears : checkedRetentionYears(params.retentionYears, "retentionYears");
-    const closedOn = new Date().toISOString().slice(0, 10);
+    const closedOn = todayIn(this.#timeZone);
     const matter = this.#store.upsert(matterId, {
       status: "closed",
       closingNote: params.closingNote.trim(),
@@ -311,7 +320,7 @@ export class MattersService {
    */
   listRetentionDue(actor: Actor, asOf: Date = new Date()): Matter[] {
     requireAttorney(actor, "reviewing file retention");
-    const today = asOf.toISOString().slice(0, 10);
+    const today = todayIn(this.#timeZone, asOf);
     return this.#store
       .listAll()
       .filter((m) => m.status === "closed" && m.retentionUntil && m.retentionUntil <= today)

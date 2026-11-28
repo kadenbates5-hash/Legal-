@@ -3,6 +3,7 @@ import { parseCsv, type CsvDelimiter, type CsvRecord } from "./csv.js";
 import { ConflictChecker, normalizeName, type ConflictSeverity, type MatchStrength } from "./conflicts.js";
 import { addYears, MatterStore, type MatterInput, type MatterParty, type MatterStatus } from "./matters.js";
 import type { BillingHoursEntry } from "./billing-hours.js";
+import { addDaysToCalendarDate, todayIn } from "./calendar-date.js";
 
 /**
  * Bringing a firm's records over from the practice-management tool it
@@ -319,6 +320,8 @@ export interface ImportContext {
   matterIdsInUse?: ReadonlySet<string>;
   retentionYears?: number;
   now: Date;
+  /** The firm's zone, for "today" (a missing close date, a date in the future). Absent, UTC. */
+  timeZone?: string;
 }
 
 export interface PlannedConflict {
@@ -464,7 +467,7 @@ function planMatters(
   const notes: string[] = [];
   const seen = new Map<string, number>();
   const attorneys = ctx.people.filter((p) => p.role === "attorney");
-  const today = ctx.now.toISOString().slice(0, 10);
+  const today = todayIn(ctx.timeZone, ctx.now);
 
   if (columns["matterId"] === undefined) {
     notes.push("This file has no matter-number column, so each matter's id is made from its name. Importing the same file again matches on those names.");
@@ -666,7 +669,7 @@ function planTimeEntries(
   const notes: string[] = [];
   const timekeepers = ctx.people;
   const matters = ctx.matters.listAll();
-  const tomorrow = new Date(ctx.now.getTime() + 86_400_000).toISOString().slice(0, 10);
+  const tomorrow = addDaysToCalendarDate(todayIn(ctx.timeZone, ctx.now), 1);
 
   const billedHeader = columns["billed"] === undefined ? undefined : normalizeHeader(headers[columns["billed"]!]!);
   const billedIsInvoiceNumber = billedHeader !== undefined && /^(?:invoicenumber|invoice|billnumber)$/.test(billedHeader);

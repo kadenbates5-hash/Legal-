@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import type { InvoiceLineItem } from "../core/invoicing.js";
+import { dayOf } from "../core/calendar-date.js";
 import { formatCents, formatQuantity, sectionFor, type RenderInvoiceParams } from "../core/invoice-render.js";
 
 /**
@@ -208,7 +209,7 @@ export class PdfLibInvoicePdfRenderer implements InvoicePdfRenderer {
     const meta: [string, string][] = [];
     if (params.clientName) meta.push(["To", params.clientName]);
     meta.push(["Matter", `${matterTitle} (${invoice.matterId})`]);
-    meta.push(["Issued", invoice.sentAt ? invoice.sentAt.slice(0, 10) : "draft — not yet issued"]);
+    meta.push(["Issued", invoice.sentAt ? dayOf(invoice.sentAt, firm.timeZone) : "draft — not yet issued"]);
     if (invoice.dueDate) meta.push(["Due", invoice.dueDate]);
     for (const [label, value] of meta) {
       l.text(label, { x: MARGIN, size: 9, font, color: MUTED });
@@ -298,7 +299,7 @@ export class PdfLibInvoicePdfRenderer implements InvoicePdfRenderer {
     totalLine("Total", formatCents(totals.subtotalCents));
     for (const payment of payments) {
       totalLine(
-        `${payment.recordedAt.slice(0, 10)} — ${PAYMENT_METHOD_LABEL[payment.method] ?? "Payment"}${
+        `${dayOf(payment.recordedAt, firm.timeZone)} — ${PAYMENT_METHOD_LABEL[payment.method] ?? "Payment"}${
           payment.reference ? ` (${payment.reference})` : ""
         }`,
         `-${formatCents(payment.amountCents)}`,

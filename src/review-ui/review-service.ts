@@ -1,6 +1,7 @@
 import { AccessDeniedError, ReviewGateError, type Actor } from "../core/types.js";
 import type { WorkProduct, WorkProductStatus } from "../core/review-gate.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
+import { todayIn } from "../core/calendar-date.js";
 import {
   DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG,
   type DeadlineConflict,
@@ -69,10 +70,13 @@ function deadlineUrgency(deadline: UpcomingDeadline): number {
 export class ReviewGateService {
   #store: WorkProductStore;
   #deadlineTracker: DeadlineTracker | undefined;
+  /** The firm's zone, so "today" on the Coming due list is the firm's day — absent, UTC's. */
+  #timeZone: string | undefined;
 
-  constructor(store: WorkProductStore, deadlineTracker?: DeadlineTracker) {
+  constructor(store: WorkProductStore, deadlineTracker?: DeadlineTracker, options: { timeZone?: string } = {}) {
     this.#store = store;
     this.#deadlineTracker = deadlineTracker;
+    this.#timeZone = options.timeZone;
   }
 
   listPendingReview(actor: Actor): WorkProductSummary[] {
@@ -250,7 +254,7 @@ export class ReviewGateService {
     if (actor.role !== "attorney" && actor.role !== "system") {
       throw new AccessDeniedError(`review-gate UI is attorney-only (got role '${actor.role}')`);
     }
-    const today = options.today ?? new Date().toISOString().slice(0, 10);
+    const today = options.today ?? todayIn(this.#timeZone);
     const withinDays = options.withinDays ?? DEFAULT_DEADLINE_HORIZON_DAYS;
     const upcoming = this.#deadlineTracker?.listUpcoming({ today, withinDays }) ?? [];
 

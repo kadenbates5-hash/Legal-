@@ -1,4 +1,5 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
+import { dayOf, todayIn } from "../core/calendar-date.js";
 import type { MatterStore, MatterStatus } from "../core/matters.js";
 import type { InvoiceStore } from "../core/invoicing.js";
 import type { BillingHoursStore } from "../core/billing-hours.js";
@@ -81,13 +82,18 @@ export class AnalyticsService {
   #utilization: UtilizationTracker;
   #auth: AuthService;
 
+  #timeZone: string | undefined;
+
   constructor(params: {
     matters: MatterStore;
     invoices: InvoiceStore;
     billingHours: BillingHoursStore;
     utilization: UtilizationTracker;
     auth: AuthService;
+    /** The firm's zone, for what "today" and "which day" mean in each report. Absent, UTC. */
+    timeZone?: string;
   }) {
+    this.#timeZone = params.timeZone;
     this.#matters = params.matters;
     this.#invoices = params.invoices;
     this.#billingHours = params.billingHours;
@@ -140,7 +146,7 @@ export class AnalyticsService {
    */
   invoiceAging(actor: Actor, asOf: Date = new Date()): InvoiceAgingBucket[] {
     requireAttorney(actor);
-    const today = asOf.toISOString().slice(0, 10);
+    const today = todayIn(this.#timeZone, asOf);
     const totalsByBucket = new Map<InvoiceAgingBucket["bucket"], { count: number; totalCents: number }>();
     for (const bucket of AGING_BUCKETS) totalsByBucket.set(bucket, { count: 0, totalCents: 0 });
 
@@ -176,7 +182,7 @@ export class AnalyticsService {
       if (!entry.endedAt) continue;
       const started = new Date(entry.startedAt);
       if (started < cutoff || started > now) continue;
-      const date = entry.startedAt.slice(0, 10);
+      const date = dayOf(entry.startedAt, this.#timeZone);
       let day = byDate.get(date);
       if (!day) {
         day = { date, minutesByTaskType: {} };
@@ -193,8 +199,8 @@ export class AnalyticsService {
     requireAttorney(actor);
     const withinDays = options.withinDays ?? 30;
     const now = options.now ?? new Date();
-    const cutoffDate = new Date(now.getTime() - withinDays * 86_400_000).toISOString().slice(0, 10);
-    const today = now.toISOString().slice(0, 10);
+    const cutoffDate = todayIn(this.#timeZone, new Date(now.getTime() - withinDays * 86_400_000));
+    const today = todayIn(this.#timeZone, now);
 
     const byDate = new Map<string, number>();
     for (const entry of this.#billingHours.listAll()) {
