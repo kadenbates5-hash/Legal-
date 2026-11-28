@@ -143,8 +143,21 @@ export interface Matter {
   retentionUntil: string | undefined;
   /** Why it was closed — the disposition, in the closing attorney's words. */
   closingNote: string | undefined;
+  /**
+   * Whether the client is a U.S. citizen, as the firm has recorded it.
+   * Plea advice to a noncitizen must cover immigration consequences
+   * (Padilla v. Kentucky), so a practice-area module can flag drafting on
+   * it. `"unknown"` (or absent) is treated as "not known to be a
+   * citizen" — a flag nobody needed costs a click; a missed one costs a
+   * client their residence. Attorney-edited only, like the rest of the
+   * record.
+   */
+  clientCitizenship: ClientCitizenship | undefined;
   updatedAt: string;
 }
+
+export type ClientCitizenship = "us_citizen" | "noncitizen" | "unknown";
+const CLIENT_CITIZENSHIPS: readonly string[] = ["us_citizen", "noncitizen", "unknown"];
 
 export interface MatterInput {
   title?: string;
@@ -159,6 +172,7 @@ export interface MatterInput {
   parties?: MatterParty[];
   retentionUntil?: string;
   closingNote?: string;
+  clientCitizenship?: ClientCitizenship;
 }
 
 const MATTER_STATUSES: readonly string[] = ["prospective", "open", "closed"];
@@ -228,6 +242,9 @@ export class MatterStore {
         throw new Error(`key date '${d.label}' must be a date in YYYY-MM-DD form (got '${String(d.date)}')`);
       }
     }
+    if (input.clientCitizenship !== undefined && !CLIENT_CITIZENSHIPS.includes(input.clientCitizenship)) {
+      throw new Error(`clientCitizenship must be us_citizen, noncitizen or unknown (got '${String(input.clientCitizenship)}')`);
+    }
     const status = inputStatus ?? existing?.status ?? "open";
     const record: Matter = {
       matterId: id,
@@ -251,6 +268,7 @@ export class MatterStore {
       // while work is still going on.
       retentionUntil: status === "closed" ? input.retentionUntil ?? existing?.retentionUntil : undefined,
       closingNote: status === "closed" ? input.closingNote ?? existing?.closingNote : undefined,
+      clientCitizenship: input.clientCitizenship ?? existing?.clientCitizenship,
       updatedAt: now,
     };
     this.#byId.set(id, record);

@@ -2285,6 +2285,7 @@ async function loadTemplates() {
     const templates = await api("/api/drafting/templates");
     const select = document.getElementById("draftTemplateId");
     select.innerHTML = templates.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join("");
+    document.getElementById("draftPadillaNote").hidden = select.value !== "plea_agreement_memo";
   } catch (err) {
     // Non-fatal if this account can't draft (e.g. not yet assigned) — the matter list will surface that instead.
   }
@@ -2391,6 +2392,8 @@ async function createTemplateDraft() {
       templateId: document.getElementById("draftTemplateId").value,
       content: document.getElementById("draftTemplateContent").value,
     };
+    // Can only add a flag; the server takes citizenship from the matter record.
+    if (document.getElementById("draftProtectiveOrder").checked) body.context = { isProtectiveOrderMaterial: true };
     const deadlineDate = document.getElementById("draftDeadlineDate").value;
     if (deadlineDate) {
       body.deadlineDate = deadlineDate;
@@ -2402,6 +2405,7 @@ async function createTemplateDraft() {
     });
     document.getElementById("draftTemplateContent").value = "";
     document.getElementById("draftDeadlineDate").value = "";
+    document.getElementById("draftProtectiveOrder").checked = false;
     await loadMatterDrafts();
     showToast("Draft created.", "success");
   } catch (err) {
@@ -5111,6 +5115,7 @@ async function loadMatterRecord() {
     document.getElementById("matterCourt").value = matter.court || "";
     document.getElementById("matterCaseNumber").value = matter.caseNumber || "";
     document.getElementById("matterOpposingCounsel").value = matter.opposingCounsel || "";
+    document.getElementById("matterClientCitizenship").value = matter.clientCitizenship || "unknown";
     document.getElementById("matterDescription").value = matter.description || "";
     currentKeyDates = (matter.keyDates || []).map((d) => ({ ...d }));
     renderKeyDatesList();
@@ -5125,6 +5130,7 @@ async function loadMatterRecord() {
       document.getElementById("matterCourt").value = "";
       document.getElementById("matterCaseNumber").value = "";
       document.getElementById("matterOpposingCounsel").value = "";
+      document.getElementById("matterClientCitizenship").value = "unknown";
       document.getElementById("matterDescription").value = "";
       document.getElementById("matterClients").value = "";
       document.getElementById("matterAdverse").value = "";
@@ -5159,6 +5165,7 @@ async function saveMatterRecord() {
         court: document.getElementById("matterCourt").value.trim(),
         caseNumber: document.getElementById("matterCaseNumber").value.trim(),
         opposingCounsel: document.getElementById("matterOpposingCounsel").value.trim(),
+        clientCitizenship: document.getElementById("matterClientCitizenship").value,
         description: document.getElementById("matterDescription").value.trim(),
         keyDates: currentKeyDates,
         parties,
@@ -6345,3 +6352,9 @@ for (const btn of document.querySelectorAll("nav.nav button")) {
     if (btn.dataset.panel !== "time-clock") stopClockTicking();
   });
 }
+
+// Say up front why a plea memo arrives flagged, rather than leave it to
+// look like something went wrong after the fact.
+document.getElementById("draftTemplateId").addEventListener("change", (e) => {
+  document.getElementById("draftPadillaNote").hidden = e.target.value !== "plea_agreement_memo";
+});

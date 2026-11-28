@@ -65,14 +65,22 @@ describe("paralegal drafting session", () => {
     expect(wp.status).toBe("approved");
   });
 
-  it("does not flag a plea memo for a citizen client", () => {
+  it("does not flag a plea memo when the record says the client is a U.S. citizen", () => {
     const { session } = makeSession();
     const wp = session.draftFromTemplate({
       templateId: "plea_agreement_memo",
       content: "plea terms...",
-      context: { clientIsNoncitizen: false },
+      context: { clientCitizenship: "us_citizen" },
     });
     expect(wp.flags.size).toBe(0);
+  });
+
+  it("flags a plea memo when citizenship isn't known — a request saying 'not a noncitizen' doesn't count", () => {
+    const { session } = makeSession();
+    for (const context of [{}, { clientIsNoncitizen: false }, { clientCitizenship: "unknown" }]) {
+      const wp = session.draftFromTemplate({ templateId: "plea_agreement_memo", content: "plea terms...", context });
+      expect(wp.flags.has("padilla_advisory_required"), JSON.stringify(context)).toBe(true);
+    }
   });
 
   it("flags protective-order material regardless of template", () => {

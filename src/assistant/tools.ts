@@ -161,7 +161,7 @@ export function createAssistantTools(deps: AssistantToolDependencies): Assistant
       definition: {
         name: "draft_from_template",
         description:
-          "Create a new draft on a matter from a template (e.g. an engagement letter or motion). If it references a calculated deadline, pass deadlineDate/deadlineType so it's flagged for redundant human verification.",
+          "Create a new draft on a matter from a template (e.g. an engagement letter or motion). If it references a calculated deadline, pass deadlineDate/deadlineType so it's flagged for redundant human verification. If the material is covered by a protective order, pass protectiveOrderMaterial: true. A plea memo is flagged for the Padilla immigration advisory unless the matter record says the client is a U.S. citizen; nothing you pass can remove that flag.",
         input_schema: {
           type: "object",
           properties: {
@@ -170,6 +170,7 @@ export function createAssistantTools(deps: AssistantToolDependencies): Assistant
             content: { type: "string" },
             deadlineDate: { type: "string", description: "YYYY-MM-DD, optional" },
             deadlineType: { type: "string", enum: ["speedy_trial", "arraignment", "bail_hearing", "discovery_response", "other"] },
+            protectiveOrderMaterial: { type: "boolean", description: "true if the material is covered by a protective order (adds a no-distribution flag)" },
           },
           required: ["matterId", "templateId", "content"],
         },
@@ -182,6 +183,10 @@ export function createAssistantTools(deps: AssistantToolDependencies): Assistant
           ...(typeof input["deadlineType"] === "string" && input["deadlineType"]
             ? { deadlineType: input["deadlineType"] as DeadlineType }
             : {}),
+          // Only ever adds a flag. Citizenship, which decides the Padilla
+          // flag, comes from the matter record in DraftingService, never
+          // from the model.
+          ...(input["protectiveOrderMaterial"] === true ? { context: { isProtectiveOrderMaterial: true } } : {}),
         }),
     },
     {

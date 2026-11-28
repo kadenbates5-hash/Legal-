@@ -327,6 +327,33 @@ of every practice area:
 - practice-area-specific hard triggers (Padilla, protective-order) are
   applied via `PracticeAreaModule.deriveWorkProductFlags()`
 
+**The Padilla flag fails closed, from the matter record.** §3 says plea
+drafting for a noncitizen client "must hard-trigger an immigration-
+consequence advisory flag ... not rely on someone remembering to check",
+yet the flag fired only when a request carried `clientIsNoncitizen:
+true`. Nothing in Docket ever sent that: the Drafting panel had no such
+field and the Assistant's `draft_from_template` took no context. So no
+plea memo drafted in Docket was ever flagged. The protective-order flag
+was out of reach the same way. Now:
+
+- `Matter.clientCitizenship` (`us_citizen` / `noncitizen` / `unknown`)
+  is recorded on the Conflicts panel's matter form. Editing it is
+  attorney-only and audited with the rest of the record.
+- `DraftingService.draftFromTemplate()` passes the recorded value to the
+  module as `clientCitizenship`, overriding anything the request says.
+  The criminal-law module flags a plea memo **unless the record says
+  U.S. citizen**. Unknown counts as not known to be a citizen. A request
+  can add the flag (`clientIsNoncitizen: true`) but never remove it, so
+  neither a paralegal's request body nor the Assistant can talk it
+  away.
+- The Drafting form says up front why a plea memo arrives flagged, and
+  has a "Covered by a protective order" checkbox. The Assistant's tool
+  gained `protectiveOrderMaterial`. Both can only add a flag.
+- `test/padilla-trigger.test.ts` pins each path, over HTTP too. This
+  changes the signed-off criminal-law content in one direction only: it
+  flags more plea memos than the old rule did (every one where
+  citizenship isn't recorded), never fewer.
+
 `src/core/document-store.ts` — `DocumentStore`, a registry of uploaded
 case documents (a contract, exhibit, or scanned form a paralegal names and
 stores against a matter) — separate from `WorkProductStore`'s

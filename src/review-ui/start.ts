@@ -337,6 +337,7 @@ const drafting = new DraftingService({
   store: state.workProductStore,
   utilization: state.utilization,
   deadlineTracker: state.deadlineTracker,
+  matters: state.matters,
 });
 
 /**

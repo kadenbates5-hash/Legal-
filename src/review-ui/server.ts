@@ -49,7 +49,7 @@ import { TrustAccountingError, type TrustEntryType } from "../core/trust-ledger.
 import { EsignatureError } from "../core/esignature.js";
 import type { ESignatureService } from "./esignature-service.js";
 import { INTAKE_SCENARIOS } from "./intake-scenarios.js";
-import { partyRoleFrom, type MatterStatus, type PartyRole } from "../core/matters.js";
+import { partyRoleFrom, type ClientCitizenship, type MatterStatus, type PartyRole } from "../core/matters.js";
 import { MatterClosingError } from "./matters-service.js";
 import type { VoiceCallSessions } from "../receptionist/voice-call-sessions.js";
 import type { AudioClipStore } from "../receptionist/audio-clip-store.js";
@@ -2995,6 +2995,7 @@ async function handleMattersRequest(
       ...(typeof body["court"] === "string" ? { court: body["court"] } : {}),
       ...(typeof body["caseNumber"] === "string" ? { caseNumber: body["caseNumber"] } : {}),
       ...(typeof body["opposingCounsel"] === "string" ? { opposingCounsel: body["opposingCounsel"] } : {}),
+      ...(typeof body["clientCitizenship"] === "string" ? { clientCitizenship: body["clientCitizenship"] as ClientCitizenship } : {}),
       ...(keyDates ? { keyDates } : {}),
       ...(parties ? { parties } : {}),
     });

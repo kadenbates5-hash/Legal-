@@ -88,8 +88,18 @@ export const criminalLawModule: PracticeAreaModule = {
   },
   deriveWorkProductFlags(templateId: string, context: Record<string, unknown>): string[] {
     const flags: string[] = [];
-    if (templateId === "plea_agreement_memo" && context["clientIsNoncitizen"] === true) {
-      flags.push(PADILLA_ADVISORY_FLAG);
+    // §3: the Padilla advisory must "hard-trigger ... not rely on someone
+    // remembering to check." It used to fire only when a request said
+    // `clientIsNoncitizen: true`, and nothing in Docket ever said it — the
+    // Drafting panel had no such field and the Assistant's tool took no
+    // context — so no plea memo was ever flagged. Now it fails closed: a
+    // plea memo is flagged unless the matter record (attorney-maintained,
+    // supplied by DraftingService as `clientCitizenship`) says the client
+    // is a U.S. citizen. A request can add the flag, never remove it.
+    if (templateId === "plea_agreement_memo") {
+      const saysNoncitizen = context["clientIsNoncitizen"] === true || context["clientCitizenship"] === "noncitizen";
+      const knownCitizen = context["clientCitizenship"] === "us_citizen" && !saysNoncitizen;
+      if (!knownCitizen) flags.push(PADILLA_ADVISORY_FLAG);
     }
     if (context["isProtectiveOrderMaterial"] === true) {
       flags.push(PROTECTIVE_ORDER_NO_DISTRIBUTION_FLAG);

@@ -7,6 +7,7 @@ import type { DeadlineTracker } from "../core/deadline.js";
 import type { PracticeAreaModule, DocumentTemplate } from "../config/practice-area.js";
 import type { UtilizationTracker } from "../core/utilization.js";
 import type { RiskAssessmentInput } from "../core/risk-assessment.js";
+import type { MatterStore } from "../core/matters.js";
 import {
   ParalegalDraftingSession,
   type DraftFromTemplateRequest,
@@ -71,6 +72,8 @@ export class DraftingService {
   #deadlineTracker: DeadlineTracker | undefined;
   #sessions = new Map<string, ParalegalDraftingSession>();
 
+  #matters: MatterStore | undefined;
+
   constructor(params: {
     accessControl: AccessControl;
     auditLog: AuditLog;
@@ -78,7 +81,13 @@ export class DraftingService {
     store: WorkProductStore;
     utilization?: UtilizationTracker;
     deadlineTracker?: DeadlineTracker;
+    /**
+     * The firm's matter records, for facts a module's hard triggers read
+     * from the record rather than the request — see `draftFromTemplate`.
+     */
+    matters?: MatterStore;
   }) {
+    this.#matters = params.matters;
     this.#accessControl = params.accessControl;
     this.#auditLog = params.auditLog;
     this.#module = params.module;
@@ -107,7 +116,16 @@ export class DraftingService {
 
   draftFromTemplate(actor: Actor, matterId: string, request: DraftFromTemplateRequest): WorkProductDetail {
     requireDraftingRole(actor);
-    const wp = this.#sessionFor(actor, matterId).draftFromTemplate(request);
+    // Facts the firm has on record go to the module from the record, and
+    // win over anything the request says: whoever (or whatever — the
+    // Assistant drafts through here) is drafting can add a flag, but not
+    // talk one away. The client's citizenship decides the Padilla flag,
+    // and only an attorney edits the matter record.
+    const context = {
+      ...(request.context ?? {}),
+      clientCitizenship: this.#matters?.get(matterId)?.clientCitizenship ?? "unknown",
+    };
+    const wp = this.#sessionFor(actor, matterId).draftFromTemplate({ ...request, context });
     return detail(wp);
   }
 
