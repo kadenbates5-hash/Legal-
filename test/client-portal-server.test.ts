@@ -331,7 +331,7 @@ describe("Stripe Checkout end to end (client portal + webhook)", () => {
     try {
       const rawBody = JSON.stringify({
         type: "checkout.session.completed",
-        data: { object: { id: "cs_1", payment_intent: "pi_1", amount_total: 5_000, metadata: { matterId: "m1", invoiceId: draft.id } } },
+        data: { object: { id: "cs_1", payment_intent: "pi_1", amount_total: 5_000, payment_status: "paid", metadata: { matterId: "m1", invoiceId: draft.id } } },
       });
       const res = await fetch(`${url}/api/stripe/webhook`, { method: "POST", body: rawBody });
       expect(res.status).toBe(400);
@@ -346,7 +346,7 @@ describe("Stripe Checkout end to end (client portal + webhook)", () => {
     try {
       const rawBody = JSON.stringify({
         type: "checkout.session.completed",
-        data: { object: { id: "cs_1", payment_intent: "pi_1", amount_total: 5_000, metadata: { matterId: "m1", invoiceId: draft.id } } },
+        data: { object: { id: "cs_1", payment_intent: "pi_1", amount_total: 5_000, payment_status: "paid", metadata: { matterId: "m1", invoiceId: draft.id } } },
       });
       const timestamp = Math.floor(Date.now() / 1000);
       const signature = createHmac("sha256", WEBHOOK_SECRET).update(`${timestamp}.${rawBody}`).digest("hex");

@@ -12,6 +12,8 @@ import {
   type LineItemSource,
   type Payment,
   type PaymentMethod,
+  type UnappliedReason,
+  type UnappliedReceipt,
 } from "../core/invoicing.js";
 import type { PaymentProcessor } from "../integrations/payment-processor.js";
 import type { CheckoutProvider } from "../integrations/checkout-provider.js";
@@ -795,39 +797,123 @@ export class InvoicingService {
    * `verifyStripeSignature` has passed, with the `"system"` role as the
    * credential (the same role `confirmDeadline`'s `calendar_system`
    * source and `recordCalendarSync` already use for "a verified machine
-   * event, not a human request"). Idempotent against a retried webhook:
-   * a payment already recorded against this session or payment intent
-   * is treated as already handled rather than double-applied, and the
-   * amount recorded is capped at the invoice's current balance in case
-   * two retries somehow race.
+   * event, not a human request").
+   *
+   * **Money Stripe took is never dropped.** What the invoice still owes is
+   * recorded as a payment; anything beyond that — the client paid from
+   * two tabs, a check was recorded while the payment page was open, the
+   * invoice was voided or never existed — is kept as an
+   * `UnappliedReceipt` for an attorney to refund. It used to be capped
+   * away silently (or, for a voided invoice, the whole charge went
+   * unrecorded), leaving client money in the firm's account that nothing
+   * in Docket showed.
+   *
+   * Idempotent against a retried webhook: a session or payment intent
+   * already accounted for, either way, is left alone.
    */
-  recordCheckoutPayment(actor: Actor, event: StripeCheckoutCompletedEvent): InvoiceView {
+  recordCheckoutPayment(
+    actor: Actor,
+    event: StripeCheckoutCompletedEvent,
+  ): { invoice: InvoiceView | undefined; unapplied: UnappliedReceipt | undefined } {
     if (actor.role !== "system") {
       throw new AccessDeniedError(`recording a Checkout payment requires the system credential (got role '${actor.role}')`);
     }
-    const invoice = this.#requireOnMatter(event.matterId, event.invoiceId);
-    const alreadyRecorded = this.#store
-      .paymentsFor(invoice.id)
-      .some((p) => p.reference === event.paymentIntentId || p.reference === event.sessionId);
-    if (alreadyRecorded) return this.#view(invoice);
+    const references = [event.paymentIntentId, event.sessionId].filter((r): r is string => Boolean(r));
+    const found = this.#store.get(event.invoiceId);
+    const invoice = found && found.matterId === event.matterId ? found : undefined;
+    if (references.some((r) => this.#store.hasProcessorReference(r))) {
+      return { invoice: invoice ? this.#view(invoice) : undefined, unapplied: undefined };
+    }
+
+    const keep = (amountCents: number, reason: UnappliedReason): UnappliedReceipt => {
+      const receipt = this.#store.recordUnappliedReceipt({
+        matterId: event.matterId,
+        invoiceId: event.invoiceId,
+        amountCents,
+        receivedCents: event.amountTotalCents,
+        reason,
+        references,
+      });
+      this.#audit(
+        actor,
+        event.matterId,
+        "online_payment_unapplied",
+        `receipt=${receipt.id} invoice=${receipt.invoiceNumber ?? event.invoiceId} amountCents=${amountCents} ` +
+          `receivedCents=${event.amountTotalCents} reason=${reason} (stripe checkout session=${event.sessionId})`,
+      );
+      return receipt;
+    };
+
+    if (!invoice) return { invoice: undefined, unapplied: keep(event.amountTotalCents, "invoice_missing") };
+    if (invoice.status === "void") return { invoice: this.#view(invoice), unapplied: keep(event.amountTotalCents, "invoice_void") };
 
     const { balanceCents } = this.#store.totals(invoice.id);
-    const amountCents = Math.min(event.amountTotalCents, balanceCents);
-    if (amountCents <= 0) return this.#view(invoice);
+    const applied = Math.min(event.amountTotalCents, Math.max(balanceCents, 0));
+    if (applied > 0) {
+      const payment = this.#store.recordPayment({
+        invoiceId: invoice.id,
+        amountCents: applied,
+        method: event.method,
+        reference: event.paymentIntentId ?? event.sessionId,
+        recordedBy: actor.id,
+      });
+      this.#audit(
+        actor,
+        event.matterId,
+        "invoice_payment_recorded",
+        `invoice=${invoice.number} amountCents=${payment.amountCents} method=${event.method} (stripe checkout session=${event.sessionId})`,
+      );
+    }
+    const excess = event.amountTotalCents - applied;
+    const unapplied = excess > 0 ? keep(excess, applied > 0 ? "overpaid" : "nothing_owed") : undefined;
+    return { invoice: this.#view(invoice), unapplied };
+  }
 
-    const payment = this.#store.recordPayment({
-      invoiceId: invoice.id,
-      amountCents,
-      method: "card",
-      reference: event.paymentIntentId ?? event.sessionId,
-      recordedBy: actor.id,
-    });
+  /**
+   * Money received online that isn't on a bill, newest first — for the
+   * Invoices panel's "needs a refund" card. Matter-scoped like
+   * `listOutstanding()`: one the caller can't reach is silently left out.
+   * `includeResolved` shows the ones already dealt with too.
+   */
+  listUnappliedReceipts(actor: Actor, options: { includeResolved?: boolean } = {}): UnappliedReceipt[] {
+    requireLegalStaff(actor);
+    const reachable = new Map<string, boolean>();
+    const canReach = (matterId: string): boolean => {
+      if (!reachable.has(matterId)) {
+        try {
+          this.#accessControl.authorize({ actor, matterId, category: "billing_internal" });
+          reachable.set(matterId, true);
+        } catch {
+          reachable.set(matterId, false);
+        }
+      }
+      return reachable.get(matterId)!;
+    };
+    return this.#store
+      .unappliedReceipts()
+      .filter((r) => (options.includeResolved || !r.resolvedAt) && canReach(r.matterId))
+      .reverse();
+  }
+
+  /**
+   * Records what was done with an unapplied receipt. Attorney-only: it
+   * says what happened to client money, the same reason sending a refund
+   * from trust is. Audited, and final — a second resolution is refused.
+   */
+  resolveUnappliedReceipt(actor: Actor, receiptId: string, resolution: string): UnappliedReceipt {
+    if (actor.role !== "attorney") {
+      throw new AccessDeniedError(`resolving money received online is attorney-only (got role '${actor.role}')`);
+    }
+    const receipt = this.#store.unappliedReceipts().find((r) => r.id === receiptId);
+    if (!receipt) throw new InvoicingError(`no unapplied receipt '${receiptId}'`);
+    this.#accessControl.authorize({ actor, matterId: receipt.matterId, category: "billing_internal" });
+    const resolved = this.#store.resolveUnappliedReceipt(receiptId, { by: actor.id, resolution });
     this.#audit(
       actor,
-      event.matterId,
-      "invoice_payment_recorded",
-      `invoice=${invoice.number} amountCents=${payment.amountCents} method=card (stripe checkout session=${event.sessionId})`,
+      receipt.matterId,
+      "online_payment_unapplied_resolved",
+      `receipt=${receipt.id} amountCents=${receipt.amountCents} resolution=${resolved.resolution}`,
     );
-    return this.#view(invoice);
+    return resolved;
   }
 }

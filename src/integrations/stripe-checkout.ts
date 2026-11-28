@@ -123,14 +123,25 @@ export interface StripeCheckoutCompletedEvent {
   amountTotalCents: number;
   matterId: string;
   invoiceId: string;
+  /** How the client paid, as the bill will name it: a card at once, or a bank debit that cleared later. */
+  method: "card" | "ach" | "other";
 }
 
 /**
- * Parses a `checkout.session.completed` webhook body into the one shape
- * `InvoicingService.recordCheckoutPayment` needs — `undefined` for any
- * other event type, or a `checkout.session.completed` event missing the
- * `matterId`/`invoiceId` metadata this app always sets when it creates
- * the session (see `InvoicingService.createCheckoutSession`). Exported
+ * Parses a webhook body into the one shape
+ * `InvoicingService.recordCheckoutPayment` needs: money that has actually
+ * arrived. `undefined` for anything else — another event type, or one
+ * missing the `matterId`/`invoiceId` metadata this app always sets when it
+ * creates the session (see `InvoicingService.createCheckoutSession`).
+ *
+ * **Only a paid session is money.** Checkout sessions don't restrict
+ * payment methods, so a firm with bank debits enabled in Stripe gets
+ * `checkout.session.completed` with `payment_status: "unpaid"` the moment
+ * a client authorises an ACH debit — days before it clears, and it may
+ * not. That used to be recorded as a card payment, marking the bill paid
+ * on money that hadn't arrived. Now a completed session counts only when
+ * Stripe says it's `paid`, and a delayed one is recorded on
+ * `checkout.session.async_payment_succeeded`, when it is. Exported
  * standalone so the parsing rules are unit-testable without a live
  * Stripe webhook, same reasoning as `google-calendar.ts`'s
  * `parseDeadlineEvent()`.
@@ -144,20 +155,35 @@ export function parseCheckoutSessionCompletedEvent(rawBody: string): StripeCheck
   }
   if (typeof event !== "object" || event === null) return undefined;
   const e = event as { type?: unknown; data?: { object?: unknown } };
-  if (e.type !== "checkout.session.completed") return undefined;
+  const delayed = e.type === "checkout.session.async_payment_succeeded";
+  if (e.type !== "checkout.session.completed" && !delayed) return undefined;
   const session = e.data?.object as
-    | { id?: unknown; payment_intent?: unknown; amount_total?: unknown; metadata?: { matterId?: unknown; invoiceId?: unknown } }
+    | {
+        id?: unknown;
+        payment_intent?: unknown;
+        amount_total?: unknown;
+        payment_status?: unknown;
+        payment_method_types?: unknown;
+        metadata?: { matterId?: unknown; invoiceId?: unknown };
+      }
     | undefined;
   if (!session || typeof session.id !== "string") return undefined;
+  if (session.payment_status !== "paid") return undefined;
   const matterId = session.metadata?.matterId;
   const invoiceId = session.metadata?.invoiceId;
   if (typeof matterId !== "string" || typeof invoiceId !== "string") return undefined;
-  if (typeof session.amount_total !== "number") return undefined;
+  // Nothing to record for a zero-amount session; and a figure that isn't whole cents isn't one we can.
+  if (typeof session.amount_total !== "number" || !Number.isSafeInteger(session.amount_total) || session.amount_total <= 0) return undefined;
   return {
     sessionId: session.id,
     paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
     amountTotalCents: session.amount_total,
     matterId,
     invoiceId,
+    method: !delayed
+      ? "card"
+      : Array.isArray(session.payment_method_types) && session.payment_method_types.includes("us_bank_account")
+        ? "ach"
+        : "other",
   };
 }

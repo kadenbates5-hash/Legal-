@@ -111,6 +111,7 @@ describe("parseCheckoutSessionCompletedEvent", () => {
           id: "cs_test_1",
           payment_intent: "pi_test_1",
           amount_total: 5000,
+          payment_status: "paid",
           metadata: { matterId: "m1", invoiceId: "inv_1" },
         },
       },
@@ -121,6 +122,7 @@ describe("parseCheckoutSessionCompletedEvent", () => {
       amountTotalCents: 5000,
       matterId: "m1",
       invoiceId: "inv_1",
+      method: "card",
     });
   });
 
@@ -144,7 +146,7 @@ describe("parseCheckoutSessionCompletedEvent", () => {
   it("tolerates a missing payment_intent, leaving it undefined", () => {
     const raw = JSON.stringify({
       type: "checkout.session.completed",
-      data: { object: { id: "cs_1", amount_total: 100, metadata: { matterId: "m1", invoiceId: "inv_1" } } },
+      data: { object: { id: "cs_1", amount_total: 100, payment_status: "paid", metadata: { matterId: "m1", invoiceId: "inv_1" } } },
     });
     expect(parseCheckoutSessionCompletedEvent(raw)?.paymentIntentId).toBeUndefined();
   });

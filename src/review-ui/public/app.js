@@ -4455,7 +4455,7 @@ async function loadHome() {
   const isAttorney = currentRole === "attorney";
   const canDraft = isAttorney || currentRole === "paralegal";
 
-  const [pending, conflicts, upcoming, cases, myHours, announcements, schedule, clock, outstanding, emailTransport] = await Promise.all([
+  const [pending, conflicts, upcoming, cases, myHours, announcements, schedule, clock, outstanding, emailTransport, unapplied] = await Promise.all([
     isAttorney ? tryApi("/api/work-products?status=pending_review") : null,
     isAttorney ? tryApi("/api/deadlines/conflicts") : null,
     isAttorney ? tryApi("/api/deadlines/upcoming?withinDays=14") : null,
@@ -4466,6 +4466,7 @@ async function loadHome() {
     currentActorId ? tryApi(`/api/time-clock/actor/${encodeURIComponent(currentActorId)}/summary`) : null,
     canDraft ? tryApi("/api/invoices/outstanding") : null,
     canDraft ? tryApi("/api/invoices/email-transport") : null,
+    canDraft ? tryApi("/api/invoices/unapplied-receipts") : null,
   ]);
 
   renderGettingStarted({ isAttorney, cases, emailTransport });
@@ -4521,6 +4522,19 @@ async function loadHome() {
   for (const d of (upcoming || []).filter((x) => x.overdue || x.daysAway <= 7 || x.confirmationState !== "confirmed").slice(0, 4)) {
     const row = listRow(deadlineRowHtml(d));
     const open = mkButton("Open in Deadlines", () => goToPanel("deadlines"));
+    row.appendChild(document.createElement("br"));
+    row.appendChild(open);
+    attention.appendChild(row);
+  }
+  // Client money the firm holds with nothing in Docket saying why: next
+  // only to a deadline in what can't wait.
+  for (const r of (unapplied || []).slice(0, 3)) {
+    const row = listRow(
+      `<strong>${escapeHtml(centsToDollars(r.amountCents))} paid online needs refunding</strong>
+       <span class="badge rejected">${escapeHtml(r.reason.replace("_", " "))}</span>
+       <div class="meta-tight">${escapeHtml(unappliedReasonText(r))}</div>`,
+    );
+    const open = mkButton("Open in Invoices", () => goToPanel("invoices"));
     row.appendChild(document.createElement("br"));
     row.appendChild(open);
     attention.appendChild(row);
@@ -5378,6 +5392,85 @@ async function sendReminder(row) {
   }
 }
 
+/** What happened, in a sentence, to money received online that isn't on a bill. */
+function unappliedReasonText(r) {
+  const invoice = r.invoiceNumber || "the invoice";
+  const received = centsToDollars(r.receivedCents);
+  switch (r.reason) {
+    case "overpaid":
+      return `${received} was paid against ${invoice}, which had only ${centsToDollars(r.receivedCents - r.amountCents)} left to pay.`;
+    case "nothing_owed":
+      return `${invoice} was already paid in full when this ${received} arrived.`;
+    case "invoice_void":
+      return `${invoice} was voided after the client opened the payment page.`;
+    default:
+      return `The payment named an invoice that isn't on this matter (${r.invoiceId}).`;
+  }
+}
+
+/**
+ * The "paid online, but not on a bill" card — only shown when there's
+ * something on it. Each row is money the firm holds for a client; an
+ * attorney records what was done with it, once.
+ */
+async function loadUnappliedReceipts() {
+  const card = document.getElementById("unappliedCard");
+  const list = document.getElementById("unappliedList");
+  let receipts;
+  try {
+    receipts = await api("/api/invoices/unapplied-receipts");
+  } catch {
+    card.hidden = true;
+    return;
+  }
+  list.innerHTML = "";
+  card.hidden = receipts.length === 0;
+  for (const r of receipts) {
+    const li = document.createElement("li");
+    li.className = "static";
+    li.innerHTML = `<strong>${escapeHtml(centsToDollars(r.amountCents))} to refund</strong>
+      <span class="badge rejected">${escapeHtml(r.reason.replace("_", " "))}</span>
+      <div class="meta-tight">${escapeHtml(unappliedReasonText(r))}</div>
+      <div class="meta-tight">Matter ${escapeHtml(r.matterId)} · received ${escapeHtml(new Date(r.receivedAt).toLocaleString())}${
+        r.references.length ? ` · Stripe ${escapeHtml(r.references.join(", "))}` : ""
+      }</div>`;
+    if (currentRole === "attorney") {
+      const form = document.createElement("form");
+      form.className = "field-row mt-xs";
+      const label = document.createElement("label");
+      label.className = "field";
+      label.innerHTML = '<span class="k">What was done</span>';
+      const input = document.createElement("input");
+      input.type = "text";
+      input.maxLength = 2000;
+      input.required = true;
+      input.placeholder = "e.g. Refunded in Stripe, re_3Q…";
+      label.appendChild(input);
+      const button = document.createElement("button");
+      button.type = "submit";
+      button.className = "btn";
+      button.textContent = "Record";
+      form.append(label, button);
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        showError("");
+        try {
+          await api(`/api/invoices/unapplied-receipts/${encodeURIComponent(r.id)}/resolve`, {
+            method: "POST",
+            body: JSON.stringify({ resolution: input.value }),
+          });
+          showToast(`Recorded what was done with ${centsToDollars(r.amountCents)}.`, "success");
+          await loadUnappliedReceipts();
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+      li.appendChild(form);
+    }
+    list.appendChild(li);
+  }
+}
+
 /** The accounts-receivable view: unpaid issued invoices, most overdue first. */
 // Kept around so "Download CSV" exports the same receivables list
 // currently on screen without a second fetch.
@@ -5745,10 +5838,14 @@ function downloadOutstandingCsv() {
   downloadCsv(`outstanding-invoices-${new Date().toISOString().slice(0, 10)}.csv`, header, rows);
 }
 
-document.getElementById("refreshOutstanding").addEventListener("click", loadOutstanding);
+document.getElementById("refreshOutstanding").addEventListener("click", () => {
+  loadOutstanding();
+  loadUnappliedReceipts();
+});
 document.getElementById("downloadOutstandingCsv").addEventListener("click", downloadOutstandingCsv);
 document.getElementById("navInvoices").addEventListener("click", () => {
   loadOutstanding();
+  loadUnappliedReceipts();
   loadInvoices();
 });
 document.getElementById("newInvoice").addEventListener("click", async () => {

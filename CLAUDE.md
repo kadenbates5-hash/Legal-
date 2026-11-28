@@ -3540,10 +3540,36 @@ beyond `stripe-checkout.ts` itself.
   already use for "a verified machine event, not a human request." A
   client calling this directly (there's no route that would even let
   them) couldn't anyway. It's idempotent against a retried webhook — a
-  payment already recorded against that session or payment-intent id is
-  treated as already handled rather than double-applied — and caps the
-  recorded amount at the invoice's current balance so two racing
-  retries can never overdraw it.
+  session or payment-intent id already accounted for, as a payment or
+  as an unapplied receipt (below), is left alone — and records on the
+  invoice no more than its current balance.
+- **Money Stripe took is never dropped.** The amount used to be capped
+  at the balance and the rest discarded without a trace, and if the
+  invoice had been voided the whole charge went unrecorded (the webhook
+  logged an error and answered 200). That happens in ordinary use: a
+  client pays from two tabs, a check is recorded while the payment page
+  is open, an attorney voids and reissues a bill. The money is in the
+  firm's account either way, and it's the client's. Anything that can't
+  go on the bill is now kept as an `UnappliedReceipt` (`overpaid`,
+  `nothing_owed`, `invoice_void`, `invoice_missing`) with Stripe's
+  references and an `online_payment_unapplied` audit entry. It shows on
+  the Invoices panel's "Paid online, but not on a bill" card and in
+  Home's "Needs your attention" list, for staff who can reach the matter.
+  An attorney records what was done with it (refunded, and the refund's
+  reference), once, audited as `online_payment_unapplied_resolved`.
+  Docket doesn't issue the refund; that stays in Stripe, as before.
+  Routes: `GET /api/invoices/unapplied-receipts` and
+  `POST /api/invoices/unapplied-receipts/:id/resolve`.
+- **Only money that has arrived is recorded.** Sessions don't restrict
+  payment methods, so a firm with bank debits switched on in Stripe got
+  `checkout.session.completed` with `payment_status: "unpaid"` the moment
+  a client authorised an ACH debit. That was recorded as a card payment,
+  marking the bill paid days before the debit cleared, or whether or not
+  it cleared at all. `parseCheckoutSessionCompletedEvent()` now takes a
+  completed session only when it's `paid`, and records a delayed one on
+  `checkout.session.async_payment_succeeded`, as `ach` for a US bank
+  debit and `other` for anything else. `test/online-payments.test.ts`
+  pins both fixes, over HTTP too.
 - `verifyStripeSignature()` implements Stripe's own webhook scheme
   (`Stripe-Signature: t=<timestamp>,v1=<hmac>[,v1=...]`, HMAC-SHA256
   over `${timestamp}.${rawBody}`, timing-safe comparison, replay
@@ -4287,7 +4313,7 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=... GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=... GOOGLE_C
 # (no config needed) the Import panel is always on for attorneys — CSV exports from Clio/MyCase/PracticePanther or a spreadsheet; see "Importing from another system (CSV)"
 # PUBLIC_BOOKING=true npm run start:review-ui                            # turn on the public /book.html consultation-request page (requests land in the Scheduling panel; staff accept and pick the time — see "Self-service public booking")
 # PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui     # enable the Signatures panel's e-signature requests (see "E-signature") — needs no new vendor; emails each signer's link whenever SMTP_* is also set, otherwise the panel shows the raw link for staff to share
-# STRIPE_SECRET_KEY=sk_... STRIPE_WEBHOOK_SECRET=whsec_... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable a "Pay now" button on outstanding invoices in the client portal (see "Online invoice payment (Stripe Checkout)"); also point a Stripe webhook endpoint at $PUBLIC_BASE_URL/api/stripe/webhook listening for checkout.session.completed in the Stripe dashboard
+# STRIPE_SECRET_KEY=sk_... STRIPE_WEBHOOK_SECRET=whsec_... PUBLIC_BASE_URL=https://docket.example.com npm run start:review-ui  # enable a "Pay now" button on outstanding invoices in the client portal (see "Online invoice payment (Stripe Checkout)"); also point a Stripe webhook endpoint at $PUBLIC_BASE_URL/api/stripe/webhook listening for checkout.session.completed and checkout.session.async_payment_succeeded in the Stripe dashboard
 # VOICEBOX_BASE_URL=http://127.0.0.1:17493 VOICEBOX_PROFILE_ID=...                    # optional — defaults to Voicebox's own local port/default voice
 # SPEECH_TOOLS=true npm run start:review-ui                               # use the firm's Voicebox voice for "Listen"/read-aloud (otherwise the browser's own offline voice is used, where the device has one) — independent of Twilio, reuses VOICEBOX_BASE_URL/VOICEBOX_PROFILE_ID
 # COURTLISTENER_API_TOKEN=...                                             # optional — search works unauthenticated at a lower rate limit

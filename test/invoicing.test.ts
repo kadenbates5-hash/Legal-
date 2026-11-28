@@ -340,7 +340,7 @@ describe("InvoicingService Checkout", () => {
     const { service, store } = makeServiceWithCheckout();
     const invoice = sentInvoice(service, store);
     expect(() =>
-      service.recordCheckoutPayment(attorney, { sessionId: "cs_1", paymentIntentId: "pi_1", amountTotalCents: 100_00, matterId: "m-1", invoiceId: invoice.id }),
+      service.recordCheckoutPayment(attorney, { sessionId: "cs_1", paymentIntentId: "pi_1", amountTotalCents: 100_00, matterId: "m-1", invoiceId: invoice.id, method: "card" }),
     ).toThrow(AccessDeniedError);
   });
 
@@ -353,7 +353,8 @@ describe("InvoicingService Checkout", () => {
       amountTotalCents: 100_00,
       matterId: "m-1",
       invoiceId: invoice.id,
-    });
+      method: "card",
+    }).invoice!;
     expect(view.totals.balanceCents).toBe(0);
     expect(view.payments[0]).toMatchObject({ method: "card", reference: "pi_1", amountCents: 100_00 });
   });
@@ -361,23 +362,25 @@ describe("InvoicingService Checkout", () => {
   it("is idempotent against a retried webhook for the same session/payment intent", () => {
     const { service, store } = makeServiceWithCheckout();
     const invoice = sentInvoice(service, store);
-    const event = { sessionId: "cs_1", paymentIntentId: "pi_1", amountTotalCents: 100_00, matterId: "m-1", invoiceId: invoice.id };
+    const event = { sessionId: "cs_1", paymentIntentId: "pi_1", amountTotalCents: 100_00, matterId: "m-1", invoiceId: invoice.id, method: "card" as const };
     service.recordCheckoutPayment(system, event);
-    const second = service.recordCheckoutPayment(system, event);
+    const second = service.recordCheckoutPayment(system, event).invoice!;
     expect(second.payments).toHaveLength(1);
   });
 
-  it("caps the recorded amount at the invoice's current balance, never overdrawing it", () => {
+  it("caps the recorded amount at the invoice's current balance, never overdrawing it — and keeps the rest", () => {
     const { service, store } = makeServiceWithCheckout();
     const invoice = sentInvoice(service, store);
-    const view = service.recordCheckoutPayment(system, {
+    const result = service.recordCheckoutPayment(system, {
       sessionId: "cs_1",
       paymentIntentId: "pi_1",
       amountTotalCents: 999_00,
       matterId: "m-1",
       invoiceId: invoice.id,
+      method: "card",
     });
-    expect(view.totals.balanceCents).toBe(0);
-    expect(view.payments[0]!.amountCents).toBe(100_00);
+    expect(result.invoice!.totals.balanceCents).toBe(0);
+    expect(result.invoice!.payments[0]!.amountCents).toBe(100_00);
+    expect(result.unapplied).toMatchObject({ amountCents: 899_00, receivedCents: 999_00, reason: "overpaid" });
   });
 });

@@ -403,7 +403,7 @@ function errorStatus(err: unknown): number {
   // An overdraw or a double-reversal is a conflict with the ledger's current
   // state, not a malformed request — 409 says "the world says no", not "you typed it wrong".
   if (err instanceof InvoicingError) {
-    if (err.message.startsWith("no invoice")) return 404;
+    if (err.message.startsWith("no invoice") || err.message.startsWith("no unapplied receipt")) return 404;
     // "can't edit a sent invoice", "exceeds the balance", "already sent" are all
     // conflicts with the invoice's current state rather than malformed input.
     return /must be|is required|needs a|does not look like/.test(err.message) ? 400 : 409;
@@ -775,10 +775,10 @@ async function handleRequest(
         invoicing.recordCheckoutPayment({ id: "system", role: "system" }, event);
         onMutated?.();
       } catch (err) {
-        // A malformed or already-voided invoice shouldn't crash the
-        // webhook handler — Stripe retries on a non-2xx, and retrying a
-        // genuinely bad event forever accomplishes nothing. Logged
-        // server-side so a real failure doesn't vanish silently.
+        // A voided or unknown invoice no longer lands here — that money is
+        // kept as an unapplied receipt — so this is for the truly
+        // unexpected. Stripe retries on a non-2xx, and retrying a bad event
+        // forever accomplishes nothing; logged so it doesn't vanish.
         console.error("stripe webhook: failed to record checkout payment:", err instanceof Error ? err.message : err);
       }
     }
@@ -2338,6 +2338,20 @@ async function handleInvoicingRequest(
 
   if (url.pathname === "/api/invoices/outstanding" && req.method === "GET") {
     sendJson(res, 200, invoicing.listOutstanding(actor));
+    return;
+  }
+
+  // Money received online that isn't on a bill — see InvoicingService.recordCheckoutPayment.
+  if (url.pathname === "/api/invoices/unapplied-receipts" && req.method === "GET") {
+    sendJson(res, 200, invoicing.listUnappliedReceipts(actor, { includeResolved: url.searchParams.get("includeResolved") === "true" }));
+    return;
+  }
+  const resolveMatch = /^\/api\/invoices\/unapplied-receipts\/([^/]+)\/resolve$/.exec(url.pathname);
+  if (resolveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const receiptId = pathSegments(url, /^\/api\/invoices\/unapplied-receipts\/?/)[0] ?? "";
+    sendJson(res, 200, invoicing.resolveUnappliedReceipt(actor, receiptId, typeof body["resolution"] === "string" ? body["resolution"] : ""));
+    onMutated?.();
     return;
   }
 

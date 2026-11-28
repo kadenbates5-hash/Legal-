@@ -125,9 +125,55 @@ export interface Invoice {
   deliveries: InvoiceDelivery[];
 }
 
+/**
+ * Why money a processor took couldn't be applied to the invoice it was
+ * for. Each is money the firm holds and Docket would otherwise have no
+ * record of.
+ */
+export type UnappliedReason =
+  /** More than the balance left: a check recorded meanwhile, or the client paid from two tabs. */
+  | "overpaid"
+  /** The invoice was already paid in full by the time the money arrived. */
+  | "nothing_owed"
+  /** The invoice was voided after the client opened the payment page. */
+  | "invoice_void"
+  /** No invoice on that matter has the id the payment named. */
+  | "invoice_missing";
+
+export const UNAPPLIED_REASONS: readonly UnappliedReason[] = ["overpaid", "nothing_owed", "invoice_void", "invoice_missing"];
+
+/**
+ * Money received online that wasn't applied to a bill — kept, rather than
+ * dropped, so someone refunds it. Never edited: resolving one records who
+ * and what they did, once.
+ */
+export interface UnappliedReceipt {
+  readonly id: string;
+  readonly matterId: string;
+  readonly invoiceId: string;
+  /** The invoice's number when it exists, for a person reading the list. */
+  readonly invoiceNumber: string | undefined;
+  /** The part not applied to the invoice. */
+  readonly amountCents: number;
+  /** What the processor reported taking in all, applied part included. */
+  readonly receivedCents: number;
+  readonly reason: UnappliedReason;
+  /** The processor's references, so the refund can be found there. */
+  readonly references: readonly string[];
+  readonly receivedAt: string;
+  readonly resolvedAt: string | undefined;
+  readonly resolvedBy: string | undefined;
+  readonly resolution: string | undefined;
+}
+
+/** How long a resolution note may be — it says what was done with the money, not the whole story. */
+export const MAX_RECEIPT_RESOLUTION_LENGTH = 2_000;
+
 export interface InvoiceSnapshot {
   invoices: Invoice[];
   payments: Payment[];
+  /** Absent in snapshots written before unapplied receipts existed. */
+  unappliedReceipts?: UnappliedReceipt[];
   nextInvoiceNumber: number;
   nextId: number;
 }
@@ -150,6 +196,7 @@ function assertPositiveCents(value: number, what: string): void {
 export class InvoiceStore {
   #invoices = new Map<string, Invoice>();
   #payments: Payment[] = [];
+  #unapplied: UnappliedReceipt[] = [];
   #nextInvoiceNumber = 1;
   #nextId = 1;
 
@@ -388,6 +435,72 @@ export class InvoiceStore {
     return invoice;
   }
 
+  /**
+   * Keeps money that arrived but couldn't go on the invoice it was for.
+   * Refuses only what isn't money: a non-positive or inexact amount, or a
+   * reason it doesn't know.
+   */
+  recordUnappliedReceipt(params: {
+    matterId: string;
+    invoiceId: string;
+    amountCents: number;
+    receivedCents: number;
+    reason: UnappliedReason;
+    references: string[];
+  }): UnappliedReceipt {
+    assertPositiveCents(params.amountCents, "unapplied amount");
+    assertPositiveCents(params.receivedCents, "amount received");
+    if (params.amountCents > params.receivedCents) throw new InvoicingError("the unapplied part can't exceed what was received");
+    if (!UNAPPLIED_REASONS.includes(params.reason)) throw new InvoicingError(`unknown reason '${String(params.reason)}'`);
+    const receipt: UnappliedReceipt = Object.freeze({
+      id: `rcpt_${this.#nextId++}`,
+      matterId: params.matterId,
+      invoiceId: params.invoiceId,
+      invoiceNumber: this.#invoices.get(params.invoiceId)?.number,
+      amountCents: params.amountCents,
+      receivedCents: params.receivedCents,
+      reason: params.reason,
+      references: Object.freeze(params.references.filter((r) => r.trim())),
+      receivedAt: new Date().toISOString(),
+      resolvedAt: undefined,
+      resolvedBy: undefined,
+      resolution: undefined,
+    });
+    this.#unapplied.push(receipt);
+    return receipt;
+  }
+
+  /** Every unapplied receipt, oldest first. */
+  unappliedReceipts(): UnappliedReceipt[] {
+    return this.#unapplied.map((r) => ({ ...r }));
+  }
+
+  /**
+   * Whether a processor reference has already been accounted for, as a
+   * payment or as an unapplied receipt — so a retried webhook is a no-op
+   * whichever way the first delivery went.
+   */
+  hasProcessorReference(reference: string): boolean {
+    if (!reference) return false;
+    return this.#payments.some((p) => p.reference === reference) || this.#unapplied.some((r) => r.references.includes(reference));
+  }
+
+  /** Records, once, what was done with an unapplied receipt (refunded, applied elsewhere by agreement…). */
+  resolveUnappliedReceipt(id: string, params: { by: string; resolution: string }): UnappliedReceipt {
+    const index = this.#unapplied.findIndex((r) => r.id === id);
+    if (index === -1) throw new InvoicingError(`no unapplied receipt '${id}'`);
+    const current = this.#unapplied[index]!;
+    if (current.resolvedAt) throw new InvoicingError(`receipt '${id}' was already resolved`);
+    const resolution = (params.resolution ?? "").trim();
+    if (!resolution) throw new InvoicingError("a note is required: say what was done with the money — refunded, and the refund's reference");
+    if (resolution.length > MAX_RECEIPT_RESOLUTION_LENGTH) {
+      throw new InvoicingError(`the note must be at most ${MAX_RECEIPT_RESOLUTION_LENGTH} characters`);
+    }
+    const resolved: UnappliedReceipt = Object.freeze({ ...current, resolvedAt: new Date().toISOString(), resolvedBy: params.by, resolution });
+    this.#unapplied[index] = resolved;
+    return { ...resolved };
+  }
+
   toSnapshot(): InvoiceSnapshot {
     return {
       invoices: this.listAll().map((i) => ({
@@ -396,6 +509,7 @@ export class InvoiceStore {
         deliveries: i.deliveries.map((d) => ({ ...d })),
       })),
       payments: this.#payments.map((p) => ({ ...p })),
+      unappliedReceipts: this.#unapplied.map((r) => ({ ...r, references: [...r.references] })),
       nextInvoiceNumber: this.#nextInvoiceNumber,
       nextId: this.#nextId,
     };
@@ -413,6 +527,9 @@ export class InvoiceStore {
       });
     }
     store.#payments = (snapshot.payments ?? []).map((p) => Object.freeze({ ...p }));
+    store.#unapplied = (snapshot.unappliedReceipts ?? []).map((r) =>
+      Object.freeze({ ...r, references: Object.freeze([...(r.references ?? [])]) }),
+    );
     store.#nextInvoiceNumber = snapshot.nextInvoiceNumber ?? store.#invoices.size + 1;
     store.#nextId = snapshot.nextId ?? 1;
     return store;
