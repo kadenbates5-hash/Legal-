@@ -142,13 +142,15 @@ export class ParalegalDraftingSession {
     for (const flag of flags) workProduct.addFlag(flag);
 
     if (request.deadlineDate !== undefined) {
+      const type = request.deadlineType ?? "other";
       workProduct.addFlag(DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG);
+      workProduct.attachDeadline({ type, date: request.deadlineDate });
       this.#deadlineTracker?.record({
         matterId: this.#matterId,
-        type: request.deadlineType ?? "other",
+        type,
         date: request.deadlineDate,
         source: "agent",
-        note: `calculated while drafting ${request.templateId}`,
+        note: `calculated while drafting ${request.templateId} (${workProduct.id})`,
       });
     }
 

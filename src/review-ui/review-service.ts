@@ -33,6 +33,12 @@ export interface WorkProductSummary {
 export interface WorkProductDetail extends WorkProductSummary {
   content: string;
   history: WorkProduct["history"];
+  /**
+   * The calculated deadline the draft carries, and where its verification
+   * stands — so the reviewer sees which date the deadline flag is about
+   * instead of being asked to name one.
+   */
+  deadline?: { type: DeadlineType; date: string; state: DeadlineStatus["state"]; confirmedDate?: string };
 }
 
 function requireAttorney(actor: Actor): void {
@@ -45,8 +51,19 @@ function summarize(wp: WorkProduct): WorkProductSummary {
   return { id: wp.id, matterId: wp.matterId, kind: wp.kind, status: wp.status, flags: [...wp.flags] };
 }
 
-function detail(wp: WorkProduct): WorkProductDetail {
-  return { ...summarize(wp), content: wp.content, history: wp.history };
+function detail(wp: WorkProduct, tracker: DeadlineTracker | undefined): WorkProductDetail {
+  const base: WorkProductDetail = { ...summarize(wp), content: wp.content, history: wp.history };
+  if (!wp.deadline) return base;
+  const status = tracker?.status(wp.matterId, wp.deadline.type);
+  return {
+    ...base,
+    deadline: {
+      type: wp.deadline.type,
+      date: wp.deadline.date,
+      state: status?.state ?? "unconfirmed",
+      ...(status?.state === "confirmed" ? { confirmedDate: status.date } : {}),
+    },
+  };
 }
 
 /** Two weeks: far enough to act on a court date, close enough that the list stays short enough to read. */
@@ -92,35 +109,35 @@ export class ReviewGateService {
   get(actor: Actor, id: string): WorkProductDetail {
     requireAttorney(actor);
     const wp = this.#requireWorkProduct(id);
-    return detail(wp);
+    return detail(wp, this.#deadlineTracker);
   }
 
   approve(actor: Actor, id: string): WorkProductDetail {
     requireAttorney(actor);
     const wp = this.#requireWorkProduct(id);
     wp.approve(actor);
-    return detail(wp);
+    return detail(wp, this.#deadlineTracker);
   }
 
   reject(actor: Actor, id: string, reason: string): WorkProductDetail {
     requireAttorney(actor);
     const wp = this.#requireWorkProduct(id);
     wp.reject(actor, reason);
-    return detail(wp);
+    return detail(wp, this.#deadlineTracker);
   }
 
   requestRevision(actor: Actor, id: string, note: string): WorkProductDetail {
     requireAttorney(actor);
     const wp = this.#requireWorkProduct(id);
     wp.requestRevision(actor, note);
-    return detail(wp);
+    return detail(wp, this.#deadlineTracker);
   }
 
   release(actor: Actor, id: string): WorkProductDetail {
     requireAttorney(actor);
     const wp = this.#requireWorkProduct(id);
     wp.release(actor);
-    return detail(wp);
+    return detail(wp, this.#deadlineTracker);
   }
 
   /**
@@ -135,18 +152,42 @@ export class ReviewGateService {
     const wp = this.#requireWorkProduct(id);
 
     if (flag === DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG) {
-      if (!deadlineType) {
+      // The deadline checked is the one the draft calculated. It used to be
+      // whichever type the attorney named, so a deadline already confirmed
+      // on the matter for some other reason (the arraignment) cleared a
+      // draft whose own date (the speedy-trial cutoff) nobody had checked.
+      const carried = wp.deadline;
+      if (carried && deadlineType && deadlineType !== carried.type) {
+        throw new ReviewGateError(
+          `cannot clear '${flag}': this draft's deadline is '${carried.type}' (${carried.date}), not '${deadlineType}'`,
+        );
+      }
+      const type = carried?.type ?? deadlineType;
+      if (!type) {
         throw new ReviewGateError("clearing the deadline flag requires specifying which deadlineType it confirms");
       }
-      if (!this.#deadlineTracker?.isConfirmed(wp.matterId, deadlineType)) {
+      const status = this.#deadlineTracker?.status(wp.matterId, type);
+      if (!status || status.state !== "confirmed") {
         throw new ReviewGateError(
-          `cannot clear '${flag}': deadline '${deadlineType}' for matter '${wp.matterId}' is not yet confirmed by two independent sources`,
+          `cannot clear '${flag}': deadline '${type}' for matter '${wp.matterId}' is not yet confirmed by two independent sources`,
+        );
+      }
+      if (carried && status.date !== carried.date) {
+        throw new ReviewGateError(
+          `cannot clear '${flag}': '${type}' is confirmed for ${status.date}, but this draft says ${carried.date}`,
+        );
+      }
+      // A draft saved before it kept its deadline: the type named must at
+      // least be one the drafting agent calculated on this matter.
+      if (!carried && !status.calculations.some((c) => c.source === "agent")) {
+        throw new ReviewGateError(
+          `cannot clear '${flag}': no '${type}' deadline was calculated while drafting on matter '${wp.matterId}'`,
         );
       }
     }
 
     wp.clearFlag(actor, flag);
-    return detail(wp);
+    return detail(wp, this.#deadlineTracker);
   }
 
   /**

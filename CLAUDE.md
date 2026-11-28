@@ -435,6 +435,16 @@ the rest of core:
   receptionist could make. An appointment is now 1 to 1,440 minutes and
   its start a real time; either mistake is a 400 (`SchedulingError`
   gained a `kind`), not a 409 or "Invalid time value".
+- **An appointment that names an attorney names one who works here.**
+  Any string was booked before. A typo, an id the Assistant invented
+  ("jdoe"), or someone who has left meant an appointment nobody would
+  attend and a reminder naming "jdoe" to the client. The attorney who
+  was actually meant never had the clash checked either.
+  `setAttorneyDirectory()` (wired in `start.ts` from the firm's enabled
+  attorney accounts) refuses anyone else as a 400. An attorney listed in
+  the firm config is accepted too, since that's where auto-assignment
+  picks from. Without a directory (a service built in a test), any id is
+  taken as before. `test/appointment-attorney.test.ts`.
 - **A booking time says which moment it means.** The routes read
   `startTime`/`newStartTime` with `new Date(text)`, which takes a time
   without a zone in the *server's* zone: "2026-12-01T10:00" from an API
@@ -754,9 +764,24 @@ surfaced immediately via `listConflicts()`, never silently resolved by
 picking one.
 
 This isn't just advisory — `ReviewGateService.clearFlag()` refuses to
-clear `DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG` unless
-`DeadlineTracker.isConfirmed()` is actually true for the matter/type in
-question (requiring a `deadlineType` parameter on that call specifically).
+clear `DEADLINE_REQUIRES_REDUNDANT_VERIFICATION_FLAG` unless the
+**draft's own** deadline is confirmed, on the date the draft gives.
+
+**It used to check whichever deadline the attorney named.** The draft
+didn't remember which deadline it had calculated, so the Review Queue
+asked in a prompt box, and any deadline already confirmed on the matter
+passed. A motion carrying an unchecked speedy-trial cutoff could be
+cleared, and approved, by typing "arraignment" when the arraignment was
+the date that had been checked. A draft now records its deadline
+(`WorkProduct.attachDeadline()`, once, while a draft; kept in the
+snapshot as `deadline`). Clearing checks that type, refuses another one
+named instead, and refuses a confirmation for a different date than
+the draft's. The Review Queue and Drafting panels show the date and
+where its verification stands, and the clear button sends it with no
+prompt. A draft saved before this kept its deadline still asks, and the
+type named must be one the drafting agent calculated on that matter.
+`test/deadline-flag-binding.test.ts` pins it.
+
 `confirmDeadline()` is how the independent human/calendar-system side gets
 recorded — it rejects `source: "agent"` outright, since that path exists
 to be the second, non-agent source, and it enforces *who* may record
@@ -2947,6 +2972,19 @@ Hardening that applies to every route, independent of any one panel.
 - `serveStatic` compares against `PUBLIC_DIR + path.sep`, not a bare
   `startsWith`: the latter also accepts a sibling directory whose name
   merely begins with it, which `../public-x/secret` would reach.
+- **A draft's text is text.** The Review Queue showed a draft with
+  `<pre>${wp.content}</pre>` and the Drafting panel put it in its
+  textarea the same way, unescaped. A draft can carry words from outside
+  the firm: a report drafted from a client's uploaded PDF, or something
+  the Assistant was given. So a link or a refresh tag in it became live in
+  an attorney's session; the CSP blocks scripts, not those. Ordinary
+  drafts were damaged too. A `<CLIENT NAME>` placeholder vanished as an
+  unknown tag. In the textarea "AT&amp;T" was decoded, so saving a
+  revision quietly changed the text. Both are escaped now, as are flag
+  names and the Scheduling list's attorney (which, until the check
+  above, any receptionist could set to markup). A scan of every HTML
+  template in the dashboard's scripts found no other user text written
+  raw.
 - **Ids in the URL path are decoded, in one place** (`pathSegments()`).
   The dashboard puts every id into a URL with `encodeURIComponent`, but
   25 route handlers split the raw path and keyed on what they found, so

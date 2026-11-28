@@ -591,6 +591,25 @@ async function loadUpcomingDeadlines() {
   }
 }
 
+/** A colleague's display name, or their id if the directory hasn't loaded them. */
+function staffName(actorId) {
+  return (Array.isArray(knownStaff) && knownStaff.find((m) => m.actorId === actorId)?.displayName) || actorId;
+}
+
+/** "Calculated speedy trial date in this draft: 2026-12-15 — confirmed by two sources." */
+function draftDeadlineLine(deadline) {
+  const label = DEADLINE_TYPE_LABEL[deadline.type] || deadline.type;
+  const state =
+    deadline.state === "confirmed"
+      ? "confirmed by two sources"
+      : deadline.state === "conflict"
+        ? "the sources disagree — resolve it on the Deadlines panel before clearing the flag"
+        : deadline.state === "unconfirmed"
+          ? "not yet confirmed — a second, independent check on the Deadlines panel clears the flag"
+          : "";
+  return `Calculated ${label} date in this draft: ${deadline.date}${state ? ` — ${state}` : ""}.`;
+}
+
 function renderAttorneyOnly(listId, message) {
   document.getElementById(listId).innerHTML = `<li class="static empty">${message}</li>`;
 }
@@ -1310,8 +1329,9 @@ async function loadDetail(id) {
       <div class="card">
         <h3>${escapeHtml(wp.kind)} <span class="badge ${wp.status}">${wp.status}</span></h3>
         <p class="subtitle-inline">Matter: ${escapeHtml(wp.matterId)}</p>
-        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${f}</code>`).join(", ")}</div>` : ""}
-        <pre>${wp.content}</pre>
+        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${escapeHtml(f)}</code>`).join(", ")}</div>` : ""}
+        ${wp.deadline ? `<p class="subtitle-inline">${escapeHtml(draftDeadlineLine(wp.deadline))}</p>` : ""}
+        <pre>${escapeHtml(wp.content)}</pre>
         <div class="actions" id="actions"></div>
       </div>
     `;
@@ -1319,7 +1339,13 @@ async function loadDetail(id) {
 
     for (const flag of wp.flags) {
       const btn = mkButton(`Clear flag: ${flag}`, () => {
+        if (flag === "deadline_requires_redundant_verification" && wp.deadline) {
+          // The server checks the deadline this draft calculated; there's
+          // nothing to choose.
+          return act(`/api/work-products/${id}/clear-flag`, { flag, deadlineType: wp.deadline.type }, id);
+        }
         if (flag === "deadline_requires_redundant_verification") {
+          // A draft saved before it kept its deadline.
           const deadlineType = prompt(
             "Which deadline type does this confirm? (speedy_trial, arraignment, bail_hearing, discovery_response, other)",
           );
@@ -1905,8 +1931,8 @@ async function loadAppointments() {
       const li = document.createElement("li");
       li.classList.add("static");
       const when = new Date(appt.startTime).toLocaleString();
-      li.innerHTML = `<strong>${appt.type}</strong> with ${appt.attorneyId} at ${when}
-        <span class="badge ${appt.status}">${appt.status}</span>`;
+      li.innerHTML = `<strong>${escapeHtml(appt.type)}</strong> with ${escapeHtml(staffName(appt.attorneyId))} at ${escapeHtml(when)}
+        <span class="badge ${escapeHtml(appt.status)}">${escapeHtml(appt.status)}</span>`;
       if (appt.status === "scheduled" || appt.status === "rescheduled") {
         const cancelBtn = mkButton("Cancel", async () => {
           const reason = prompt("Cancellation reason (optional)?") || undefined;
@@ -2325,10 +2351,11 @@ async function loadDraftDetail(id) {
     detail.innerHTML = `
       <div class="card">
         <h3>${escapeHtml(wp.kind)} <span class="badge ${wp.status}">${wp.status}</span></h3>
-        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${f}</code>`).join(", ")}</div>` : ""}
+        ${wp.flags.length ? `<div class="flags">Unresolved flags: ${wp.flags.map((f) => `<code>${escapeHtml(f)}</code>`).join(", ")}</div>` : ""}
+        ${wp.deadline ? `<p class="subtitle-inline">${escapeHtml(draftDeadlineLine(wp.deadline))}</p>` : ""}
         <div class="field-row">
           <label class="field grow">Content
-            <textarea id="draftDetailContent" rows="8" ${editable ? "" : "disabled"}>${wp.content}</textarea>
+            <textarea id="draftDetailContent" rows="8" ${editable ? "" : "disabled"}>${escapeHtml(wp.content)}</textarea>
           </label>
         </div>
         <div class="actions" id="draftDetailActions"></div>

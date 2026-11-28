@@ -121,6 +121,10 @@ if (process.env["FIRM_TIME_ZONE"] && firmConfig?.businessHours?.timezone && firm
 const store: string | StateStore = DATABASE_URL ? await createPostgresStateStore({ connectionString: DATABASE_URL }) : STATE_FILE;
 
 const state = await loadSystemState(store, firmConfig ? { firmConfig } : {});
+// An appointment that names an attorney must name one who works here.
+state.scheduling.setAttorneyDirectory((actorId) =>
+  state.auth.listUsers().some((u) => u.actorId === actorId && u.role === "attorney" && !u.disabled),
+);
 
 /**
  * First-run bootstrap only: if the persisted state has no accounts yet,

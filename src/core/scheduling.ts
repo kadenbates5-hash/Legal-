@@ -125,6 +125,7 @@ export class SchedulingService {
   #firmConfig: FirmConfig | undefined;
   #accessControl: AccessControl | undefined;
   #reminderOffsetsMinutes: number[];
+  #isAttorney: ((actorId: string) => boolean) | undefined;
 
   constructor(params?: { firmConfig?: FirmConfig; accessControl?: AccessControl; reminderOffsetsMinutes?: number[] }) {
     this.#firmConfig = params?.firmConfig;
@@ -132,9 +133,23 @@ export class SchedulingService {
     this.#reminderOffsetsMinutes = params?.reminderOffsetsMinutes ?? DEFAULT_REMINDER_OFFSETS_MINUTES;
   }
 
+  /**
+   * Who counts as an attorney here, for an appointment that names one.
+   * Without it any string was booked: a typo, an id the Assistant made up,
+   * or someone who left the firm — an appointment nobody would attend,
+   * reminders telling the client they're seeing "jdoe", and no
+   * double-booking check against the attorney who was actually meant.
+   * Set once at boot (`start.ts`), from the firm's accounts; absent, any id
+   * is taken, as before.
+   */
+  setAttorneyDirectory(isAttorney: (actorId: string) => boolean): void {
+    this.#isAttorney = isAttorney;
+  }
+
   scheduleConsultation(actor: Actor, params: ScheduleConsultationParams): Appointment {
     this.#authorize(actor, params.matterId);
 
+    if (params.attorneyId !== undefined) this.#assertKnownAttorney(params.attorneyId);
     const attorneyId = params.attorneyId ?? this.#autoAssignAttorney(params.practiceAreaId);
     if (!attorneyId) {
       throw new SchedulingError(
@@ -356,6 +371,16 @@ export class SchedulingService {
       });
     }
     return service;
+  }
+
+  #assertKnownAttorney(attorneyId: string): void {
+    if (!this.#isAttorney) return;
+    const listed = (this.#firmConfig?.attorneys ?? []).some((a) => a.id === attorneyId);
+    if (listed || this.#isAttorney(attorneyId)) return;
+    throw new SchedulingError(
+      `${JSON.stringify(attorneyId)} isn't an attorney at this firm — choose one of the firm's attorneys, or leave it out to assign one from firm settings`,
+      "invalid",
+    );
   }
 
   #authorize(actor: Actor, matterId: string): void {

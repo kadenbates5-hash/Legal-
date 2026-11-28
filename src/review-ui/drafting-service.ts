@@ -1,7 +1,7 @@
 import { AccessDeniedError, type Actor } from "../core/types.js";
 import type { AccessControl } from "../core/access-control.js";
 import type { AuditLog } from "../core/audit.js";
-import type { WorkProduct, WorkProductStatus } from "../core/review-gate.js";
+import type { WorkProduct, WorkProductDeadline, WorkProductStatus } from "../core/review-gate.js";
 import type { WorkProductStore } from "../core/work-product-store.js";
 import type { DeadlineTracker } from "../core/deadline.js";
 import type { PracticeAreaModule, DocumentTemplate } from "../config/practice-area.js";
@@ -47,6 +47,8 @@ export interface WorkProductSummary {
 export interface WorkProductDetail extends WorkProductSummary {
   content: string;
   history: WorkProduct["history"];
+  /** The calculated deadline the draft carries, if any. */
+  deadline?: WorkProductDeadline;
 }
 
 function requireDraftingRole(actor: Actor): void {
@@ -60,7 +62,7 @@ function summarize(wp: WorkProduct): WorkProductSummary {
 }
 
 function detail(wp: WorkProduct): WorkProductDetail {
-  return { ...summarize(wp), content: wp.content, history: wp.history };
+  return { ...summarize(wp), content: wp.content, history: wp.history, ...(wp.deadline ? { deadline: { ...wp.deadline } } : {}) };
 }
 
 export class DraftingService {

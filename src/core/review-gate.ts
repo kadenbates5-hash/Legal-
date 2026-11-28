@@ -1,5 +1,16 @@
 import { ReviewGateError, type Actor } from "./types.js";
 import type { AuditLog } from "./audit.js";
+import type { DeadlineType } from "./deadline.js";
+
+/**
+ * The calculated deadline a draft carries. Recorded with the draft so
+ * clearing its verification flag checks *this* deadline — see
+ * `ReviewGateService.clearFlag`.
+ */
+export interface WorkProductDeadline {
+  readonly type: DeadlineType;
+  readonly date: string;
+}
 
 /**
  * §1 non-negotiable rule: "nothing produced by either agent reaches a
@@ -47,6 +58,8 @@ export interface WorkProductSnapshot {
    * `fromSnapshot` then recovers it from the audit log.
    */
   clearedFlags?: string[];
+  /** Absent for a draft that carries no deadline, and on snapshots written before it was kept. */
+  deadline?: WorkProductDeadline;
 }
 
 export class WorkProduct {
@@ -70,6 +83,7 @@ export class WorkProduct {
    * existed, which is shown as "date not recorded" rather than guessed.
    */
   createdAt: string | undefined = new Date().toISOString();
+  #deadline: WorkProductDeadline | undefined;
 
   #auditLog: AuditLog;
 
@@ -83,6 +97,25 @@ export class WorkProduct {
 
   get content(): string {
     return this.#content;
+  }
+
+  /** The calculated deadline this draft carries, if any. */
+  get deadline(): WorkProductDeadline | undefined {
+    return this.#deadline;
+  }
+
+  /**
+   * Records which deadline the draft calculated, once, while it is still a
+   * draft. Clearing the deadline-verification flag is checked against this
+   * — without it, an attorney clearing the flag named the deadline type
+   * themselves, and any *other* deadline already confirmed on the matter
+   * (a confirmed arraignment, say) cleared a draft whose speedy-trial date
+   * nobody had checked.
+   */
+  attachDeadline(deadline: WorkProductDeadline): void {
+    if (this.#deadline) throw new ReviewGateError(`work product '${this.id}' already carries a deadline`);
+    if (this.status !== "draft") throw new ReviewGateError(`a deadline can only be attached while '${this.id}' is a draft`);
+    this.#deadline = { type: deadline.type, date: deadline.date };
   }
 
   /**
@@ -189,6 +222,7 @@ export class WorkProduct {
       history: this.history.map((t) => ({ ...t })),
       ...(this.createdAt ? { createdAt: this.createdAt } : {}),
       clearedFlags: [...this.#clearedFlags],
+      ...(this.#deadline ? { deadline: { ...this.#deadline } } : {}),
     };
   }
 
@@ -210,6 +244,7 @@ export class WorkProduct {
     for (const flag of snapshot.flags) workProduct.flags.add(flag);
     workProduct.history.push(...snapshot.history.map((t) => ({ ...t })));
     workProduct.createdAt = snapshot.createdAt;
+    if (snapshot.deadline) workProduct.#deadline = { type: snapshot.deadline.type, date: snapshot.deadline.date };
     if (snapshot.clearedFlags) {
       for (const flag of snapshot.clearedFlags) if (!workProduct.flags.has(flag)) workProduct.#clearedFlags.add(flag);
     } else {
