@@ -42,6 +42,18 @@ actual code path, not a prompt instruction:
   itself throws once status leaves `draft`/`revision_requested` — so an
   attorney's approval can never be silently invalidated by a post-approval
   content edit.
+  **A cleared flag is a sign-off on the text, so a rewrite re-raises it.**
+  It used to survive a revision. An attorney could clear the Padilla flag
+  on a memo that carried the advisory and ask for changes, and the
+  rewrite (advisory gone, by the paralegal or the Assistant) could then
+  be approved with nothing left to stop it. `reviseDraft()` now restores
+  every flag cleared since the text last changed, when the text actually
+  changes, and audits it as `flags_reraised`. The Drafting panel says so
+  when it happens. Cleared flags are kept in the snapshot
+  (`clearedFlags`). A snapshot written before that recovers them from
+  the audit log, failing closed: an unapproved draft whose flag was
+  cleared and then rewritten under the old code gets the flag back at
+  load. `test/flag-reraise.test.ts` pins it.
 - `src/core/access-control.ts` — `AccessControl.authorize()` throws
   `AccessDeniedError` unless the request is within the actor's scope:
   receptionist gets `intake`/`scheduling` fields only; paralegal is scoped

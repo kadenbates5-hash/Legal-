@@ -2342,13 +2342,22 @@ async function loadDraftDetail(id) {
         showError("");
         try {
           const content = document.getElementById("draftDetailContent").value;
-          await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/work-products/${id}/revise`, {
+          const flagsBefore = new Set(wp.flags);
+          const revised = await api(`/api/drafting/matters/${encodeURIComponent(draftingMatterId())}/work-products/${id}/revise`, {
             method: "POST",
             body: JSON.stringify({ content }),
           });
           await loadMatterDrafts();
           await loadDraftDetail(id);
-          showToast("Revision saved.", "success");
+          // A flag an attorney cleared comes back when the text changes —
+          // say so, rather than let it look like something broke.
+          const reraised = (revised.flags || []).filter((f) => !flagsBefore.has(f));
+          showToast(
+            reraised.length
+              ? `Revision saved. An attorney will need to sign off on ${reraised.join(", ")} again, since the text changed.`
+              : "Revision saved.",
+            "success",
+          );
         } catch (err) {
           showError(err.message);
         }

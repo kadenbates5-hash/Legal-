@@ -41,6 +41,12 @@ export interface WorkProductSnapshot {
   history: WorkProductTransition[];
   /** Absent on snapshots written before it was recorded. */
   createdAt?: string;
+  /**
+   * Flags an attorney cleared on the content as it stands — re-raised if
+   * that content changes. Absent on snapshots written before this existed;
+   * `fromSnapshot` then recovers it from the audit log.
+   */
+  clearedFlags?: string[];
 }
 
 export class WorkProduct {
@@ -50,6 +56,12 @@ export class WorkProduct {
   status: WorkProductStatus = "draft";
   #content: string;
   readonly flags = new Set<string>();
+  /**
+   * Flags cleared since the content last changed. A clearance is an
+   * attorney's sign-off on *this text* — "the Padilla advisory is handled
+   * here" — so a revision re-raises it. See `reviseDraft`.
+   */
+  readonly #clearedFlags = new Set<string>();
   readonly history: WorkProductTransition[] = [];
   /**
    * When the draft was first created. `history` only records transitions,
@@ -86,8 +98,20 @@ export class WorkProduct {
         `cannot revise content from status '${this.status}': content is locked once submitted for review`,
       );
     }
+    const changed = newContent !== this.#content;
     this.#content = newContent;
     this.#record("revise_draft", actor, undefined);
+    // A cleared flag was a sign-off on the old text. Without this, an
+    // attorney could clear the Padilla advisory on a draft that carried
+    // one, ask for a revision, and approve the rewrite — advisory removed
+    // — with nothing left to stop it. A rewrite by the paralegal or the
+    // Assistant now brings every cleared flag back for a fresh sign-off.
+    if (changed && this.#clearedFlags.size > 0) {
+      const reraised = [...this.#clearedFlags];
+      for (const flag of reraised) this.flags.add(flag);
+      this.#clearedFlags.clear();
+      this.#record("flags_reraised", actor, `flags=${reraised.join(",")} (content changed after they were cleared)`);
+    }
   }
 
   /** A practice-area module hard-triggers a flag (e.g. "padilla_advisory_required"). */
@@ -102,6 +126,7 @@ export class WorkProduct {
       throw new ReviewGateError(`flag '${flag}' is not set on work product '${this.id}'`);
     }
     this.flags.delete(flag);
+    this.#clearedFlags.add(flag);
     this.#record("clear_flag", actor, `flag=${flag}`);
   }
 
@@ -163,6 +188,7 @@ export class WorkProduct {
       flags: [...this.flags],
       history: this.history.map((t) => ({ ...t })),
       ...(this.createdAt ? { createdAt: this.createdAt } : {}),
+      clearedFlags: [...this.#clearedFlags],
     };
   }
 
@@ -184,6 +210,19 @@ export class WorkProduct {
     for (const flag of snapshot.flags) workProduct.flags.add(flag);
     workProduct.history.push(...snapshot.history.map((t) => ({ ...t })));
     workProduct.createdAt = snapshot.createdAt;
+    if (snapshot.clearedFlags) {
+      for (const flag of snapshot.clearedFlags) if (!workProduct.flags.has(flag)) workProduct.#clearedFlags.add(flag);
+    } else {
+      // Written before cleared flags were kept: recover them from the log.
+      const { cleared, stale } = flagClearancesFromLog(auditLog, snapshot.id);
+      for (const flag of cleared) if (!workProduct.flags.has(flag)) workProduct.#clearedFlags.add(flag);
+      // A flag cleared and then followed by a rewrite was never signed off
+      // on the text as it now stands. Until it's approved, that draft gets
+      // the flag back, as a revision now would give it.
+      if (snapshot.status === "draft" || snapshot.status === "pending_review" || snapshot.status === "revision_requested") {
+        for (const flag of stale) workProduct.flags.add(flag);
+      }
+    }
     return workProduct;
   }
 
@@ -204,4 +243,32 @@ export class WorkProduct {
   #record(action: string, actor: Actor, detail?: string): void {
     this.#auditLog.append({ actor, matterId: this.matterId, action: `work_product.${this.id}.${action}`, detail });
   }
+}
+
+/**
+ * For a snapshot written before cleared flags were kept, what the audit
+ * log says about this work product's flags: `cleared` since the last
+ * revision, and `stale` — cleared, then followed by a revision, and not
+ * cleared again since. The log can't say whether a revision changed the
+ * text, so every one counts as a change: the safe direction to be wrong.
+ */
+function flagClearancesFromLog(auditLog: AuditLog, workProductId: string): { cleared: string[]; stale: string[] } {
+  const prefix = `work_product.${workProductId}.`;
+  const cleared = new Set<string>();
+  const stale = new Set<string>();
+  for (const entry of auditLog.read("attorney")) {
+    if (!entry.action.startsWith(prefix)) continue;
+    const action = entry.action.slice(prefix.length);
+    if (action === "revise_draft") {
+      for (const flag of cleared) stale.add(flag);
+      cleared.clear();
+    } else if (action === "clear_flag") {
+      const flag = /^flag=(.+)$/.exec(entry.detail ?? "")?.[1];
+      if (flag) {
+        cleared.add(flag);
+        stale.delete(flag);
+      }
+    }
+  }
+  return { cleared: [...cleared], stale: [...stale] };
 }
